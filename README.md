@@ -2,7 +2,9 @@
 
 VOGUE의 시장성 조사 단계에서 사용할 수 있는 계약 중립적 Python 도메인 코어입니다. 현재 구현은 승인된 시장 자료원이 정해지지 않은 상태를 반영해 외부 API, 크롤러, 모델, 그래프 저장소를 포함하지 않습니다.
 
-현재 저장소는 실제 판매 원장이나 시장 자료를 조회하지 않으므로, 운영 분석 시스템으로 아직 동작하지 않습니다. 판매량 분석은 현재 MVP 범위가 아닙니다. 승인된 자료원 없이 어댑터를 연결하거나 숫자를 만들지 않으며, 자료원이 미구성된 경우 `no_results`와 제한 사유를 전달합니다.
+현재 저장소에는 승인된 실제 판매 원장·시장 자료 어댑터가 없어 운영 분석 시스템으로 동작하지 않습니다. 판매 관측 모델과 결과 정규화 경계는 Project_07 책임으로 구현하되, 자료원이 미구성된 경우 `no_results`와 제한 사유를 전달합니다. Kaggle/H&M 공개 과거 데이터와 합성 fixture는 운영 데이터로 사용하지 않습니다.
+
+Project_06의 기존 판매 책임 정리 과정에서 H&M 과거자료 처리·품질·집계 adapter, 판매 domain model, synthetic sales/operations demo와 관련 테스트 및 설계 기록을 이 저장소로 옮겼습니다. Project_06은 새상품 기획 전용입니다. 이동한 H&M adapter는 local historical research용이며 승인된 사내 sales connector가 아닙니다. 테스트는 임시 fixture를 만들며 원본 CSV나 Project_06의 로컬 `data/`를 필요로 하지 않습니다. 실제 원본·처리 데이터, `.env`, SQLite 데이터는 복사·이동하지 않았습니다.
 
 ## 현재 동작
 
@@ -13,11 +15,12 @@ VOGUE의 시장성 조사 단계에서 사용할 수 있는 계약 중립적 Pyt
 - Evidence ID와 출처 ID·유형·이름 또는 finding ID·주제·주장이 비거나 공백이면 해당 항목을 제외하고 오류를 남깁니다.
 - 판매·시장 수치의 기간/as-of, 지역, 채널, 상품 매핑, 단위, 통화, 지표 정의, 계산 참조는 Evidence 메타데이터 확장 제안에 담을 수 있습니다. 이 확장은 Project_06과 합의 전이며 wire contract가 아닙니다.
 - 자료 결측, 정의/매핑 불일치, 권한 제한은 원인 코드·메시지·필드·Evidence 참조를 가진 `data_limitations` 제안 모델로 보존할 수 있습니다. `data_limitations` 또한 미합의 확장입니다.
+- 판매 관측을 위한 `SalesObservation` 및 `SalesDataResult` 도메인 모델을 소유합니다. 각 관측은 지표명·값·단위·상품/기간/채널 범위와 Evidence ID를 보존합니다. 이 모델은 제안 계약이며 Project_06과 공유 wire contract로 승인된 상태는 아닙니다.
 - `fact` 유형 finding은 Evidence ID를 반드시 가져야 합니다. 참조가 누락되거나 유효하지 않으면 해당 finding을 제거하고 오류를 남깁니다.
 - provider 결과가 부분적이어도 유효한 finding과 Evidence를 보존하고 `partial` 상태를 반환합니다.
 - 공통 입력의 상태·제한사항·미확보 필드는 가능한 한 결과의 제한사항에 기록하며, 입력 원문 객체는 source adapter에 그대로 전달합니다.
 - 입력 envelope에 `request_id`가 있으면 실행 요청 ID와 일치하는지 확인하고, 불일치 입력은 결합하지 않습니다.
-- 새상품 조사 결과는 시장 조사 입력에 포함하지 않습니다. 두 에이전트는 공통 입력만으로 독립 실행하고, 초안 생성 단계가 두 결과를 함께 받습니다.
+- `PlanningRequest`, `TrendResult`, `InventoryProductResult`를 받아 조사하되, Project_06 상품 기획 결과는 입력으로 받지 않습니다. VOGUE 상위 흐름은 Project_07 결과가 Project_06보다 먼저 전달되는 순차 처리입니다.
 - `CompositeMarketResearchSource`는 호출자가 제공한 source adapter들의 결과를 결합하고, 일부 source 실패 시 가용 결과와 오류를 함께 보존합니다. 현재 승인된 source adapter는 연결되어 있지 않습니다.
 
 이 패키지는 요청·트렌드·재고 입력을 opaque dictionary로 전달합니다. 실제 공통 입력 스키마가 다른 저장소와 합의되면 해당 계약 어댑터를 추가해야 합니다. `contracts/schemas/market-research-result.schema.json`은 현재 로컬 1.0 구현을 설명하며, `contracts/schemas/proposals/`의 1.1은 새 판매·시장 경계를 검토하기 위한 제안입니다. 어느 파일도 다른 에이전트 저장소와 합의된 wire contract를 뜻하지 않습니다.
@@ -80,7 +83,7 @@ result = MarketResearchAgent().run(context)
 print(result.to_dict())
 ```
 
-새상품 조사 에이전트와의 병렬 실행은 상위 workflow가 공통 입력을 사용해 각 에이전트를 독립 호출하도록 구현해야 합니다. 두 에이전트는 서로의 결과를 읽거나 전달하지 않습니다. 이 저장소는 transport나 orchestrator를 선택하지 않습니다. 초안 생성 단계가 `ProductConcept`와 `MarketResearchResult`를 함께 받은 뒤 두 결과의 관계를 판단하고 상태와 Evidence를 보존합니다.
+상위 workflow는 Project_01/02 입력을 받은 뒤 Project_07 조사를 완료하고, 상태와 Evidence를 포함한 결과를 Project_06 기획안 에이전트로 전달합니다. 이 저장소는 상위 orchestrator나 transport를 선택하지 않습니다.
 
 ## 미결정 사항
 
@@ -89,7 +92,7 @@ print(result.to_dict())
 - API/메시지 전달 방식, 인증, 저장·보존, retry/timeout과 배포 형태
 - 시장 조사 품질 평가용 승인 데이터와 팀이 정할 합격 기준
 
-현재 MVP 지침에 따라 판매량 분석은 구현하지 않으며 재고 스냅샷을 수요나 판매량의 대리 지표로 사용하지 않습니다. 출처·구현 경계의 검토 기록은 [`docs/design/notion-review.md`](docs/design/notion-review.md), 계층 구조와 의존 방향은 [`docs/design/project-structure.md`](docs/design/project-structure.md)에 있습니다.
+승인된 source adapter가 연결되기 전에는 판매량이나 시장 수치를 반환하지 않으며, 재고 스냅샷을 수요나 판매량의 대리 지표로 사용하지 않습니다. 출처·구현 경계의 검토 기록은 [`docs/design/notion-review.md`](docs/design/notion-review.md), 계층 구조와 의존 방향은 [`docs/design/project-structure.md`](docs/design/project-structure.md)에 있습니다.
 
 Notion 합의에서 구현 순서와 미결정 사항까지 연결한 전체 방향은 [`docs/design/implementation-direction.md`](docs/design/implementation-direction.md)에 정리되어 있습니다.
 
@@ -104,6 +107,7 @@ repository-root/
 ├── docs/decisions/                 # 구조·구현 결정 기록
 ├── docs/design/                    # 요구사항과 설계 기록
 ├── examples/fixtures/              # 합성 데모 입력
+├── docs/reference/                 # 이관된 historical sales pipeline/fixture 설명
 ├── src/market_research_agent/
 │   ├── domain/                     # 도메인 계약과 모델
 │   ├── sources/                    # 출처 인터페이스와 어댑터
@@ -111,4 +115,4 @@ repository-root/
 └── tests/                          # 자동화 테스트
 ```
 
-구조는 project_06의 `domain` / `sources` / `workflows` 분리를 따릅니다. 실제 자료원이 정해지기 전이므로 provider 전용 코드, 로컬 UI, 서비스 서버는 추가하지 않았습니다.
+구조는 project_06의 `domain` / `sources` / `workflows` 분리를 따릅니다. 운영 자료원이 정해지지 않아 사내 DB/API connector, 로컬 UI, 서비스 서버는 추가하지 않았습니다. H&M 과거자료 adapter와 합성 예시는 별도 historical/test 용도로 분리되어 있습니다.

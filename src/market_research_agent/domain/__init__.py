@@ -11,6 +11,7 @@ from .models import (
     ResultStatus,
     SourceReport,
 )
+from .sales import SalesDataResult, SalesObservation
 
 __all__ = [
     "AgentError",
@@ -22,4 +23,6 @@ __all__ = [
     "ResearchFinding",
     "ResultStatus",
     "SourceReport",
+    "SalesDataResult",
+    "SalesObservation",
 ]

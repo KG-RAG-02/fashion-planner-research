@@ -12,6 +12,8 @@ from market_research_agent import (
     ResearchFinding,
     ResultStatus,
     SourceReport,
+    SalesDataResult,
+    SalesObservation,
 )
 
 
@@ -56,6 +58,46 @@ class StaticSource:
 
 
 class MarketResearchAgentTests(unittest.TestCase):
+    def test_project07_owns_scoped_sales_observations_and_checks_evidence(self) -> None:
+        observation = SalesObservation(
+            observation_id="sales-obs-1",
+            metric_name="units_sold",
+            value=0,
+            unit="units",
+            evidence_ids=("market:E-001",),
+            category="women_knit",
+            period_start="2026-01-01",
+            period_end="2026-01-31",
+        )
+        source = StaticSource(SourceReport(
+            status=ResultStatus.OK,
+            evidence=(make_evidence(),),
+            sales_data=SalesDataResult(status="ok", observations=(observation,)),
+        ))
+        result = MarketResearchAgent(source).run(make_context())
+
+        self.assertEqual(result.sales_data.status, "ok")
+        self.assertEqual(result.sales_data.observations[0].value, 0)
+        self.assertEqual(result.to_proposal_dict()["sales_data"]["observations"][0]["evidence_ids"], ("market:E-001",))
+
+    def test_sales_observation_without_authorized_evidence_is_omitted(self) -> None:
+        observation = SalesObservation(
+            observation_id="sales-obs-1",
+            metric_name="units_sold",
+            value=13,
+            unit="units",
+            evidence_ids=("missing:E-1",),
+        )
+        source = StaticSource(SourceReport(
+            status=ResultStatus.OK,
+            sales_data=SalesDataResult(status="ok", observations=(observation,)),
+        ))
+        result = MarketResearchAgent(source).run(make_context())
+
+        self.assertEqual(result.sales_data.status, "partial")
+        self.assertEqual(result.sales_data.observations, ())
+        self.assertIn("INVALID_SALES_EVIDENCE", {item.code for item in result.errors})
+
     def test_no_source_is_no_results_not_zero(self) -> None:
         result = MarketResearchAgent().run(make_context())
 

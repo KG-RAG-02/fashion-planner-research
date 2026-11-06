@@ -146,6 +146,29 @@ class MarketResearchAgent:
             if evidence.permission_status == PermissionStatus.AUTHORIZED
             and evidence_id not in duplicate_ids
         }
+        sales_data = report.sales_data
+        if sales_data is not None:
+            valid_sales = tuple(
+                item for item in sales_data.observations
+                if set(item.evidence_ids).issubset(permitted_evidence)
+            )
+            if len(valid_sales) != len(sales_data.observations):
+                limitations.append(
+                    "Sales observations without authorized, resolvable Evidence were omitted."
+                )
+                errors.append(
+                    AgentError(
+                        code="INVALID_SALES_EVIDENCE",
+                        message="Some sales observations did not reference authorized Evidence.",
+                    )
+                )
+            sales_data = type(sales_data)(
+                status=("partial" if sales_data.status == "ok" and len(valid_sales) != len(sales_data.observations) else sales_data.status),
+                observations=valid_sales,
+                limitations=sales_data.limitations,
+                errors=sales_data.errors,
+                follow_up_questions=sales_data.follow_up_questions,
+            )
         unapproved_ids = set(all_evidence) - set(permitted_evidence)
         if unapproved_ids:
             limitations.append(
@@ -191,7 +214,11 @@ class MarketResearchAgent:
 
         evidence = tuple(permitted_evidence.values())
         findings_tuple = tuple(findings)
-        has_content = bool(findings_tuple or evidence)
+        has_content = bool(
+            findings_tuple
+            or evidence
+            or (sales_data is not None and sales_data.observations)
+        )
         if report.status == ResultStatus.NO_RESULTS and has_content:
             errors.append(
                 AgentError(
@@ -225,6 +252,7 @@ class MarketResearchAgent:
             limitations=tuple(dict.fromkeys(limitations)),
             errors=tuple(errors),
             data_limitations=report.data_limitations,
+            sales_data=sales_data,
         )
 
     def _failure(

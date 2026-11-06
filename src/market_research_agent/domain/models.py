@@ -6,6 +6,8 @@ from dataclasses import asdict, dataclass
 from enum import StrEnum
 from typing import Any
 
+from .sales import SalesDataResult
+
 
 class ResultStatus(StrEnum):
     OK = "ok"
@@ -97,6 +99,7 @@ class SourceReport:
     limitations: tuple[str, ...] = ()
     errors: tuple[AgentError, ...] = ()
     data_limitations: tuple[DataLimitation, ...] = ()
+    sales_data: SalesDataResult | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -111,11 +114,13 @@ class MarketResearchResult:
     limitations: tuple[str, ...] = ()
     errors: tuple[AgentError, ...] = ()
     data_limitations: tuple[DataLimitation, ...] = ()
+    sales_data: SalesDataResult | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible object matching the local result schema."""
         payload = asdict(self)
         payload.pop("data_limitations", None)
+        payload.pop("sales_data", None)
         payload |= {
             "status": self.status.value,
             "findings": [
@@ -128,4 +133,18 @@ class MarketResearchResult:
             ],
             "errors": [asdict(item) for item in self.errors],
         }
+        return payload
+
+    def to_proposal_dict(self) -> dict[str, Any]:
+        """Serialize the unratified 1.1 proposal without changing local 1.0."""
+        payload = self.to_dict()
+        payload["schema_version"] = "1.1-proposal"
+        payload["sales_data"] = self.sales_data.to_dict() if self.sales_data else None
+        payload["data_limitations"] = [
+            asdict(item) for item in self.data_limitations
+        ]
+        payload["evidence"] = [
+            asdict(item) | {"permission_status": item.permission_status.value}
+            for item in self.evidence
+        ]
         return payload
