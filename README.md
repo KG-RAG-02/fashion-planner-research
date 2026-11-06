@@ -11,7 +11,9 @@ VOGUE의 시장성 조사 단계에서 사용할 수 있는 계약 중립적 Pyt
 - Evidence ID와 출처 ID·유형·이름 또는 finding ID·주제·주장이 비거나 공백이면 해당 항목을 제외하고 오류를 남깁니다.
 - `fact` 유형 finding은 Evidence ID를 반드시 가져야 합니다. 참조가 누락되거나 유효하지 않으면 해당 finding을 제거하고 오류를 남깁니다.
 - provider 결과가 부분적이어도 유효한 finding과 Evidence를 보존하고 `partial` 상태를 반환합니다.
-- `product_concept`는 후속 교차 연결을 위한 선택 입력입니다. 시장 조사는 이 결과가 없어도 실행할 수 있습니다.
+- 공통 입력의 상태·제한사항·미확보 필드는 가능한 한 결과의 제한사항에 기록하며, 입력 원문 객체는 source adapter에 그대로 전달합니다.
+- 입력 envelope에 `request_id`가 있으면 실행 요청 ID와 일치하는지 확인하고, 불일치 입력은 결합하지 않습니다.
+- 새상품 조사 결과는 시장 조사 입력에 포함하지 않습니다. 두 에이전트는 공통 입력만으로 독립 실행하고, 초안 생성 단계가 두 결과를 함께 받습니다.
 
 이 패키지는 요청·트렌드·재고 입력을 opaque dictionary로 전달합니다. 실제 공통 입력 스키마가 다른 저장소와 합의되면 해당 계약 어댑터를 추가해야 합니다. 이 저장소의 JSON Schema는 구현 초안이며, 다른 에이전트 저장소와 동기화된 wire contract로 간주하지 않습니다.
 
@@ -73,7 +75,7 @@ result = MarketResearchAgent().run(context)
 print(result.to_dict())
 ```
 
-새상품 조사 에이전트와의 병렬 실행은 상위 workflow가 각 에이전트를 독립 호출해 구현해야 합니다. 이 저장소는 transport나 orchestrator를 선택하지 않습니다. 초안 생성 단계는 `ProductConcept`와 `MarketResearchResult`를 함께 받은 뒤 결과별 상태와 Evidence를 보존해야 합니다.
+새상품 조사 에이전트와의 병렬 실행은 상위 workflow가 공통 입력을 사용해 각 에이전트를 독립 호출하도록 구현해야 합니다. 두 에이전트는 서로의 결과를 읽거나 전달하지 않습니다. 이 저장소는 transport나 orchestrator를 선택하지 않습니다. 초안 생성 단계가 `ProductConcept`와 `MarketResearchResult`를 함께 받은 뒤 두 결과의 관계를 판단하고 상태와 Evidence를 보존합니다.
 
 ## 미결정 사항
 
