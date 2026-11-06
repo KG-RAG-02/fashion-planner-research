@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from ..domain.models import (
     AgentError,
+    FindingKind,
     MarketResearchContext,
     MarketResearchResult,
     PermissionStatus,
@@ -61,6 +62,14 @@ class MarketResearchAgent:
                 AgentError(
                     code="INVALID_SOURCE_REPORT",
                     message="The source adapter returned an unsupported report type.",
+                ),
+            )
+        if not isinstance(report.status, ResultStatus):
+            return self._failure(
+                context.request_id,
+                AgentError(
+                    code="INVALID_SOURCE_REPORT",
+                    message="The source adapter returned an unsupported result status.",
                 ),
             )
 
@@ -130,7 +139,9 @@ class MarketResearchAgent:
 
             if duplicate_finding:
                 problem = True
-            if finding.kind.value == "fact" and not finding.evidence_ids:
+            if not isinstance(finding.kind, FindingKind):
+                problem = True
+            elif finding.kind == FindingKind.FACT and not finding.evidence_ids:
                 problem = True
             if not set(finding.evidence_ids).issubset(all_ids):
                 problem = True

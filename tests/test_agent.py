@@ -159,6 +159,31 @@ class MarketResearchAgentTests(unittest.TestCase):
         self.assertEqual(result.findings, ())
         self.assertIn("UNSUPPORTED_FINDING", {error.code for error in result.errors})
 
+    def test_invalid_finding_kind_is_omitted_without_crashing(self) -> None:
+        report = SourceReport(
+            status=ResultStatus.OK,
+            findings=(
+                ResearchFinding(
+                    finding_id="finding-1",
+                    topic="market",
+                    statement="Unclassified source claim.",
+                    kind="fact",  # type: ignore[arg-type]
+                ),
+            ),
+        )
+        result = MarketResearchAgent(StaticSource(report)).run(make_context())
+
+        self.assertEqual(result.status, ResultStatus.ERROR)
+        self.assertEqual(result.findings, ())
+        self.assertIn("UNSUPPORTED_FINDING", {error.code for error in result.errors})
+
+    def test_invalid_provider_status_returns_safe_error(self) -> None:
+        report = SourceReport(status="complete")  # type: ignore[arg-type]
+        result = MarketResearchAgent(StaticSource(report)).run(make_context())
+
+        self.assertEqual(result.status, ResultStatus.ERROR)
+        self.assertIn("INVALID_SOURCE_REPORT", {error.code for error in result.errors})
+
     def test_partial_source_report_keeps_available_findings(self) -> None:
         report = SourceReport(
             status=ResultStatus.PARTIAL,
