@@ -52,7 +52,6 @@ class MarketResearchAgent:
                 AgentError(
                     code="FORBIDDEN",
                     message="The configured source denied access.",
-                    retryable=False,
                 ),
             )
         except TimeoutError:
@@ -61,7 +60,6 @@ class MarketResearchAgent:
                 AgentError(
                     code="TIMEOUT",
                     message="The configured source did not respond in time.",
-                    retryable=True,
                 ),
             )
         except Exception:
@@ -71,7 +69,6 @@ class MarketResearchAgent:
                 AgentError(
                     code="SOURCE_UNAVAILABLE",
                     message="The configured source could not be queried.",
-                    retryable=True,
                 ),
             )
 
@@ -122,7 +119,6 @@ class MarketResearchAgent:
                 AgentError(
                     code="EVIDENCE_PERMISSION_UNCONFIRMED",
                     message="Some source evidence was not confirmed for use.",
-                    retryable=False,
                 )
             )
 

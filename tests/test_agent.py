@@ -139,7 +139,7 @@ class MarketResearchAgentTests(unittest.TestCase):
             ),
             evidence=(make_evidence(),),
             limitations=("One requested source was unavailable.",),
-            errors=(AgentError("SOURCE_UNAVAILABLE", "A source could not be reached.", True),),
+            errors=(AgentError("SOURCE_UNAVAILABLE", "A source could not be reached."),),
         )
         result = MarketResearchAgent(StaticSource(report)).run(make_context())
 
@@ -158,7 +158,6 @@ class MarketResearchAgentTests(unittest.TestCase):
         self.assertEqual(denied.errors[0].code, "FORBIDDEN")
         self.assertNotIn("secret", denied.errors[0].message)
         self.assertEqual(timed_out.errors[0].code, "TIMEOUT")
-        self.assertTrue(timed_out.errors[0].retryable)
 
     def test_product_concept_is_optional_context_not_a_prerequisite(self) -> None:
         source = StaticSource(SourceReport(status=ResultStatus.NO_RESULTS))

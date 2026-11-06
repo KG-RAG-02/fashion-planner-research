@@ -67,7 +67,6 @@ class ResearchFinding:
 class AgentError:
     code: str
     message: str
-    retryable: bool = False
 
 
 @dataclass(frozen=True, slots=True)
