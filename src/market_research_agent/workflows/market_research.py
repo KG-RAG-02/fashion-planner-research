@@ -19,6 +19,8 @@ class MarketResearchAgent:
     """Build a result while enforcing source permission and evidence links."""
 
     agent_id = "market-research-agent"
+    # This is the implemented local envelope version. Proposed fields in the
+    # schema draft are not advertised as a shared wire-contract version.
     schema_version = "1.0"
 
     def __init__(self, source: MarketResearchSource | None = None) -> None:
@@ -222,6 +224,7 @@ class MarketResearchAgent:
             evidence=evidence,
             limitations=tuple(dict.fromkeys(limitations)),
             errors=tuple(errors),
+            data_limitations=report.data_limitations,
         )
 
     def _failure(

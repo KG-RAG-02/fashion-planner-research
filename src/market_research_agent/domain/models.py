@@ -47,6 +47,16 @@ class EvidenceRecord:
     published_at: str | None = None
     observed_at: str | None = None
     fetched_at: str | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    as_of: str | None = None
+    geography: str | None = None
+    channel: str | None = None
+    product_mapping: str | None = None
+    unit: str | None = None
+    currency: str | None = None
+    metric_definition: str | None = None
+    calculation_reference: str | None = None
     permission_status: PermissionStatus = PermissionStatus.UNKNOWN
     manifest_id: str | None = None
 
@@ -68,6 +78,16 @@ class AgentError:
 
 
 @dataclass(frozen=True, slots=True)
+class DataLimitation:
+    """Structured issue detail; codes are local proposals until shared agreement."""
+
+    code: str
+    message: str
+    evidence_ids: tuple[str, ...] = ()
+    field: str | None = None
+
+
+@dataclass(frozen=True, slots=True)
 class SourceReport:
     """One provider's report before the agent applies provenance checks."""
 
@@ -76,6 +96,7 @@ class SourceReport:
     evidence: tuple[EvidenceRecord, ...] = ()
     limitations: tuple[str, ...] = ()
     errors: tuple[AgentError, ...] = ()
+    data_limitations: tuple[DataLimitation, ...] = ()
 
 
 @dataclass(frozen=True, slots=True)
@@ -89,11 +110,13 @@ class MarketResearchResult:
     evidence: tuple[EvidenceRecord, ...] = ()
     limitations: tuple[str, ...] = ()
     errors: tuple[AgentError, ...] = ()
+    data_limitations: tuple[DataLimitation, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible object matching the local result schema."""
-
-        return asdict(self) | {
+        payload = asdict(self)
+        payload.pop("data_limitations", None)
+        payload |= {
             "status": self.status.value,
             "findings": [
                 asdict(item) | {"kind": item.kind.value}
@@ -105,3 +128,4 @@ class MarketResearchResult:
             ],
             "errors": [asdict(item) for item in self.errors],
         }
+        return payload
