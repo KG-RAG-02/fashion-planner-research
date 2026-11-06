@@ -8,6 +8,7 @@ VOGUE의 시장성 조사 단계에서 사용할 수 있는 계약 중립적 Pyt
 - 조사 출처는 `MarketResearchSource` 인터페이스로 연결하도록 분리했습니다.
 - 출처가 설정되지 않으면 `no_results`와 사유를 반환합니다. 이를 시장값 0으로 표현하지 않습니다.
 - 권한이 `authorized`로 확인되지 않은 Evidence와 이를 근거로 삼은 finding은 출력하지 않습니다.
+- Evidence ID와 출처 ID·유형·이름 또는 finding ID·주제·주장이 비거나 공백이면 해당 항목을 제외하고 오류를 남깁니다.
 - `fact` 유형 finding은 Evidence ID를 반드시 가져야 합니다. 참조가 누락되거나 유효하지 않으면 해당 finding을 제거하고 오류를 남깁니다.
 - provider 결과가 부분적이어도 유효한 finding과 Evidence를 보존하고 `partial` 상태를 반환합니다.
 - `product_concept`는 후속 교차 연결을 위한 선택 입력입니다. 시장 조사는 이 결과가 없어도 실행할 수 있습니다.
