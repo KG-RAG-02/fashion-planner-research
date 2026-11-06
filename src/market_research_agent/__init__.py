@@ -11,11 +11,13 @@ from .domain.models import (
     ResultStatus,
     SourceReport,
 )
+from .sources.composite import CompositeMarketResearchSource
 from .sources.noop import NoConfiguredSources
 from .workflows.market_research import MarketResearchAgent
 
 __all__ = [
     "AgentError",
+    "CompositeMarketResearchSource",
     "EvidenceRecord",
     "FindingKind",
     "MarketResearchAgent",

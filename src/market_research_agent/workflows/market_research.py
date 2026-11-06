@@ -201,11 +201,13 @@ class MarketResearchAgent:
 
         if report.status == ResultStatus.ERROR:
             status = ResultStatus.PARTIAL if has_content else ResultStatus.ERROR
+        elif report.status == ResultStatus.PARTIAL:
+            status = ResultStatus.PARTIAL
         elif has_issues:
             status = ResultStatus.PARTIAL if has_content else ResultStatus.ERROR
         elif report.status == ResultStatus.NO_RESULTS or not has_content:
             status = ResultStatus.NO_RESULTS
-        elif report.status == ResultStatus.PARTIAL or incomplete_context:
+        elif incomplete_context:
             status = ResultStatus.PARTIAL
         else:
             status = ResultStatus.OK
