@@ -125,6 +125,40 @@ class MarketResearchAgentTests(unittest.TestCase):
         self.assertEqual(result.findings, ())
         self.assertIn("UNSUPPORTED_FINDING", {e.code for e in result.errors})
 
+    def test_evidence_without_traceable_source_identity_is_omitted(self) -> None:
+        malformed = EvidenceRecord(
+            evidence_id="market:E-001",
+            source_id=" ",
+            source_type="report",
+            source_name="Approved market report",
+            permission_status=PermissionStatus.AUTHORIZED,
+        )
+        result = MarketResearchAgent(
+            StaticSource(SourceReport(status=ResultStatus.OK, evidence=(malformed,)))
+        ).run(make_context())
+
+        self.assertEqual(result.status, ResultStatus.ERROR)
+        self.assertEqual(result.evidence, ())
+        self.assertIn("INVALID_EVIDENCE", {error.code for error in result.errors})
+
+    def test_blank_finding_is_not_returned_as_a_claim(self) -> None:
+        report = SourceReport(
+            status=ResultStatus.OK,
+            findings=(
+                ResearchFinding(
+                    finding_id="finding-1",
+                    topic="market",
+                    statement=" ",
+                    kind=FindingKind.INTERPRETATION,
+                ),
+            ),
+        )
+        result = MarketResearchAgent(StaticSource(report)).run(make_context())
+
+        self.assertEqual(result.status, ResultStatus.ERROR)
+        self.assertEqual(result.findings, ())
+        self.assertIn("UNSUPPORTED_FINDING", {error.code for error in result.errors})
+
     def test_partial_source_report_keeps_available_findings(self) -> None:
         report = SourceReport(
             status=ResultStatus.PARTIAL,

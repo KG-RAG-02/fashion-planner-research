@@ -72,9 +72,22 @@ class MarketResearchAgent:
         errors = list(report.errors)
         limitations = list(report.limitations)
 
-        all_evidence: dict[str, object] = {}
+        all_evidence = {}
         duplicate_ids: set[str] = set()
         for evidence in report.evidence:
+            if not self._has_required_identity(
+                evidence.evidence_id,
+                evidence.source_id,
+                evidence.source_type,
+                evidence.source_name,
+            ):
+                errors.append(
+                    AgentError(
+                        code="INVALID_EVIDENCE",
+                        message="Evidence without complete source identity was omitted.",
+                    )
+                )
+                continue
             if evidence.evidence_id in all_evidence:
                 duplicate_ids.add(evidence.evidence_id)
             all_evidence[evidence.evidence_id] = evidence
@@ -109,11 +122,14 @@ class MarketResearchAgent:
         seen_finding_ids: set[str] = set()
         all_ids = set(all_evidence)
         for finding in report.findings:
-            problem = False
-            if finding.finding_id in seen_finding_ids:
-                problem = True
+            problem = not self._has_required_identity(
+                finding.finding_id, finding.topic, finding.statement
+            )
+            duplicate_finding = finding.finding_id in seen_finding_ids
             seen_finding_ids.add(finding.finding_id)
 
+            if duplicate_finding:
+                problem = True
             if finding.kind.value == "fact" and not finding.evidence_ids:
                 problem = True
             if not set(finding.evidence_ids).issubset(all_ids):
@@ -192,3 +208,9 @@ class MarketResearchAgent:
         if status == ResultStatus.NO_RESULTS:
             return "No market findings were returned."
         return "Market research did not produce a usable result."
+
+    @staticmethod
+    def _has_required_identity(*values: str) -> bool:
+        """Reject blank identifiers and labels before they enter the shared result."""
+
+        return all(isinstance(value, str) and value.strip() for value in values)
