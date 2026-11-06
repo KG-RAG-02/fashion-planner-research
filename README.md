@@ -22,7 +22,13 @@ Python 3.11 이상, 외부 패키지 없이 실행할 수 있습니다.
 python3 -m venv .venv
 source .venv/bin/activate
 pip install -e .
-python -m unittest discover -s tests -v
+PYTHONPATH=src python3 -m unittest discover -s tests -v
+```
+
+합성 예시는 다음 명령으로 실행합니다.
+
+```bash
+PYTHONPATH=src python3 examples/synthetic_demo.py
 ```
 
 ## 사용 예시
@@ -51,4 +57,22 @@ print(result.to_dict())
 - API/메시지 전달 방식, 인증, 저장·보존, retry/timeout과 배포 형태
 - 시장 조사 품질 평가용 승인 데이터와 팀이 정할 합격 기준
 
-현재 MVP 지침에 따라 판매량 분석은 구현하지 않으며 재고 스냅샷을 수요나 판매량의 대리 지표로 사용하지 않습니다. 출처·구현 경계의 검토 기록은 [`docs/notion-review.md`](docs/notion-review.md)에 있습니다.
+현재 MVP 지침에 따라 판매량 분석은 구현하지 않으며 재고 스냅샷을 수요나 판매량의 대리 지표로 사용하지 않습니다. 출처·구현 경계의 검토 기록은 [`docs/design/notion-review.md`](docs/design/notion-review.md), 계층 구조와 의존 방향은 [`docs/design/project-structure.md`](docs/design/project-structure.md)에 있습니다.
+
+## 폴더 구조
+
+```text
+repository-root/
+├── contracts/schemas/             # MarketResearchResult 스키마 초안
+├── data/                           # Git 제외 런타임 데이터 위치
+├── docs/decisions/                 # 구조·구현 결정 기록
+├── docs/design/                    # 요구사항과 설계 기록
+├── examples/fixtures/              # 합성 데모 입력
+├── src/market_research_agent/
+│   ├── domain/                     # 도메인 계약과 모델
+│   ├── sources/                    # 출처 인터페이스와 어댑터
+│   └── workflows/                  # 검증과 결과 조립
+└── tests/                          # 자동화 테스트
+```
+
+구조는 project_06의 `domain` / `sources` / `workflows` 분리를 따릅니다. 실제 자료원이 정해지기 전이므로 provider 전용 코드, 로컬 UI, 서비스 서버는 추가하지 않았습니다.

@@ -1,7 +1,6 @@
-"""Market Research Agent domain package."""
+"""Public API for the VOGUE Market Research Agent."""
 
-from .agent import MarketResearchAgent, NoConfiguredSources
-from .models import (
+from .domain.models import (
     AgentError,
     EvidenceRecord,
     FindingKind,
@@ -12,6 +11,8 @@ from .models import (
     ResultStatus,
     SourceReport,
 )
+from .sources.noop import NoConfiguredSources
+from .workflows.market_research import MarketResearchAgent
 
 __all__ = [
     "AgentError",

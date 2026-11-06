@@ -1,10 +1,8 @@
-"""Evidence-preserving agent boundary with a replaceable research source."""
+"""Use case that checks source evidence and builds a market result."""
 
 from __future__ import annotations
 
-from typing import Protocol
-
-from .models import (
+from ..domain.models import (
     AgentError,
     MarketResearchContext,
     MarketResearchResult,
@@ -12,23 +10,8 @@ from .models import (
     ResultStatus,
     SourceReport,
 )
-
-
-class MarketResearchSource(Protocol):
-    """An authorized source adapter; provider details are intentionally open."""
-
-    def research(self, context: MarketResearchContext) -> SourceReport:
-        """Return source-backed results for the supplied request context."""
-
-
-class NoConfiguredSources:
-    """Safe default until an authorized market source is selected."""
-
-    def research(self, context: MarketResearchContext) -> SourceReport:
-        return SourceReport(
-            status=ResultStatus.NO_RESULTS,
-            limitations=("No authorized market research source is configured.",),
-        )
+from ..sources.noop import NoConfiguredSources
+from ..sources.protocol import MarketResearchSource
 
 
 class MarketResearchAgent:
