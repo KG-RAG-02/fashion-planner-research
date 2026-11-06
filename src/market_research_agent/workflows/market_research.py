@@ -28,6 +28,20 @@ class MarketResearchAgent:
         if not context.request_id.strip():
             raise ValueError("request_id must not be empty")
 
+        context_limitations, incomplete_context = self._context_limitations(context)
+        mismatched_input = self._request_id_mismatch(context)
+        if mismatched_input:
+            return self._failure(
+                context.request_id,
+                AgentError(
+                    code="UPSTREAM_REQUEST_ID_MISMATCH",
+                    message=(
+                        f"Upstream input '{mismatched_input}' belongs to a different request."
+                    ),
+                ),
+                limitations=context_limitations,
+            )
+
         try:
             report = self._source.research(context)
         except PermissionError:
@@ -37,6 +51,7 @@ class MarketResearchAgent:
                     code="FORBIDDEN",
                     message="The configured source denied access.",
                 ),
+                limitations=context_limitations,
             )
         except TimeoutError:
             return self._failure(
@@ -45,6 +60,7 @@ class MarketResearchAgent:
                     code="TIMEOUT",
                     message="The configured source did not respond in time.",
                 ),
+                limitations=context_limitations,
             )
         except Exception:
             # Avoid returning exception strings that may contain credentials or source data.
@@ -54,6 +70,7 @@ class MarketResearchAgent:
                     code="SOURCE_UNAVAILABLE",
                     message="The configured source could not be queried.",
                 ),
+                limitations=context_limitations,
             )
 
         if not isinstance(report, SourceReport):
@@ -63,6 +80,7 @@ class MarketResearchAgent:
                     code="INVALID_SOURCE_REPORT",
                     message="The source adapter returned an unsupported report type.",
                 ),
+                limitations=context_limitations,
             )
         if not isinstance(report.status, ResultStatus):
             return self._failure(
@@ -71,15 +89,26 @@ class MarketResearchAgent:
                     code="INVALID_SOURCE_REPORT",
                     message="The source adapter returned an unsupported result status.",
                 ),
+                limitations=context_limitations,
             )
 
-        return self._assemble(context.request_id, report)
+        return self._assemble(
+            context.request_id,
+            report,
+            context_limitations=context_limitations,
+            incomplete_context=incomplete_context,
+        )
 
     def _assemble(
-        self, request_id: str, report: SourceReport
+        self,
+        request_id: str,
+        report: SourceReport,
+        *,
+        context_limitations: tuple[str, ...] = (),
+        incomplete_context: bool = False,
     ) -> MarketResearchResult:
         errors = list(report.errors)
-        limitations = list(report.limitations)
+        limitations = [*report.limitations, *context_limitations]
 
         all_evidence = {}
         duplicate_ids: set[str] = set()
@@ -174,10 +203,10 @@ class MarketResearchAgent:
             status = ResultStatus.PARTIAL if has_content else ResultStatus.ERROR
         elif has_issues:
             status = ResultStatus.PARTIAL if has_content else ResultStatus.ERROR
-        elif report.status == ResultStatus.PARTIAL:
-            status = ResultStatus.PARTIAL
         elif report.status == ResultStatus.NO_RESULTS or not has_content:
             status = ResultStatus.NO_RESULTS
+        elif report.status == ResultStatus.PARTIAL or incomplete_context:
+            status = ResultStatus.PARTIAL
         else:
             status = ResultStatus.OK
 
@@ -193,14 +222,20 @@ class MarketResearchAgent:
             errors=tuple(errors),
         )
 
-    def _failure(self, request_id: str, error: AgentError) -> MarketResearchResult:
+    def _failure(
+        self,
+        request_id: str,
+        error: AgentError,
+        *,
+        limitations: tuple[str, ...] = (),
+    ) -> MarketResearchResult:
         return MarketResearchResult(
             schema_version=self.schema_version,
             request_id=request_id,
             agent_id=self.agent_id,
             status=ResultStatus.ERROR,
             summary="Market research did not produce a usable result.",
-            limitations=(),
+            limitations=limitations,
             errors=(error,),
         )
 
@@ -225,3 +260,92 @@ class MarketResearchAgent:
         """Reject blank identifiers and labels before they enter the shared result."""
 
         return all(isinstance(value, str) and value.strip() for value in values)
+
+    @staticmethod
+    def _context_limitations(
+        context: MarketResearchContext,
+    ) -> tuple[tuple[str, ...], bool]:
+        """Summarize upstream availability without requiring an unapproved schema.
+
+        The original common context is still passed unchanged to the source
+        adapter. This reader only carries common status/limitation metadata into
+        the result; it never reads another agent's output.
+        """
+
+        notes: list[str] = []
+        incomplete = False
+        for name in ("planning_request", "trend_result", "inventory_product_result"):
+            payload = getattr(context, name)
+            if payload is None:
+                if name != "planning_request":
+                    notes.append(f"Optional upstream input '{name}' was not supplied.")
+                    incomplete = True
+                continue
+            if not isinstance(payload, dict):
+                notes.append(f"Upstream input '{name}' was not a readable object.")
+                incomplete = True
+                continue
+
+            nested_result = payload.get("result")
+            metadata = nested_result if isinstance(nested_result, dict) else payload
+            status = metadata.get("status", payload.get("status"))
+            if isinstance(status, str) and status in {"partial", "no_results", "error"}:
+                notes.append(f"Upstream input '{name}' reported status '{status}'.")
+                incomplete = True
+            elif status is not None and status != "ok":
+                notes.append(f"Upstream input '{name}' reported an unrecognized status.")
+                incomplete = True
+
+            for source in (payload, metadata):
+                for limitation in MarketResearchAgent._string_items(
+                    source.get("limitations")
+                ):
+                    if isinstance(limitation, str) and limitation.strip():
+                        notes.append(f"Upstream {name}: {limitation.strip()}")
+                for missing in MarketResearchAgent._string_items(
+                    source.get("missing_fields")
+                ):
+                    if isinstance(missing, str) and missing.strip():
+                        notes.append(
+                            f"Upstream {name} is missing field '{missing.strip()}'."
+                        )
+                for error in MarketResearchAgent._mapping_items(source.get("errors")):
+                    code = error.get("code")
+                    if isinstance(code, str) and code.strip():
+                        notes.append(
+                            f"Upstream {name} reported error code '{code.strip()}'."
+                        )
+                        incomplete = True
+
+        return tuple(dict.fromkeys(notes)), incomplete
+
+    @staticmethod
+    def _request_id_mismatch(context: MarketResearchContext) -> str | None:
+        """Reject conflicting common-envelope request IDs when a caller provides them."""
+
+        for name in ("planning_request", "trend_result", "inventory_product_result"):
+            payload = getattr(context, name)
+            if not isinstance(payload, dict):
+                continue
+            nested_result = payload.get("result")
+            metadata = nested_result if isinstance(nested_result, dict) else payload
+            request_id = metadata.get("request_id", payload.get("request_id"))
+            if request_id is not None and request_id != context.request_id:
+                return name
+        return None
+
+    @staticmethod
+    def _string_items(value: object) -> tuple[str, ...]:
+        if isinstance(value, str):
+            return (value,)
+        if isinstance(value, (list, tuple)):
+            return tuple(item for item in value if isinstance(item, str))
+        return ()
+
+    @staticmethod
+    def _mapping_items(value: object) -> tuple[dict, ...]:
+        if isinstance(value, dict):
+            return (value,)
+        if isinstance(value, (list, tuple)):
+            return tuple(item for item in value if isinstance(item, dict))
+        return ()

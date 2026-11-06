@@ -15,13 +15,12 @@ from market_research_agent import (
 )
 
 
-def make_context(*, product_concept: dict | None = None) -> MarketResearchContext:
+def make_context() -> MarketResearchContext:
     return MarketResearchContext(
         request_id="request-123",
         planning_request={"query": "spring knitwear"},
         trend_result={"status": "ok"},
         inventory_product_result={"status": "ok"},
-        product_concept=product_concept,
     )
 
 
@@ -218,13 +217,122 @@ class MarketResearchAgentTests(unittest.TestCase):
         self.assertNotIn("secret", denied.errors[0].message)
         self.assertEqual(timed_out.errors[0].code, "TIMEOUT")
 
-    def test_product_concept_is_optional_context_not_a_prerequisite(self) -> None:
+    def test_market_research_context_has_no_new_product_result_input(self) -> None:
         source = StaticSource(SourceReport(status=ResultStatus.NO_RESULTS))
-        result = MarketResearchAgent(source).run(make_context(product_concept=None))
+        context = make_context()
+        result = MarketResearchAgent(source).run(context)
 
-        self.assertIsNone(source.received_context.product_concept)
+        self.assertIs(source.received_context, context)
+        self.assertFalse(hasattr(source.received_context, "product_concept"))
         self.assertEqual(result.request_id, "request-123")
         self.assertEqual(result.status, ResultStatus.NO_RESULTS)
+
+    def test_upstream_partial_status_and_limitations_are_preserved(self) -> None:
+        report = SourceReport(
+            status=ResultStatus.OK,
+            findings=(
+                ResearchFinding(
+                    finding_id="finding-1",
+                    topic="market context",
+                    statement="A source-backed observation.",
+                    kind=FindingKind.FACT,
+                    evidence_ids=("market:E-001",),
+                ),
+            ),
+            evidence=(make_evidence(),),
+        )
+        context = MarketResearchContext(
+            request_id="request-123",
+            planning_request={"query": "spring knitwear"},
+            trend_result={
+                "result": {
+                    "status": "partial",
+                    "limitations": ["Some trend sources were unavailable."],
+                    "errors": [
+                        {"code": "SOURCE_TIMEOUT", "message": "sensitive source detail"}
+                    ],
+                },
+                "missing_fields": ["market"],
+                "evidence_ids": ["trend:E-001"],
+            },
+            inventory_product_result={"status": "ok"},
+        )
+        source = StaticSource(report)
+
+        result = MarketResearchAgent(source).run(context)
+
+        self.assertIs(source.received_context, context)
+        self.assertEqual(
+            source.received_context.trend_result["evidence_ids"], ["trend:E-001"]
+        )
+        self.assertEqual(result.status, ResultStatus.PARTIAL)
+        self.assertIn(
+            "Upstream input 'trend_result' reported status 'partial'.",
+            result.limitations,
+        )
+        self.assertIn(
+            "Upstream trend_result: Some trend sources were unavailable.",
+            result.limitations,
+        )
+        self.assertIn(
+            "Upstream trend_result is missing field 'market'.",
+            result.limitations,
+        )
+        self.assertIn(
+            "Upstream trend_result reported error code 'SOURCE_TIMEOUT'.",
+            result.limitations,
+        )
+        self.assertFalse(any("sensitive source detail" in item for item in result.limitations))
+
+    def test_absent_optional_upstream_input_does_not_block_research(self) -> None:
+        source = StaticSource(SourceReport(status=ResultStatus.NO_RESULTS))
+        context = MarketResearchContext(
+            request_id="request-123", planning_request={"query": "spring knitwear"}
+        )
+
+        result = MarketResearchAgent(source).run(context)
+
+        self.assertIs(source.received_context, context)
+        self.assertEqual(result.status, ResultStatus.NO_RESULTS)
+        self.assertTrue(
+            any("trend_result' was not supplied" in item for item in result.limitations)
+        )
+
+    def test_source_error_keeps_upstream_context_limitations(self) -> None:
+        context = MarketResearchContext(
+            request_id="request-123",
+            planning_request={"query": "spring knitwear"},
+            trend_result={
+                "status": "partial",
+                "limitations": ["Trend coverage is incomplete."],
+            },
+            inventory_product_result={"status": "ok"},
+        )
+
+        result = MarketResearchAgent(
+            StaticSource(error=TimeoutError("sensitive details"))
+        ).run(context)
+
+        self.assertEqual(result.status, ResultStatus.ERROR)
+        self.assertEqual(result.errors[0].code, "TIMEOUT")
+        self.assertIn(
+            "Upstream trend_result: Trend coverage is incomplete.",
+            result.limitations,
+        )
+
+    def test_request_id_mismatch_stops_combining_upstream_context(self) -> None:
+        source = StaticSource(SourceReport(status=ResultStatus.NO_RESULTS))
+        context = MarketResearchContext(
+            request_id="request-123",
+            planning_request={"query": "spring knitwear"},
+            trend_result={"request_id": "request-other", "status": "ok"},
+        )
+
+        result = MarketResearchAgent(source).run(context)
+
+        self.assertIsNone(source.received_context)
+        self.assertEqual(result.status, ResultStatus.ERROR)
+        self.assertEqual(result.errors[0].code, "UPSTREAM_REQUEST_ID_MISMATCH")
 
     def test_empty_request_id_is_rejected(self) -> None:
         with self.assertRaises(ValueError):

@@ -35,8 +35,6 @@ class MarketResearchContext:
     planning_request: dict[str, Any]
     trend_result: dict[str, Any] | None = None
     inventory_product_result: dict[str, Any] | None = None
-    # Optional context can improve cross-linking, but is never a prerequisite.
-    product_concept: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
