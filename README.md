@@ -40,6 +40,18 @@ docker compose run --build --rm market-research-agent-demo
 docker compose --profile test run --build --rm market-research-agent-tests
 ```
 
+Docker Desktop의 Compose 앱 **Start** 버튼으로 실행하려면 먼저 일반 서비스 컨테이너를 생성합니다. `run --rm`은 실행 후 컨테이너를 삭제하므로 Desktop의 `start` 대상이 남지 않습니다.
+
+```bash
+docker compose create market-research-agent-demo
+```
+
+그다음 Docker Desktop에서 시작하거나 아래 명령을 사용합니다.
+
+```bash
+docker compose start market-research-agent-demo
+```
+
 두 서비스는 합성 예시와 테스트를 실행한 뒤 종료하는 one-shot 컨테이너입니다. 현재 HTTP 서버나 승인된 외부 자료원이 없어 포트나 비밀키를 설정하지 않으며, 실행 컨테이너는 네트워크를 사용하지 않습니다. Docker 이미지에는 `.env`, `.venv`, 원본·처리 데이터가 포함되지 않습니다.
 
 ## Docker 실행
