@@ -17,4 +17,4 @@ RUN pip install --no-cache-dir .
 
 USER agent
 
-CMD ["python", "examples/synthetic_demo.py"]
+CMD ["python", "-m", "market_research_agent.runtime"]

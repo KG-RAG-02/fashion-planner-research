@@ -1,10 +1,19 @@
 services:
+  market-research-agent:
+    build:
+      context: .
+    image: vogue-market-research-agent:local
+    network_mode: none
+    init: true
+    restart: unless-stopped
+
   market-research-agent-demo:
     build:
       context: .
     image: vogue-market-research-agent:local
     command: ["python", "examples/synthetic_demo.py"]
     network_mode: none
+    profiles: ["tools"]
     restart: "no"
 
   market-research-agent-tests:

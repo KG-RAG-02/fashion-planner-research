@@ -33,42 +33,27 @@ PYTHONPATH=src python3 examples/synthetic_demo.py
 
 ## Docker
 
-Docker Desktop 또는 Docker Engine과 Compose를 설치한 뒤 프로젝트 루트에서 실행합니다.
+Docker Desktop 또는 Docker Engine과 Compose를 설치한 뒤 프로젝트 루트에서 개발 컨테이너를 시작합니다.
 
 ```bash
-docker compose run --build --rm market-research-agent-demo
-docker compose --profile test run --build --rm market-research-agent-tests
+docker compose up --build -d
+docker compose ps
+docker compose logs -f market-research-agent
 ```
 
-Docker Desktop의 Compose 앱 **Start** 버튼으로 실행하려면 먼저 일반 서비스 컨테이너를 생성합니다. `run --rm`은 실행 후 컨테이너를 삭제하므로 Desktop의 `start` 대상이 남지 않습니다.
+기본 컨테이너는 Docker Desktop에서 실행 상태를 유지하는 개발용 대기 프로세스입니다. 현재 API 서버나 worker는 포함하지 않습니다. 컨테이너 안에서 합성 데모를 실행하려면 다음 명령을 사용합니다.
 
 ```bash
-docker compose create market-research-agent-demo
+docker compose exec market-research-agent python examples/synthetic_demo.py
 ```
 
-그다음 Docker Desktop에서 시작하거나 아래 명령을 사용합니다.
-
-```bash
-docker compose start market-research-agent-demo
-```
-
-두 서비스는 합성 예시와 테스트를 실행한 뒤 종료하는 one-shot 컨테이너입니다. 현재 HTTP 서버나 승인된 외부 자료원이 없어 포트나 비밀키를 설정하지 않으며, 실행 컨테이너는 네트워크를 사용하지 않습니다. Docker 이미지에는 `.env`, `.venv`, 원본·처리 데이터가 포함되지 않습니다.
-
-## Docker 실행
-
-Docker Desktop 또는 Docker Engine과 Compose가 설치되어 있으면 합성 데모를 컨테이너에서 실행합니다.
-
-```bash
-docker compose run --build --rm market-research-agent-demo
-```
-
-컨테이너 안에서 테스트를 실행할 수 있습니다.
+테스트는 별도 일회 실행 컨테이너로 실행합니다.
 
 ```bash
 docker compose --profile test run --build --rm market-research-agent-tests
 ```
 
-현재 구성은 데모와 테스트용 one-shot 컨테이너입니다. HTTP 서버나 승인된 외부 데이터 공급자가 아직 없으므로 포트와 API 키를 설정하지 않습니다. 컨테이너 네트워크도 비활성화해 합성 예시가 외부에 접속하지 않도록 했습니다. 향후 승인된 provider를 연결할 때는 별도 실행 설정과 필요한 네트워크 범위를 검토해야 합니다.
+데모 자체만 실행하고 종료하려면 `docker compose --profile tools run --build --rm market-research-agent-demo`를 사용합니다. 컨테이너는 네트워크를 사용하지 않으며, Docker 이미지에는 `.env`, `.venv`, 원본·처리 데이터가 포함되지 않습니다. 중지할 때는 `docker compose down`을 실행합니다.
 
 ## 사용 예시
 
