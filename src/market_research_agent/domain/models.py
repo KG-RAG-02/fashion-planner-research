@@ -46,6 +46,7 @@ class MarketResearchContext:
     requested_metrics: tuple[str, ...] = ()
     requested_geography: str | None = "KR"
     requested_channel: str | None = "online"
+    requested_query: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

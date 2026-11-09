@@ -60,6 +60,9 @@ def main(argv: list[str] | None = None) -> int:
     try:
         request, trend, inventory = _read_inputs(args.inputs_json)
         context_data = request.get("context") if isinstance(request.get("context"), dict) else {}
+        query = request.get("query") or request.get("original_query") or context_data.get("query")
+        if query is not None and not isinstance(query, str):
+            raise ValueError("planning_request.query must be a string when supplied.")
         category = context_data.get("category")
         if isinstance(category, dict):
             category = category.get("value")
@@ -71,6 +74,7 @@ def main(argv: list[str] | None = None) -> int:
             requested_metrics=tuple(x.strip() for x in args.metrics.split(",") if x.strip()),
             requested_geography=args.geography.strip() or None,
             requested_channel=args.channel.strip() or None,
+            requested_query=query.strip() if isinstance(query, str) and query.strip() else None,
         )
         sources = []
         if bool(args.market_observations_csv) != bool(args.market_manifest):

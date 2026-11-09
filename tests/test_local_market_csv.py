@@ -1,12 +1,15 @@
 from __future__ import annotations
 
 import csv
+import io
 import json
 import tempfile
 import unittest
+from contextlib import redirect_stdout
 from pathlib import Path
 
 from market_research_agent import MarketResearchAgent, MarketResearchContext
+from market_research_agent.cli import main as cli_main
 from market_research_agent.sources.composite import CompositeMarketResearchSource
 from market_research_agent.sources.hm_historical.hm_sales_adapter import HmHistoricalSalesSource
 from market_research_agent.sources.local_market_csv import LocalMarketCsvSource
@@ -26,6 +29,7 @@ class LocalMarketCsvSourceTests(unittest.TestCase):
             "period_end", "period_grain", "as_of", "geography", "channel",
             "currency", "metric_definition", "product_mapping_id",
             "product_mapping_version", "population",
+            "search_text",
         ]
         self.row = {
             "observation_id": "synthetic-observation-1",
@@ -74,7 +78,7 @@ class LocalMarketCsvSourceTests(unittest.TestCase):
     def _source(self) -> LocalMarketCsvSource:
         return LocalMarketCsvSource(self.csv_path, self.manifest_path)
 
-    def _context(self) -> MarketResearchContext:
+    def _context(self, query: str | None = None) -> MarketResearchContext:
         return MarketResearchContext(
             request_id="synthetic-request",
             planning_request={},
@@ -82,6 +86,7 @@ class LocalMarketCsvSourceTests(unittest.TestCase):
             requested_metrics=("market_size",),
             requested_geography="KR",
             requested_channel="online",
+            requested_query=query,
         )
 
     def test_authorized_rows_become_evidence_linked_observations_and_findings(self) -> None:
@@ -110,6 +115,49 @@ class LocalMarketCsvSourceTests(unittest.TestCase):
 
         self.assertEqual(result.market_data.missing_data[0].reason, "access_denied")
         self.assertIn("MARKET_SOURCE_ACCESS_DENIED", {item.code for item in result.errors})
+
+    def test_raw_query_is_used_for_literal_market_csv_search_and_returned_in_scope(self) -> None:
+        query = "한국 온라인 아우터 시장규모"
+        row = dict(self.row, search_text=f"{query} 27SS 공식 통계")
+        self._write_rows([row])
+        result = MarketResearchAgent(self._source()).run(self._context(query))
+
+        self.assertEqual(len(result.market_data.observations), 1)
+        self.assertEqual(result.to_proposal_v1_2_dict()["requested_scope"]["query"], query)
+
+    def test_raw_query_without_search_text_column_is_preserved_as_limitation(self) -> None:
+        self.columns.remove("search_text")
+        self._write_rows([self.row])
+        report = self._source().research(self._context("한국 온라인 아우터 시장규모"))
+
+        self.assertEqual(report.market_data.status, "partial")
+        self.assertTrue(any("not applied to CSV row text" in item for item in report.market_data.limitations))
+
+    def test_cli_forwards_planning_request_query_into_market_search(self) -> None:
+        query = "한국 온라인 아우터 시장규모"
+        self._write_rows([dict(self.row, search_text=f"{query} 공식 통계")])
+        input_path = self.root / "request.json"
+        input_path.write_text(json.dumps({
+            "planning_request": {
+                "schema_version": "1.0", "request_id": "synthetic-cli-request",
+                "query": query, "context": {"category": {"value": "Outerwear"}},
+            },
+        }), encoding="utf-8")
+        output = io.StringIO()
+
+        with redirect_stdout(output):
+            exit_code = cli_main([
+                "--inputs-json", str(input_path),
+                "--metrics", "market_size",
+                "--market-observations-csv", str(self.csv_path),
+                "--market-manifest", str(self.manifest_path),
+                "--proposal-v1-2",
+            ])
+
+        payload = json.loads(output.getvalue())
+        self.assertEqual(exit_code, 0)
+        self.assertEqual(payload["requested_scope"]["query"], query)
+        self.assertEqual(payload["market_data"]["status"], "ok")
 
     def test_missing_scope_metadata_retains_row_as_partial_without_claiming_scope_match(self) -> None:
         row = dict(self.row, channel="", period_start="", period_end="", as_of="", product_mapping_version="")

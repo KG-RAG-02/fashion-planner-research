@@ -105,6 +105,7 @@ class MarketResearchAgent:
                 "metrics": list(context.requested_metrics),
                 "geography": context.requested_geography,
                 "channel": context.requested_channel,
+                "query": context.requested_query,
             },
         )
 

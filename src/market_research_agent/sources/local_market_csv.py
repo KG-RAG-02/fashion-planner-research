@@ -69,7 +69,7 @@ class LocalMarketCsvSource:
             return self._invalid("The market source manifest is missing required source identity fields.")
 
         try:
-            observations, evidence = self._read_observations(manifest, context)
+            observations, evidence, query_search_available = self._read_observations(manifest, context)
         except FileNotFoundError:
             return self._missing("source_not_configured", "Market CSV or source manifest was not found.")
         except (OSError, ValueError, csv.Error, UnicodeError):
@@ -78,6 +78,8 @@ class LocalMarketCsvSource:
         if not observations:
             reason = "no_matching_records"
             message = "The configured market source returned no observations matching the requested category and scope."
+            if context.requested_query and not query_search_available:
+                message += " The CSV has no search_text column, so the raw query could not be applied to row text."
             return SourceReport(
                 status=ResultStatus.NO_RESULTS,
                 limitations=(message,),
@@ -105,6 +107,8 @@ class LocalMarketCsvSource:
             for item in observations
         )
         limitations = tuple(dict.fromkeys(limitation for item in observations for limitation in _scope_limitations(item, context)))
+        if context.requested_query and not query_search_available:
+            limitations = (*limitations, "The raw user query was passed to the source but not applied to CSV row text because the file has no search_text column.")
         market_status = "partial" if limitations else "ok"
         return SourceReport(
             status=ResultStatus.PARTIAL if limitations else ResultStatus.OK,
@@ -130,7 +134,7 @@ class LocalMarketCsvSource:
 
     def _read_observations(
         self, manifest: dict[str, Any], context: MarketResearchContext
-    ) -> tuple[list[MarketObservation], dict[str, EvidenceRecord]]:
+    ) -> tuple[list[MarketObservation], dict[str, EvidenceRecord], bool]:
         path = self.observations_path.expanduser()
         if not path.is_file():
             raise FileNotFoundError
@@ -141,11 +145,13 @@ class LocalMarketCsvSource:
         evidence: dict[str, EvidenceRecord] = {}
         seen_observation_ids: set[str] = set()
         requested_metrics = {value.casefold() for value in context.requested_metrics}
+        query_search_available = False
         fetched_at = manifest.get("fetched_at") or datetime.now(timezone.utc).isoformat()
         with path.open("r", encoding="utf-8-sig", newline="") as stream:
             reader = csv.DictReader(stream)
             if not REQUIRED_COLUMNS.issubset(set(reader.fieldnames or ())):
                 raise ValueError("market CSV has missing required columns")
+            query_search_available = "search_text" in set(reader.fieldnames or ())
             for row_number, row in enumerate(reader, start=1):
                 if row_number > MAX_OBSERVATIONS:
                     raise ValueError("market CSV row limit exceeded")
@@ -153,6 +159,10 @@ class LocalMarketCsvSource:
                 metric_name = _required(row, "metric_name")
                 if requested_metrics and metric_name.casefold() not in requested_metrics:
                     continue
+                if context.requested_query and query_search_available:
+                    row_search_text = (row.get("search_text") or "").casefold()
+                    if context.requested_query.casefold() not in row_search_text:
+                        continue
                 if context.requested_category and category and category.casefold() != context.requested_category.casefold():
                     continue
                 geography = _optional(row, "geography")
@@ -216,7 +226,7 @@ class LocalMarketCsvSource:
                     permission_status=PermissionStatus.AUTHORIZED,
                     manifest_id=manifest["manifest_id"],
                 ))
-        return rows, evidence
+        return rows, evidence, query_search_available
 
     @staticmethod
     def _missing(reason: str, message: str) -> SourceReport:

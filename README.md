@@ -58,7 +58,7 @@ PYTHONPATH=src python3 -m market_research_agent.cli \\
 
 입력 예시 파일은 이 저장소의 `examples/fixtures/market-research-input.example.json`을 참고하세요. 모든 상위 결과의 `request_id`가 일치해야 합니다. H&M 어댑터는 승인 여부가 별도 확인되지 않으면 수치 관측을 출력하지 않습니다. 실제 데이터 사용 승인을 받은 뒤에만 `--hm-usage-authorized`를 지정하십시오. 이 플래그는 승인 절차가 아니며, 호출자가 외부에서 확인한 승인을 선언합니다. 기본 1.0 직렬화는 기존 결과 스키마를 유지합니다. `--proposal-v1-1`은 이전 미합의 판매 데이터 확장, `--proposal-v1-2`는 판매·시장·원가/마진 영역이 분리된 최신 proposal을 출력합니다. 둘 다 공통 wire contract를 뜻하지 않습니다.
 
-승인된 시장자료 파일은 `--market-observations-csv`와 `--market-manifest`로 함께 전달할 수 있습니다. manifest의 `permission_status`가 `authorized`가 아니면 관측을 내보내지 않습니다. 이 로컬 CSV 어댑터는 외부 API를 호출하지 않으며, KOSIS/Euromonitor/WGSN에 자동 연결되지 않습니다. CSV 열 정의, manifest 예시, H&M 처리 파일 준비와 두 어댑터를 한 번에 실행하는 방법은 [`docs/design/local-market-data-connection.md`](docs/design/local-market-data-connection.md)를 참고하세요. API 자격 증명은 CLI 인수나 데이터 manifest에 넣지 마세요.
+승인된 시장자료 파일은 `--market-observations-csv`와 `--market-manifest`로 함께 전달할 수 있습니다. manifest의 `permission_status`가 `authorized`가 아니면 관측을 내보내지 않습니다. 입력의 원문 `planning_request.query`는 각 source adapter로 전달되고 1.2 proposal의 `requested_scope.query`에도 보존됩니다. CSV `search_text` 열이 있으면 원문 쿼리로 literal 검색하며, 열이 없으면 검색이 적용되지 않았다는 제한을 `partial` 상태로 표시합니다. 이 로컬 CSV 어댑터는 외부 API를 호출하지 않으며, KOSIS/Euromonitor/WGSN에 자동 연결되지 않습니다. CSV 열 정의, manifest 예시, H&M 처리 파일 준비와 두 어댑터를 한 번에 실행하는 방법은 [`docs/design/local-market-data-connection.md`](docs/design/local-market-data-connection.md)를 참고하세요. API 자격 증명은 CLI 인수나 데이터 manifest에 넣지 마세요.
 
 핵심 설정 환경변수는 `VOGUE_HM_PROCESSED_DIR`(처리 데이터 경로)와 `VOGUE_HM_MAPPING_VERSION`(분류 매핑 버전)입니다. 기존 `VOGUE_HM_ANALYSIS_PATH`는 historical prototype 경로 설정입니다. 이 패키지는 `.env`를 자동 로드하지 않으며, 필요한 값을 셸 또는 실행환경에서 설정해야 합니다. `.env`는 Git 제외 상태를 유지하십시오.
 
