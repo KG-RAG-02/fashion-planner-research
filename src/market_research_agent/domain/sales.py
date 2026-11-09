@@ -87,7 +87,7 @@ class MissingData:
     def __post_init__(self) -> None:
         allowed = {
             "source_not_configured", "no_matching_records", "not_available_from_source",
-            "access_denied", "mapping_failed", "invalid_data", "source_error", "out_of_scope",
+            "access_denied", "permission_not_confirmed", "mapping_failed", "invalid_data", "source_error", "out_of_scope",
         }
         if not self.field.strip() or not self.message.strip() or self.reason not in allowed:
             raise ValueError("MissingData requires a field, supported reason, and message.")

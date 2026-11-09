@@ -164,7 +164,7 @@
       "required": ["field", "reason", "message", "retryable"],
       "properties": {
         "field": {"type": "string", "minLength": 1},
-        "reason": {"enum": ["source_not_configured", "no_matching_records", "not_available_from_source", "access_denied", "mapping_failed", "invalid_data", "source_error", "out_of_scope"]},
+        "reason": {"enum": ["source_not_configured", "no_matching_records", "not_available_from_source", "access_denied", "permission_not_confirmed", "mapping_failed", "invalid_data", "source_error", "out_of_scope"]},
         "message": {"type": "string", "minLength": 1},
         "source_id": {"type": ["string", "null"]},
         "retryable": {"type": "boolean"}

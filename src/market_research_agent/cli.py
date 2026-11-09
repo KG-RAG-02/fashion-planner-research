@@ -12,6 +12,7 @@ from typing import Any
 from .domain.models import MarketResearchContext
 from .sources.composite import CompositeMarketResearchSource
 from .sources.hm_historical.hm_sales_adapter import HmHistoricalSalesSource
+from .sources.local_market_csv import LocalMarketCsvSource
 from .sources.noop import NoConfiguredSources
 from .workflows.market_research import MarketResearchAgent
 
@@ -50,6 +51,8 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--hm-category-map", action="append", default=[], help="Explicit source-to-request category mapping, e.g. 'Garment Upper body=Outerwear'")
     parser.add_argument("--hm-mapping-version", default=os.getenv("VOGUE_HM_MAPPING_VERSION", ""))
     parser.add_argument("--hm-usage-authorized", action="store_true", help="Declare externally confirmed authorization for this source")
+    parser.add_argument("--market-observations-csv", default="", help="Explicit local CSV path for authorized market observations")
+    parser.add_argument("--market-manifest", default="", help="Explicit source/permission manifest path for the market CSV")
     parser.add_argument("--proposal-v1-1", action="store_true", help="Emit the explicitly unratified sales-data extension")
     parser.add_argument("--proposal-v1-2", action="store_true", help="Emit the explicitly unratified separated sales, market, and unit-economics proposal")
     args = parser.parse_args(argv)
@@ -70,6 +73,12 @@ def main(argv: list[str] | None = None) -> int:
             requested_channel=args.channel.strip() or None,
         )
         sources = []
+        if bool(args.market_observations_csv) != bool(args.market_manifest):
+            raise ValueError("--market-observations-csv and --market-manifest must be supplied together.")
+        if args.market_observations_csv:
+            sources.append(LocalMarketCsvSource(
+                Path(args.market_observations_csv), Path(args.market_manifest)
+            ))
         if args.hm_category_map:
             if not args.hm_mapping_version:
                 raise ValueError("--hm-mapping-version is required with --hm-category-map.")
