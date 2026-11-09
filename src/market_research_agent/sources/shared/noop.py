@@ -1,6 +1,6 @@
 """Safe source adapter used until a market source is approved and configured."""
 
-from ..domain.models import MarketResearchContext, ResultStatus, SourceReport
+from ...domain.models import MarketResearchContext, ResultStatus, SourceReport
 
 
 class NoConfiguredSources:

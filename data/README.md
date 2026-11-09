@@ -8,5 +8,8 @@ reports, and local state are runtime files and must not be committed.
 - `processed/`: reproducible, source-backed outputs.
 - `local/`: machine-specific caches or development state.
 
-No provider or market dataset is configured yet, so these directories contain
-no data. Keep credentials in local environment configuration and never in Git.
+The workspace may contain local H&M Kaggle source and processed files. They are
+Git-ignored; their presence does not confirm usage permission, nor does it
+mean an approved internal sales ledger or market provider is connected. Do not
+delete, copy, inspect, or upload these files as part of repository cleanup.
+Keep credentials in local environment configuration and never in Git.

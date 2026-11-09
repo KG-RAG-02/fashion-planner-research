@@ -11,8 +11,8 @@ from ..domain.models import (
     ResultStatus,
     SourceReport,
 )
-from ..sources.noop import NoConfiguredSources
-from ..sources.protocol import MarketResearchSource
+from ..sources.shared.noop import NoConfiguredSources
+from ..sources.shared.protocol import MarketResearchSource
 from ..domain.sales import MarketDataResult, UnitEconomicsResult
 
 

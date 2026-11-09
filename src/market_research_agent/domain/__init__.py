@@ -12,6 +12,7 @@ from .models import (
     SourceReport,
 )
 from .sales import (
+    ComparabilityResult,
     MarketDataResult,
     MarketObservation,
     MissingData,
@@ -19,6 +20,7 @@ from .sales import (
     SalesObservation,
     UnitEconomicsCalculation,
     UnitEconomicsResult,
+    compare_sales_to_market,
 )
 
 __all__ = [
@@ -33,6 +35,8 @@ __all__ = [
     "SourceReport",
     "SalesDataResult",
     "SalesObservation",
+    "ComparabilityResult",
+    "compare_sales_to_market",
     "MarketDataResult",
     "MarketObservation",
     "MissingData",

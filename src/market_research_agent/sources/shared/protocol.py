@@ -2,7 +2,7 @@
 
 from typing import Protocol
 
-from ..domain.models import MarketResearchContext, SourceReport
+from ...domain.models import MarketResearchContext, SourceReport
 
 
 class MarketResearchSource(Protocol):

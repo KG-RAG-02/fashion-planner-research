@@ -4,7 +4,7 @@ VOGUE의 시장성 조사 단계에서 사용할 수 있는 계약 중립적 Pyt
 
 현재 저장소에는 승인된 실제 판매 원장·시장 자료 어댑터가 없어 운영 분석 시스템으로 동작하지 않습니다. 판매 관측 모델과 결과 정규화 경계는 Project_07 책임으로 구현하되, 자료원이 미구성된 경우 `no_results`와 제한 사유를 전달합니다. Kaggle/H&M 공개 과거 데이터와 합성 fixture는 운영 데이터로 사용하지 않습니다.
 
-Project_06의 책임 정리 과정에서 H&M 과거자료 처리·품질·집계 adapter, 판매 domain model 및 합성 판매/운영 시나리오 예제와 관련 테스트가 이 저장소로 옮겨졌습니다. 2026-11-09에는 작업공간의 H&M Kaggle 원본 ZIP과 처리 산출물 디렉터리도 Project_06에서 이 저장소의 `data/raw/` 및 `data/processed/`로 이동했습니다. 이 파일들은 Git 제외 상태이며 이동은 이용 권한을 승인하지 않습니다. `.env`와 SQLite 데이터는 옮기지 않았습니다. Project_06은 새상품 기획 전용입니다. Project_07의 합성 merchandising 시나리오는 소프트웨어 검증/역사 데모이며 운영 분석 결과가 아닙니다. 이동한 H&M adapter는 local historical research용이며 승인된 사내 sales connector가 아닙니다. 테스트는 임시 fixture를 만들며 실제 Kaggle 원본 CSV를 요구하지 않습니다.
+Project_06의 책임 정리 과정에서 H&M 과거자료 처리·품질·집계 adapter가 이 저장소로 옮겨졌습니다. 2026-11-09에는 H&M Kaggle 파일도 Git 제외 로컬 데이터 경로로 이동했습니다. 이 이동은 이용 권한을 승인하지 않습니다. `.env`와 SQLite 데이터는 옮기지 않았습니다. 판매와 시장 분석 코드는 각각 `sources/sales/`와 `sources/market/`에 둡니다. 상품기획 초안/시나리오 생성 데모 코드는 Project_06의 `_incoming/project_07-product-planning/`으로 반환했습니다. H&M adapter는 historical research용이며 승인된 사내 sales connector가 아닙니다. 테스트는 임시 합성 fixture를 사용하며 실제 Kaggle 원본 CSV를 요구하지 않습니다.
 
 ## 현재 동작
 
@@ -22,6 +22,10 @@ Project_06의 책임 정리 과정에서 H&M 과거자료 처리·품질·집계
 - 입력 envelope에 `request_id`가 있으면 실행 요청 ID와 일치하는지 확인하고, 불일치 입력은 결합하지 않습니다.
 - `PlanningRequest`, `TrendResult`, `InventoryProductResult`를 받아 조사하되, Project_06 상품 기획 결과는 입력으로 받지 않습니다. VOGUE 상위 흐름은 Project_07 결과가 Project_06보다 먼저 전달되는 순차 처리입니다.
 - `CompositeMarketResearchSource`는 호출자가 제공한 source adapter들의 결과를 결합하고, 일부 source 실패 시 가용 결과와 오류를 함께 보존합니다. 현재 승인된 source adapter는 연결되어 있지 않습니다.
+- H&M historical adapter는 카테고리 매핑 후 `purchase_rows`를 주 단위 관측으로 보존합니다. 이 값은 역사적 거래 행 수이며 현재 판매나 수요를 뜻하지 않습니다.
+- `ObservationComparabilityValidator` / `compare_sales_to_market`는 판매·시장 관측의 지역, 채널, 기간, 카테고리, 단위, 정의, 매핑 및 권한을 확인합니다. 이는 비교 가능성만 판정하고 비율·시장점유율·마진을 계산하지 않습니다. 미확인 범위, 권한 미승인, H&M `purchase_rows`는 비교를 차단합니다.
+- 검색/RAG는 아직 MarketResearchAgent 실행 경로에 연결되어 있지 않습니다. 숫자 분석은 결정론적 계산으로, RAG는 권한 확인된 설명 문서의 정의·방법론 검색에 한정하는 설계 제안입니다. 실제 문서 색인과 외부 자료원 호출은 승인·설정 전에는 수행하지 않습니다.
+- `MarketEvidenceRetriever`는 원문 query와 구조화 scope, 출처·위치·시점·지역·채널·분류·문서 버전이 포함된 청크 및 검색 결과 계약만 정의합니다. 승인되지 않은 청크는 색인 후보에서 제외하고 결과 생성도 거부합니다. 벡터 저장소/모델은 선택하지 않았고 MarketResearchAgent 호출에 아직 연결되지 않았습니다.
 
 이 패키지는 요청·트렌드·재고 입력을 opaque dictionary로 전달합니다. 실제 공통 입력 스키마가 다른 저장소와 합의되면 해당 계약 어댑터를 추가해야 합니다. `contracts/schemas/market-research-result.schema.json`은 현재 로컬 1.0 구현을 설명하며, `contracts/schemas/proposals/`의 1.1은 새 판매·시장 경계를 검토하기 위한 제안입니다. 어느 파일도 다른 에이전트 저장소와 합의된 wire contract를 뜻하지 않습니다.
 
@@ -128,13 +132,16 @@ repository-root/
 ├── compose.yaml                    # 합성 데모 및 테스트 서비스
 ├── docs/decisions/                 # 구조·구현 결정 기록
 ├── docs/design/                    # 요구사항과 설계 기록
-├── examples/fixtures/              # 합성 데모 입력
-├── docs/reference/                 # 이관된 historical sales pipeline/fixture 설명
+├── examples/fixtures/              # MarketResearchAgent 합성 입력
+├── docs/reference/                 # Sales source pipeline references
 ├── src/market_research_agent/
 │   ├── domain/                     # 도메인 계약과 모델
-│   ├── sources/                    # 출처 인터페이스와 어댑터
+│   ├── sources/
+│   │   ├── sales/hm_kaggle/        # H&M historical 판매 처리와 분석
+│   │   ├── market/                 # 시장 CSV와 Evidence 검색 포트
+│   │   └── shared/                 # 공통 source protocol/composition/검증
 │   └── workflows/                  # 검증과 결과 조립
 └── tests/                          # 자동화 테스트
 ```
 
-구조는 project_06의 `domain` / `sources` / `workflows` 분리를 따릅니다. 운영 자료원이 정해지지 않아 사내 DB/API connector, 로컬 UI, 서비스 서버는 추가하지 않았습니다. H&M 과거자료 adapter와 합성 예시는 별도 historical/test 용도로 분리되어 있습니다.
+구조는 `domain` / `sources` / `workflows` 책임을 따릅니다. 운영 자료원이 정해지지 않아 사내 DB/API connector, 로컬 UI, 서비스 서버는 추가하지 않았습니다. H&M 관측치와 시장 자료는 서로 다른 adapter 경로에서 유지합니다. 새상품 기획에 해당하는 합성 상품기획 데모는 Project_06 인계 폴더에 있습니다.

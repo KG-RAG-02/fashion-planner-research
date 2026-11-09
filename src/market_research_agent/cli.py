@@ -10,10 +10,10 @@ from pathlib import Path
 from typing import Any
 
 from .domain.models import MarketResearchContext
-from .sources.composite import CompositeMarketResearchSource
-from .sources.hm_historical.hm_sales_adapter import HmHistoricalSalesSource
-from .sources.local_market_csv import LocalMarketCsvSource
-from .sources.noop import NoConfiguredSources
+from .sources.shared.composite import CompositeMarketResearchSource
+from .sources.sales.hm_kaggle.hm_sales_adapter import HmHistoricalSalesSource
+from .sources.market.local_market_csv import LocalMarketCsvSource
+from .sources.shared.noop import NoConfiguredSources
 from .workflows.market_research import MarketResearchAgent
 
 

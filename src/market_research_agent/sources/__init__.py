@@ -1,8 +1,8 @@
 """Replaceable source adapters for authorized market information."""
 
-from .composite import CompositeMarketResearchSource
-from .noop import NoConfiguredSources
-from .protocol import MarketResearchSource
+from .shared.composite import CompositeMarketResearchSource
+from .shared.noop import NoConfiguredSources
+from .shared.protocol import MarketResearchSource
 
 __all__ = [
     "CompositeMarketResearchSource",

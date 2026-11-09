@@ -10,9 +10,9 @@ from pathlib import Path
 
 from market_research_agent import MarketResearchAgent, MarketResearchContext
 from market_research_agent.cli import main as cli_main
-from market_research_agent.sources.composite import CompositeMarketResearchSource
-from market_research_agent.sources.hm_historical.hm_sales_adapter import HmHistoricalSalesSource
-from market_research_agent.sources.local_market_csv import LocalMarketCsvSource
+from market_research_agent.sources.shared.composite import CompositeMarketResearchSource
+from market_research_agent.sources.sales.hm_kaggle.hm_sales_adapter import HmHistoricalSalesSource
+from market_research_agent.sources.market.local_market_csv import LocalMarketCsvSource
 
 
 class LocalMarketCsvSourceTests(unittest.TestCase):

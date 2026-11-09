@@ -25,6 +25,7 @@ class SalesObservation:
     category: str | None = None
     period_start: str | None = None
     period_end: str | None = None
+    period_grain: str | None = None
     as_of: str | None = None
     geography: str | None = None
     channel: str | None = None
@@ -136,6 +137,61 @@ class MarketObservation:
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
+
+
+@dataclass(frozen=True, slots=True)
+class ComparabilityResult:
+    """Decision record for whether two observations may be compared arithmetically."""
+
+    comparable: bool
+    matches: tuple[str, ...] = ()
+    mismatches: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict[str, Any]:
+        return asdict(self)
+
+
+def compare_sales_to_market(
+    sales: SalesObservation,
+    market: MarketObservation,
+    *,
+    sales_permission_authorized: bool,
+    market_permission_authorized: bool,
+) -> ComparabilityResult:
+    """Check scope and definition compatibility before comparing two records.
+
+    This deliberately does not calculate a ratio or market share. Unknown
+    values fail closed, and historical purchase rows cannot be used as market
+    size or current sales evidence even if their other dimensions happen to match.
+    """
+    dimensions = {
+        "geography": (sales.geography, market.geography),
+        "channel": (sales.channel, market.channel),
+        "category": (sales.category, market.category),
+        "period_start": (sales.period_start, market.period_start),
+        "period_end": (sales.period_end, market.period_end),
+        "unit": (sales.unit, market.unit),
+        "metric_definition": (sales.metric_definition, market.metric_definition),
+        "product_mapping": (sales.product_mapping, market.product_mapping_version),
+    }
+    matches: list[str] = []
+    mismatches: list[str] = []
+    for name, (left, right) in dimensions.items():
+        if left is None or right is None or not str(left).strip() or not str(right).strip():
+            mismatches.append(f"{name}:unknown")
+        elif str(left).casefold() != str(right).casefold():
+            mismatches.append(f"{name}:mismatch")
+        else:
+            matches.append(name)
+    if sales.metric_name != market.metric_name:
+        mismatches.append("metric_name:mismatch")
+    else:
+        matches.append("metric_name")
+    if not sales_permission_authorized or not market_permission_authorized:
+        mismatches.append("permission:not_authorized")
+    if sales.unit == "purchase_rows":
+        mismatches.append("sales_measure:historical_purchase_rows_not_market_size")
+    return ComparabilityResult(not mismatches, tuple(matches), tuple(mismatches))
 
 
 @dataclass(frozen=True, slots=True)

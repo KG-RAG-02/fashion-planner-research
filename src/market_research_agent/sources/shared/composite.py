@@ -4,13 +4,13 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 
-from ..domain.models import (
+from ...domain.models import (
     AgentError,
     MarketResearchContext,
     ResultStatus,
     SourceReport,
 )
-from ..domain.sales import MarketDataResult, SalesDataResult, UnitEconomicsResult
+from ...domain.sales import MarketDataResult, SalesDataResult, UnitEconomicsResult
 from .protocol import MarketResearchSource
 
 

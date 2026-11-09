@@ -12,8 +12,8 @@ import json
 from pathlib import Path
 from typing import Mapping
 
-from ...domain.models import EvidenceRecord, MarketResearchContext, PermissionStatus, ResultStatus, SourceReport
-from ...domain.sales import SalesDataResult, SalesObservation
+from ....domain.models import EvidenceRecord, MarketResearchContext, PermissionStatus, ResultStatus, SourceReport
+from ....domain.sales import SalesDataResult, SalesObservation
 
 DEFAULT_PROCESSED_DIR = Path("data/processed/hm-personalized-fashion-recommendations")
 
@@ -147,7 +147,9 @@ def load_hm_sales_analysis(
                 catalog[article_id] = row
 
     normalized_map = {key.strip().casefold(): value.strip() for key, value in source_category_map.items()}
-    aggregates: dict[tuple[str, str, str], dict[str, object]] = {}
+    # Preserve each source week as an observation. Grouping across time would
+    # hide seasonality and make period comparisons impossible to reproduce.
+    aggregates: dict[tuple[str, str, str, str], dict[str, object]] = {}
     unmatched_rows = 0
     with weekly_path.open("r", encoding="utf-8-sig", newline="") as stream:
         reader = csv.DictReader(stream)
@@ -176,7 +178,10 @@ def load_hm_sales_analysis(
                 continue
             if purchase_rows < 0:
                 continue
-            key = (mapped_category, group_name, type_name)
+            week_start = (row.get("week_start") or "").strip()
+            if not week_start:
+                continue
+            key = (mapped_category, group_name, type_name, week_start)
             metric = aggregates.setdefault(key, {"purchase_rows": 0, "articles": set(), "channels": set()})
             metric["purchase_rows"] = int(metric["purchase_rows"]) + purchase_rows
             metric["articles"].add(article_id)  # type: ignore[union-attr]
@@ -190,8 +195,8 @@ def load_hm_sales_analysis(
     sales_fingerprint = str(manifest.get("source_transactions", {}).get("container_sha256", "unknown"))[:12]
     catalog_fingerprint = str(manifest.get("source_articles", {}).get("container_sha256", "unknown"))[:12]
     observations: list[SalesObservation] = []
-    for (mapped, group_name, type_name), metric in sorted(aggregates.items()):
-        category_evidence_id = f"E-HM-CATEGORY-{sales_fingerprint}-{catalog_fingerprint}-{group_name}-{type_name}-{period_start}-{period_end}"
+    for (mapped, group_name, type_name, week_start), metric in sorted(aggregates.items()):
+        category_evidence_id = f"E-HM-CATEGORY-{sales_fingerprint}-{catalog_fingerprint}-{group_name}-{type_name}-{week_start}"
         catalog_evidence_id = f"E-HM-TAXONOMY-{catalog_fingerprint}-{group_name}-{type_name}"
         channels = metric["channels"]
         observations.append(SalesObservation(
@@ -201,8 +206,9 @@ def load_hm_sales_analysis(
             unit="purchase_rows",
             evidence_ids=(category_evidence_id, catalog_evidence_id),
             category=mapped,
-            period_start=period_start,
-            period_end=period_end,
+            period_start=week_start,
+            period_end=week_start,
+            period_grain="week",
             channel=next(iter(channels)) if len(channels) == 1 else None,
             metric_definition="Count of purchase transaction rows in the declared source period; not a customer count or demand estimate.",
             product_mapping=category_mapping_version,

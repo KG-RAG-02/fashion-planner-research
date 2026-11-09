@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from ..domain.models import MarketResearchContext, ResultStatus, SourceReport
+from ...domain.models import MarketResearchContext, ResultStatus, SourceReport
 
 
 class UnconfiguredMarketDataSource:

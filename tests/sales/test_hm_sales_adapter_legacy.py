@@ -7,7 +7,7 @@ import unittest
 from pathlib import Path
 
 from market_research_agent.domain.sales import SalesDataResult, SalesObservation, peer_percentile_scores
-from market_research_agent.sources.hm_historical.hm_sales_adapter import load_hm_sales_analysis
+from market_research_agent.sources.sales.hm_kaggle.hm_sales_adapter import load_hm_sales_analysis
 
 
 class SalesDomainTests(unittest.TestCase):
@@ -53,6 +53,7 @@ class HmSalesAdapterTests(unittest.TestCase):
         observation = result.observations[0]
         self.assertEqual(observation.value, 3)
         self.assertEqual(observation.period_start, "2018-01-01")
+        self.assertEqual(observation.period_grain, "week")
         self.assertEqual(observation.product_mapping, "test-map")
         self.assertTrue(observation.evidence_ids)
         self.assertTrue(any("could not be joined" in item for item in result.limitations))
@@ -65,6 +66,20 @@ class HmSalesAdapterTests(unittest.TestCase):
                 requested_category="unknown", source_category_map={}, category_mapping_version="test", processed_dir=root)
         self.assertEqual(result.status, "no_results")
         self.assertFalse(result.observations)
+
+    def test_preserves_separate_weekly_observations(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._fixture(root)
+            # Add a second week for the same mapped article group.
+            with (root / "weekly_sales_by_article_channel.csv").open("a", encoding="utf-8", newline="") as stream:
+                stream.write("A1,4,2018-01-08,1\n")
+            result = load_hm_sales_analysis(request_id="r1", schema_version="1.0",
+                requested_category="shorts", source_category_map={"Shorts":"shorts"},
+                category_mapping_version="test-map", processed_dir=root)
+        self.assertEqual(len(result.observations), 2)
+        self.assertEqual([item.period_start for item in result.observations], ["2018-01-01", "2018-01-08"])
+        self.assertEqual([item.value for item in result.observations], [3, 4])
 
 
 if __name__ == "__main__":

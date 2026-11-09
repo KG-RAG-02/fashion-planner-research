@@ -12,6 +12,7 @@ from .domain.models import (
     SourceReport,
 )
 from .domain.sales import (
+    ComparabilityResult,
     MarketDataResult,
     MarketObservation,
     MissingData,
@@ -19,9 +20,10 @@ from .domain.sales import (
     SalesObservation,
     UnitEconomicsCalculation,
     UnitEconomicsResult,
+    compare_sales_to_market,
 )
-from .sources.composite import CompositeMarketResearchSource
-from .sources.noop import NoConfiguredSources
+from .sources.shared.composite import CompositeMarketResearchSource
+from .sources.shared.noop import NoConfiguredSources
 from .workflows.market_research import MarketResearchAgent
 
 __all__ = [
@@ -39,6 +41,8 @@ __all__ = [
     "SourceReport",
     "SalesDataResult",
     "SalesObservation",
+    "ComparabilityResult",
+    "compare_sales_to_market",
     "MarketDataResult",
     "MarketObservation",
     "MissingData",

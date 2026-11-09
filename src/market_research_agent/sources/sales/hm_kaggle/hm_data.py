@@ -301,7 +301,7 @@ def build(source: Path, output: Path = OUTPUT_ROOT, *, batch_size: int = 100_000
     from .hm_analysis import generate_analysis
 
     generate_analysis(output)
-    from .hm_planning_analysis import write_outputs
+    from .hm_sales_analysis import write_outputs
 
     write_outputs(output)
     return json.loads(manifest_path.read_text(encoding="utf-8"))

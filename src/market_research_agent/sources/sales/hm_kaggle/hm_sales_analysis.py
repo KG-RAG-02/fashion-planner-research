@@ -1,8 +1,8 @@
-"""Article-level H&M sales analysis for product planning.
+"""Article-level H&M historical sales analysis.
 
-The module derives category, seasonality, color, source-price, channel, and
-reviewable opportunity summaries from local processed data. It does not infer
-stock, returns, customer preference, or future demand.
+The module derives category, seasonality, color, source-price, and channel
+summaries from local processed data. It does not propose products, infer stock,
+returns, customer preference, or future demand.
 """
 
 from __future__ import annotations
@@ -205,32 +205,6 @@ def analyze(processed_dir: Path = DEFAULT_DIR) -> dict[str, Any]:
                               "interpretation": "Historical purchase concentration by product_code; not evidence of future launch success."})
 
     top_group = sorted(group_rows, key=lambda row: row["purchase_rows"], reverse=True)
-    top_types = type_rows[:10]
-    opportunities = []
-    top_type_keys = {(row["product_group_name"], row["product_type_name"]): row for row in type_rows[:20]}
-    for key, metric in top_type_keys.items():
-        season = next((row for row in seasonality if (row["product_group_name"], row["product_type_name"]) == key), {})
-        type_colors = [row for row in color_rows if (row["product_group_name"], row["product_type_name"]) == key]
-        concentration_row = next((row for row in concentration if (row["product_group_name"], row["product_type_name"]) == key), {})
-        evidence = {
-            "observed_purchase_rows": metric["purchase_rows"],
-            "share_of_joined_purchase_rows": metric["share_of_joined_purchase_rows"],
-            "observed_month_peaks_by_week_start": season.get("monthly_peak_week_start_months", []),
-            "top_observed_colors": [{"name": row["colour_group_name"], "share": row["share_within_type"], "purchase_rows": row["purchase_rows"]} for row in type_colors[:3]],
-            "top_5_style_share": concentration_row.get("top_5_style_share"),
-        }
-        opportunities.append({
-            "opportunity_id": f"HM-OPP-{len(opportunities)+1:03d}", "category": {"product_group_name": key[0], "product_type_name": key[1]},
-            "priority_basis": "historical_category_scale", "observations": evidence,
-            "planning_interpretation": "대규모 과거 구매 관측을 기반으로 후속 시즌·색상·가격대 기획 검토 후보로 삼을 수 있습니다.",
-            "hypotheses_to_validate": ["최근 시장 트렌드와 내부 시즌 기획 방향을 대조", "재고·반품·원가·마진 자료로 사업성 확인", "고객/시장 데이터가 확보되면 타깃 적합성 확인"],
-            "confidence": "historical_volume_only", "evidence": [
-                {"evidence_id": metric["evidence_id"], "source_id": SOURCE_SALES, "dataset": manifest.get("dataset"), "period": manifest.get("observation_period"), "aggregation": "article_id x week_start x source channel, reclassified by article catalog"},
-                {"evidence_id": f"E-HM-TAX-{catalog_fingerprint}-{hashlib.sha256((key[0]+'\\0'+key[1]).encode('utf-8')).hexdigest()[:12]}", "source_id": SOURCE_CATALOG, "aggregation": "article_id to product group/type/color/product_code"},
-            ],
-            "limits": ["과거 판매 규모는 미래 수요나 시장 성장의 증거가 아닙니다.", "재고·반품·고객 특성·명시적 시즌은 포함되지 않았습니다."],
-        })
-
     result = {
         "analysis_version": VERSION,
         "generated_at_utc": datetime.now(timezone.utc).replace(microsecond=0).isoformat().replace("+00:00", "Z"),
@@ -247,27 +221,16 @@ def analyze(processed_dir: Path = DEFAULT_DIR) -> dict[str, Any]:
             "price_bands": "Within each type, quintiles of article-week-channel average source price; no monetary label.",
             "concentration": "Share of type purchases attributed to top product_code styles.",
             "minimum_color_sample": 100,
-            "opportunity_priority": "Ranks historical scale only; trend, inventory, profitability and customer fit unavailable.",
         },
         "product_groups": group_rows, "product_types": type_rows,
         "seasonality_and_growth": seasonality, "color_mix": color_rows,
         "relative_source_price_bands": price_rows, "channel_mix": channel_rows,
-        "style_concentration": concentration, "opportunity_candidates": opportunities,
-        "planning_brief_template": {
-            "category": None, "planning_season": None, "historical_evidence": None,
-            "color_direction_hypothesis": None, "relative_source_price_position": None,
-            "silhouette_hypothesis": None, "material_hypothesis": None,
-            "assumptions_to_validate": [], "image_prompt": {
-                "evidence_based_inputs": [], "creative_hypotheses": [], "constraints": ["Do not state unsupported market demand or customer preference as fact."],
-                "reference_image_source": None, "reference_rights_status": "must be checked before use",
-            },
-        },
+        "style_concentration": concentration,
         "limitations": [
             "Historical Kaggle public competition dataset, not current internal H&M data.",
             "Purchase rows are not unique orders, customers, or future demand.",
             "No explicit merchandising season, inventory, returns, stockouts, launch date, customer attributes, or market trend data.",
             "Price remains unverified source numeric scale; channel labels remain unmapped source codes.",
-            "Image generation provider/model is not configured; this report creates a traceable brief template and prompt inputs, not a generated image.",
         ],
     }
     return result
@@ -276,27 +239,26 @@ def analyze(processed_dir: Path = DEFAULT_DIR) -> dict[str, Any]:
 def write_outputs(processed_dir: Path = DEFAULT_DIR) -> dict[str, Any]:
     root = processed_dir.expanduser().resolve()
     result = analyze(root)
-    path = root / "hm_planning_analysis.json"
+    path = root / "hm_sales_analysis.json"
     path.write_text(json.dumps(result, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     manifest_path = root / "manifest.json"
     manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
-    manifest.setdefault("planning_analysis", {}).update({"version": VERSION, "output": path.name, "sha256": _sha256(path), "purchase_rows": result["purchase_rows"]})
+    manifest.setdefault("sales_analysis", {}).update({"version": VERSION, "output": path.name, "sha256": _sha256(path), "purchase_rows": result["purchase_rows"]})
     manifest_path.write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return result
 
 
 def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(description="Generate article-level H&M product-planning analysis.")
+    parser = argparse.ArgumentParser(description="Generate article-level H&M historical sales analysis.")
     parser.add_argument("--processed-dir", type=Path, default=DEFAULT_DIR)
     args = parser.parse_args(argv)
     try:
         result = write_outputs(args.processed_dir)
-    except (OSError, ValueError, json.JSONDecodeError, KeyError) as exc:
-        print(f"H&M planning analysis failed: {exc}", file=sys.stderr)
+    except (OSError, ValueError, json.JSONDecodeError, KeyError):
+        print("H&M historical sales analysis failed.", file=sys.stderr)
         return 2
-    print(json.dumps({"output": str((args.processed_dir / "hm_planning_analysis.json").resolve()),
+    print(json.dumps({"output": str((args.processed_dir / "hm_sales_analysis.json").resolve()),
                       "purchase_rows": result["purchase_rows"], "product_types": len(result["product_types"]),
-                      "opportunity_candidates": len(result["opportunity_candidates"]),
                       "joined_weekly_rows": result["joined_weekly_rows"], "unmatched_weekly_rows": result["unmatched_weekly_rows"]}, ensure_ascii=False, indent=2))
     return 0
 
