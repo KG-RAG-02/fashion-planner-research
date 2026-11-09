@@ -11,7 +11,15 @@ from .domain.models import (
     ResultStatus,
     SourceReport,
 )
-from .domain.sales import SalesDataResult, SalesObservation
+from .domain.sales import (
+    MarketDataResult,
+    MarketObservation,
+    MissingData,
+    SalesDataResult,
+    SalesObservation,
+    UnitEconomicsCalculation,
+    UnitEconomicsResult,
+)
 from .sources.composite import CompositeMarketResearchSource
 from .sources.noop import NoConfiguredSources
 from .workflows.market_research import MarketResearchAgent
@@ -31,4 +39,9 @@ __all__ = [
     "SourceReport",
     "SalesDataResult",
     "SalesObservation",
+    "MarketDataResult",
+    "MarketObservation",
+    "MissingData",
+    "UnitEconomicsCalculation",
+    "UnitEconomicsResult",
 ]

@@ -10,7 +10,7 @@ from ..domain.models import (
     ResultStatus,
     SourceReport,
 )
-from ..domain.sales import SalesDataResult
+from ..domain.sales import MarketDataResult, SalesDataResult, UnitEconomicsResult
 from .protocol import MarketResearchSource
 
 
@@ -106,17 +106,49 @@ class CompositeMarketResearchSource:
         if sales_reports:
             observations = tuple(item for sales in sales_reports for item in sales.observations)
             sales_statuses = {sales.status for sales in sales_reports}
-            sales_status = "ok" if observations and sales_statuses == {"ok"} else "partial" if observations else "no_results"
+            sales_status = _domain_status(sales_statuses, bool(observations))
             sales_data = SalesDataResult(
                 status=sales_status,
                 observations=observations,
                 limitations=tuple(dict.fromkeys(item for sales in sales_reports for item in sales.limitations)),
                 errors=tuple(item for sales in sales_reports for item in sales.errors),
                 follow_up_questions=tuple(item for sales in sales_reports for item in sales.follow_up_questions),
+                missing_data=tuple(item for sales in sales_reports for item in sales.missing_data),
+            )
+
+        market_reports = [report.market_data for report in reports if report.market_data is not None]
+        market_data = None
+        if market_reports:
+            observations = tuple(item for market in market_reports for item in market.observations)
+            domain_statuses = {market.status for market in market_reports}
+            domain_status = _domain_status(domain_statuses, bool(observations))
+            market_data = MarketDataResult(
+                status=domain_status,
+                observations=observations,
+                limitations=tuple(dict.fromkeys(item for market in market_reports for item in market.limitations)),
+                errors=tuple(item for market in market_reports for item in market.errors),
+                missing_data=tuple(item for market in market_reports for item in market.missing_data),
+            )
+
+        economics_reports = [report.unit_economics for report in reports if report.unit_economics is not None]
+        unit_economics = None
+        if economics_reports:
+            calculations = tuple(item for economics in economics_reports for item in economics.calculations)
+            domain_statuses = {economics.status for economics in economics_reports}
+            unit_economics = UnitEconomicsResult(
+                status=_domain_status(domain_statuses, bool(calculations)),
+                calculations=calculations,
+                limitations=tuple(dict.fromkeys(item for economics in economics_reports for item in economics.limitations)),
+                errors=tuple(item for economics in economics_reports for item in economics.errors),
+                missing_data=tuple(item for economics in economics_reports for item in economics.missing_data),
             )
 
         has_sales_observations = bool(sales_data and sales_data.observations)
-        has_source_content = bool(findings or evidence or has_sales_observations)
+        has_source_content = bool(
+            findings or evidence or has_sales_observations
+            or (market_data and market_data.observations)
+            or (unit_economics and unit_economics.calculations)
+        )
         if not reports:
             status = ResultStatus.ERROR
         elif any(report.status == ResultStatus.PARTIAL for report in reports):
@@ -148,4 +180,16 @@ class CompositeMarketResearchSource:
             limitations=tuple(dict.fromkeys(limitations)),
             errors=tuple(errors),
             sales_data=sales_data,
+            market_data=market_data,
+            unit_economics=unit_economics,
         )
+
+
+def _domain_status(statuses: set[str], has_observations: bool) -> str:
+    if "partial" in statuses or ("ok" in statuses and "no_results" in statuses):
+        return "partial"
+    if "error" in statuses:
+        return "partial" if has_observations else "error"
+    if has_observations:
+        return "ok"
+    return "no_results"

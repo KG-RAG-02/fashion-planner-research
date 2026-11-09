@@ -13,6 +13,7 @@ from ..domain.models import (
 )
 from ..sources.noop import NoConfiguredSources
 from ..sources.protocol import MarketResearchSource
+from ..domain.sales import MarketDataResult, UnitEconomicsResult
 
 
 class MarketResearchAgent:
@@ -99,6 +100,12 @@ class MarketResearchAgent:
             report,
             context_limitations=context_limitations,
             incomplete_context=incomplete_context,
+            requested_scope={
+                "category": context.requested_category,
+                "metrics": list(context.requested_metrics),
+                "geography": context.requested_geography,
+                "channel": context.requested_channel,
+            },
         )
 
     def _assemble(
@@ -108,6 +115,7 @@ class MarketResearchAgent:
         *,
         context_limitations: tuple[str, ...] = (),
         incomplete_context: bool = False,
+        requested_scope: dict | None = None,
     ) -> MarketResearchResult:
         errors = list(report.errors)
         limitations = [*report.limitations, *context_limitations]
@@ -168,6 +176,40 @@ class MarketResearchAgent:
                 limitations=sales_data.limitations,
                 errors=sales_data.errors,
                 follow_up_questions=sales_data.follow_up_questions,
+                missing_data=sales_data.missing_data,
+            )
+        market_data = report.market_data
+        if market_data is not None:
+            valid_market = tuple(
+                item for item in market_data.observations
+                if set(item.evidence_ids).issubset(permitted_evidence)
+            )
+            if len(valid_market) != len(market_data.observations):
+                limitations.append("Market observations without authorized, resolvable Evidence were omitted.")
+                errors.append(AgentError("INVALID_MARKET_EVIDENCE", "Some market observations did not reference authorized Evidence."))
+            market_data = MarketDataResult(
+                status=("partial" if market_data.status == "ok" and len(valid_market) != len(market_data.observations) else market_data.status),
+                observations=valid_market,
+                limitations=market_data.limitations,
+                errors=market_data.errors,
+                missing_data=market_data.missing_data,
+            )
+        unit_economics = report.unit_economics
+        if unit_economics is not None:
+            valid_calculations = tuple(
+                item for item in unit_economics.calculations
+                if set(item.evidence_ids).issubset(permitted_evidence)
+                and set(item.input_evidence_ids).issubset(permitted_evidence)
+            )
+            if len(valid_calculations) != len(unit_economics.calculations):
+                limitations.append("Unit-economics calculations without authorized, resolvable input and result Evidence were omitted.")
+                errors.append(AgentError("INVALID_UNIT_ECONOMICS_EVIDENCE", "Some calculations did not reference authorized input and result Evidence."))
+            unit_economics = UnitEconomicsResult(
+                status=("partial" if unit_economics.status == "ok" and len(valid_calculations) != len(unit_economics.calculations) else unit_economics.status),
+                calculations=valid_calculations,
+                limitations=unit_economics.limitations,
+                errors=unit_economics.errors,
+                missing_data=unit_economics.missing_data,
             )
         unapproved_ids = set(all_evidence) - set(permitted_evidence)
         if unapproved_ids:
@@ -218,6 +260,8 @@ class MarketResearchAgent:
             findings_tuple
             or evidence
             or (sales_data is not None and sales_data.observations)
+            or (market_data is not None and market_data.observations)
+            or (unit_economics is not None and unit_economics.calculations)
         )
         if report.status == ResultStatus.NO_RESULTS and has_content:
             errors.append(
@@ -241,6 +285,23 @@ class MarketResearchAgent:
         else:
             status = ResultStatus.OK
 
+        requested_metrics = {item.casefold() for item in (requested_scope or {}).get("metrics", [])}
+        expected_domains = set()
+        if requested_metrics & {"sales", "sales_units", "sales_revenue", "units_sold"}:
+            expected_domains.add("sales")
+        if requested_metrics & {"market_size", "retail_sales_index", "market_share", "trend_interest"}:
+            expected_domains.add("market")
+        if requested_metrics & {"unit_margin", "cost_margin", "margin", "gross_margin"}:
+            expected_domains.add("unit_economics")
+        missing_expected = (
+            ("sales" in expected_domains and (sales_data is None or sales_data.status == "no_results"))
+            or ("market" in expected_domains and (market_data is None or market_data.status == "no_results"))
+            or ("unit_economics" in expected_domains and (unit_economics is None or unit_economics.status == "no_results"))
+        )
+        if missing_expected and status in {ResultStatus.OK, ResultStatus.NO_RESULTS}:
+            status = ResultStatus.PARTIAL if has_content else ResultStatus.NO_RESULTS
+            limitations.append("One or more requested data domains returned no usable observations or calculations.")
+
         return MarketResearchResult(
             schema_version=self.schema_version,
             request_id=request_id,
@@ -253,6 +314,9 @@ class MarketResearchAgent:
             errors=tuple(errors),
             data_limitations=report.data_limitations,
             sales_data=sales_data,
+            market_data=market_data,
+            unit_economics=unit_economics,
+            requested_scope=requested_scope,
         )
 
     def _failure(

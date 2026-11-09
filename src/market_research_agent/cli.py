@@ -44,11 +44,14 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--inputs-json", required=True, help="JSON object with planning_request, trend_result, inventory_product_result")
     parser.add_argument("--metrics", default="", help="Optional comma-separated research metrics")
+    parser.add_argument("--geography", default="KR", help="Requested market geography (default: KR)")
+    parser.add_argument("--channel", default="online", help="Requested market channel (default: online)")
     parser.add_argument("--hm-processed-dir", default=os.getenv("VOGUE_HM_PROCESSED_DIR", "data/processed/hm-personalized-fashion-recommendations"))
     parser.add_argument("--hm-category-map", action="append", default=[], help="Explicit source-to-request category mapping, e.g. 'Garment Upper body=Outerwear'")
     parser.add_argument("--hm-mapping-version", default=os.getenv("VOGUE_HM_MAPPING_VERSION", ""))
     parser.add_argument("--hm-usage-authorized", action="store_true", help="Declare externally confirmed authorization for this source")
     parser.add_argument("--proposal-v1-1", action="store_true", help="Emit the explicitly unratified sales-data extension")
+    parser.add_argument("--proposal-v1-2", action="store_true", help="Emit the explicitly unratified separated sales, market, and unit-economics proposal")
     args = parser.parse_args(argv)
 
     try:
@@ -63,6 +66,8 @@ def main(argv: list[str] | None = None) -> int:
             trend_result=trend, inventory_product_result=inventory,
             requested_category=category,
             requested_metrics=tuple(x.strip() for x in args.metrics.split(",") if x.strip()),
+            requested_geography=args.geography.strip() or None,
+            requested_channel=args.channel.strip() or None,
         )
         sources = []
         if args.hm_category_map:
@@ -80,7 +85,15 @@ def main(argv: list[str] | None = None) -> int:
             ))
         source = CompositeMarketResearchSource(sources) if sources else NoConfiguredSources()
         result = MarketResearchAgent(source).run(context)
-        output = result.to_proposal_dict() if args.proposal_v1_1 else result.to_dict()
+        if args.proposal_v1_1 and args.proposal_v1_2:
+            raise ValueError("Choose only one proposal schema version.")
+        output = (
+            result.to_proposal_v1_2_dict()
+            if args.proposal_v1_2
+            else result.to_proposal_dict()
+            if args.proposal_v1_1
+            else result.to_dict()
+        )
         json.dump(output, sys.stdout, ensure_ascii=False, indent=2)
         sys.stdout.write("\n")
         return 0

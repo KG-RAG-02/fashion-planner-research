@@ -11,7 +11,15 @@ from .models import (
     ResultStatus,
     SourceReport,
 )
-from .sales import SalesDataResult, SalesObservation
+from .sales import (
+    MarketDataResult,
+    MarketObservation,
+    MissingData,
+    SalesDataResult,
+    SalesObservation,
+    UnitEconomicsCalculation,
+    UnitEconomicsResult,
+)
 
 __all__ = [
     "AgentError",
@@ -25,4 +33,9 @@ __all__ = [
     "SourceReport",
     "SalesDataResult",
     "SalesObservation",
+    "MarketDataResult",
+    "MarketObservation",
+    "MissingData",
+    "UnitEconomicsCalculation",
+    "UnitEconomicsResult",
 ]
