@@ -28,6 +28,10 @@ class EvidenceChunk:
     channel: str | None = None
     category: str | None = None
     document_version: str | None = None
+    page_or_section: str | None = None
+    content_hash: str | None = None
+    mapping_version: str | None = None
+    access_scope: str | None = None
 
     def __post_init__(self) -> None:
         required = (self.evidence_id, self.source_id, self.source_name, self.text, self.locator)

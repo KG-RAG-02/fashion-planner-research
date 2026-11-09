@@ -13,7 +13,31 @@ from ..domain.models import (
 )
 from ..sources.shared.noop import NoConfiguredSources
 from ..sources.shared.protocol import MarketResearchSource
-from ..domain.sales import MarketDataResult, UnitEconomicsResult
+from ..domain.sales import ComparabilityResult, MarketDataResult, MissingData, UnitEconomicsResult, compare_sales_to_market
+from ..sources.market.analysis import calculate_market_series_change
+from ..sources.market.evidence_retrieval import MarketEvidenceRetriever, RetrievalQuery, RetrievedEvidence
+from ..domain.models import EvidenceRecord
+from dataclasses import asdict, dataclass
+import math
+
+
+@dataclass(frozen=True, slots=True)
+class RetrievalResult:
+    domain: str
+    status: str
+    hits: tuple[RetrievedEvidence, ...] = ()
+    missing_data: tuple[str, ...] = ()
+
+    def to_dict(self) -> dict:
+        return {
+            "domain": self.domain,
+            "status": self.status,
+            "hits": [
+                {"chunk": asdict(hit.chunk) | {"permission_status": hit.chunk.permission_status.value}, "score": hit.score}
+                for hit in self.hits
+            ],
+            "missing_data": list(self.missing_data),
+        }
 
 
 class MarketResearchAgent:
@@ -24,8 +48,10 @@ class MarketResearchAgent:
     # schema draft are not advertised as a shared wire-contract version.
     schema_version = "1.0"
 
-    def __init__(self, source: MarketResearchSource | None = None) -> None:
+    def __init__(self, source: MarketResearchSource | None = None, *, sales_retriever: MarketEvidenceRetriever | None = None, market_retriever: MarketEvidenceRetriever | None = None) -> None:
         self._source = source or NoConfiguredSources()
+        self._sales_retriever = sales_retriever
+        self._market_retriever = market_retriever
 
     def run(self, context: MarketResearchContext) -> MarketResearchResult:
         if not context.request_id.strip():
@@ -95,6 +121,65 @@ class MarketResearchAgent:
                 limitations=context_limitations,
             )
 
+        retrieval_evidence: list[EvidenceRecord] = []
+        retrieval_errors: list[AgentError] = []
+        retrieval_limitations: list[str] = []
+        retrieval_results = {}
+        if context.requested_query and context.requested_query.strip():
+            for domain, retriever in (("sales", self._sales_retriever), ("market", self._market_retriever)):
+                hits: tuple[RetrievedEvidence, ...] = ()
+                missing = ()
+                status = "no_results"
+                if retriever is None:
+                    missing = ("retriever_not_configured",)
+                else:
+                    try:
+                        raw_hits = retriever.retrieve(RetrievalQuery(
+                            raw_query=context.requested_query,
+                            category=context.requested_category,
+                            geography=context.requested_geography,
+                            channel=context.requested_channel,
+                            metrics=context.requested_metrics,
+                            as_of_or_period=context.requested_period,
+                        ))
+                        hits = tuple(hit for hit in raw_hits if isinstance(hit, RetrievedEvidence)
+                                     and hit.chunk.permission_status == PermissionStatus.AUTHORIZED
+                                     and math.isfinite(hit.score))
+                        status = "ok" if hits else "no_results"
+                        if len(hits) != len(raw_hits):
+                            missing = ("unauthorized_or_invalid_hits_omitted",)
+                            status = "partial" if hits else "no_results"
+                    except PermissionError:
+                        missing = ("access_denied",)
+                        status = "error"
+                        retrieval_errors.append(AgentError("RETRIEVAL_FORBIDDEN", f"The {domain} evidence retriever denied access."))
+                    except Exception:
+                        missing = ("retrieval_error",)
+                        status = "error"
+                        retrieval_errors.append(AgentError("RETRIEVAL_UNAVAILABLE", f"The {domain} evidence retriever could not be queried."))
+                for hit in hits:
+                    chunk = hit.chunk
+                    retrieval_evidence.append(EvidenceRecord(
+                        evidence_id=chunk.evidence_id, source_id=chunk.source_id,
+                        source_type=f"{domain}_explanatory_document", source_name=chunk.source_name,
+                        locator=chunk.locator, published_at=chunk.published_at,
+                        observed_at=chunk.observed_at, fetched_at=chunk.fetched_at,
+                        geography=chunk.geography, channel=chunk.channel,
+                        product_mapping=chunk.mapping_version or chunk.category,
+                        permission_status=PermissionStatus.AUTHORIZED,
+                    ))
+                retrieval_results[domain] = RetrievalResult(domain, status, hits, missing)
+        if report.status == ResultStatus.NO_RESULTS and retrieval_evidence:
+            retrieval_limitations.append("Authorized explanatory evidence was retrieved, but no structured observations or factual synthesis were produced.")
+        report = SourceReport(
+            status=ResultStatus.PARTIAL if report.status == ResultStatus.NO_RESULTS and retrieval_evidence else report.status,
+            findings=report.findings,
+            evidence=(*report.evidence, *retrieval_evidence), limitations=(*report.limitations, *retrieval_limitations),
+            errors=(*report.errors, *retrieval_errors), data_limitations=report.data_limitations,
+            sales_data=report.sales_data, market_data=report.market_data,
+            unit_economics=report.unit_economics,
+        )
+
         return self._assemble(
             context.request_id,
             report,
@@ -106,7 +191,10 @@ class MarketResearchAgent:
                 "geography": context.requested_geography,
                 "channel": context.requested_channel,
                 "query": context.requested_query,
+                "period": context.requested_period,
             },
+            sales_retrieval=retrieval_results.get("sales"),
+            market_retrieval=retrieval_results.get("market"),
         )
 
     def _assemble(
@@ -117,6 +205,8 @@ class MarketResearchAgent:
         context_limitations: tuple[str, ...] = (),
         incomplete_context: bool = False,
         requested_scope: dict | None = None,
+        sales_retrieval=None,
+        market_retrieval=None,
     ) -> MarketResearchResult:
         errors = list(report.errors)
         limitations = [*report.limitations, *context_limitations]
@@ -178,6 +268,7 @@ class MarketResearchAgent:
                 errors=sales_data.errors,
                 follow_up_questions=sales_data.follow_up_questions,
                 missing_data=sales_data.missing_data,
+                calculations=sales_data.calculations,
             )
         market_data = report.market_data
         if market_data is not None:
@@ -194,6 +285,7 @@ class MarketResearchAgent:
                 limitations=market_data.limitations,
                 errors=market_data.errors,
                 missing_data=market_data.missing_data,
+                calculations=market_data.calculations,
             )
         unit_economics = report.unit_economics
         if unit_economics is not None:
@@ -256,6 +348,19 @@ class MarketResearchAgent:
             findings.append(finding)
 
         evidence = tuple(permitted_evidence.values())
+        def keep_resolvable_hits(retrieval):
+            if retrieval is None:
+                return None
+            kept = tuple(hit for hit in retrieval.hits if hit.chunk.evidence_id in permitted_evidence)
+            removed = len(kept) != len(retrieval.hits)
+            return RetrievalResult(
+                retrieval.domain,
+                "partial" if removed and kept else "no_results" if removed or not kept else retrieval.status,
+                kept,
+                (*retrieval.missing_data, *(("evidence_identity_conflict",) if removed else ())),
+            )
+        sales_retrieval = keep_resolvable_hits(sales_retrieval)
+        market_retrieval = keep_resolvable_hits(market_retrieval)
         findings_tuple = tuple(findings)
         has_content = bool(
             findings_tuple
@@ -288,9 +393,9 @@ class MarketResearchAgent:
 
         requested_metrics = {item.casefold() for item in (requested_scope or {}).get("metrics", [])}
         expected_domains = set()
-        if requested_metrics & {"sales", "sales_units", "sales_revenue", "units_sold"}:
+        if requested_metrics & {"sales", "category_sales", "purchase_rows", "sales_units", "sales_revenue", "units_sold"}:
             expected_domains.add("sales")
-        if requested_metrics & {"market_size", "retail_sales_index", "market_share", "trend_interest"}:
+        if requested_metrics & {"market_size", "market_size_growth", "market_growth", "retail_sales_index", "retail_sales_index_change", "market_share", "trend_interest"}:
             expected_domains.add("market")
         if requested_metrics & {"unit_margin", "cost_margin", "margin", "gross_margin"}:
             expected_domains.add("unit_economics")
@@ -303,6 +408,68 @@ class MarketResearchAgent:
             status = ResultStatus.PARTIAL if has_content else ResultStatus.NO_RESULTS
             limitations.append("One or more requested data domains returned no usable observations or calculations.")
 
+        comparisons = []
+        comparison_truncated = False
+        if sales_data and market_data:
+            for sales_item in sales_data.observations:
+                for market_item in market_data.observations:
+                    if sales_item.category and market_item.category and sales_item.category.casefold() == market_item.category.casefold():
+                        if len(comparisons) == 5000:
+                            comparison_truncated = True
+                            break
+                        comparisons.append(compare_sales_to_market(
+                            sales_item, market_item,
+                            sales_permission_authorized=True,
+                            market_permission_authorized=True,
+                        ))
+                if comparison_truncated:
+                    break
+        if comparison_truncated:
+            comparisons.append(ComparabilityResult(
+                False, mismatches=("comparison_matrix:limited_to_5000_pairs",),
+            ))
+            limitations.append("Comparability matrix was limited to 5,000 observation pairs; additional pairs were not evaluated.")
+            if status == ResultStatus.OK:
+                status = ResultStatus.PARTIAL
+        requested_metrics = {str(item).casefold() for item in (requested_scope or {}).get("metrics", [])}
+        if market_data and requested_metrics & {"market_size_growth", "retail_sales_index_change", "market_growth"}:
+            groups: dict[tuple, list] = {}
+            for item in market_data.observations:
+                key = (item.metric_name, item.measure_type, item.unit, item.currency, item.geography,
+                       item.channel, item.category, item.population, item.product_mapping_id,
+                       item.product_mapping_version, item.period_grain, item.metric_definition)
+                groups.setdefault(key, []).append(item)
+            calculations = list(market_data.calculations)
+            calculation_issues = []
+            for series in groups.values():
+                series.sort(key=lambda item: (item.period_start or "", item.period_end or "", item.observation_id))
+                for baseline, current in zip(series, series[1:]):
+                    try:
+                        calculations.extend(calculate_market_series_change(baseline, current))
+                    except (ValueError, TypeError):
+                        calculation_issues.append(f"Series {baseline.observation_id} → {current.observation_id} was not comparable for the requested calculation.")
+            calculation_missing = (MissingData(
+                "market_data.calculations", "not_available_from_source",
+                "One or more requested calculations were blocked by incompatible or incomplete series scope.",
+            ),) if calculation_issues else ()
+            market_data = MarketDataResult(
+                status="partial" if calculation_issues and market_data.status == "ok" else market_data.status,
+                observations=market_data.observations,
+                limitations=(*market_data.limitations, *calculation_issues), errors=market_data.errors,
+                missing_data=(*market_data.missing_data, *calculation_missing),
+                calculations=tuple(calculations),
+            )
+            if calculation_issues:
+                limitations.append("One or more requested market calculations were blocked by incompatible or incomplete series scope.")
+                if status == ResultStatus.OK:
+                    status = ResultStatus.PARTIAL
+        domain_statuses = [
+            item.status for item in (sales_data, market_data, unit_economics) if item is not None
+        ]
+        if any(item == "error" for item in domain_statuses):
+            status = ResultStatus.PARTIAL if has_content else ResultStatus.ERROR
+        elif any(item == "partial" for item in domain_statuses) and has_content and status == ResultStatus.OK:
+            status = ResultStatus.PARTIAL
         return MarketResearchResult(
             schema_version=self.schema_version,
             request_id=request_id,
@@ -318,6 +485,9 @@ class MarketResearchAgent:
             market_data=market_data,
             unit_economics=unit_economics,
             requested_scope=requested_scope,
+            sales_retrieval=sales_retrieval,
+            market_retrieval=market_retrieval,
+            comparability=tuple(comparisons),
         )
 
     def _failure(

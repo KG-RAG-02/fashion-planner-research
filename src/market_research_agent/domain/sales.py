@@ -11,6 +11,8 @@ import math
 from dataclasses import asdict, dataclass
 from typing import Any, Mapping
 
+from .calculations import CalculationRecord
+
 
 @dataclass(frozen=True, slots=True)
 class SalesObservation:
@@ -55,6 +57,7 @@ class SalesDataResult:
     errors: tuple[str, ...] = ()
     follow_up_questions: tuple[str, ...] = ()
     missing_data: tuple["MissingData", ...] = ()
+    calculations: tuple[CalculationRecord, ...] = ()
 
     def __post_init__(self) -> None:
         if self.status not in {"ok", "partial", "no_results", "error"}:
@@ -68,6 +71,7 @@ class SalesDataResult:
         return {
             "status": self.status,
             "observations": [item.to_dict() for item in self.observations],
+            "calculations": [item.to_dict() for item in self.calculations],
             "limitations": list(self.limitations),
             "errors": list(self.errors),
             "follow_up_questions": list(self.follow_up_questions),
@@ -146,6 +150,8 @@ class ComparabilityResult:
     comparable: bool
     matches: tuple[str, ...] = ()
     mismatches: tuple[str, ...] = ()
+    sales_observation_id: str | None = None
+    market_observation_id: str | None = None
 
     def to_dict(self) -> dict[str, Any]:
         return asdict(self)
@@ -191,7 +197,7 @@ def compare_sales_to_market(
         mismatches.append("permission:not_authorized")
     if sales.unit == "purchase_rows":
         mismatches.append("sales_measure:historical_purchase_rows_not_market_size")
-    return ComparabilityResult(not mismatches, tuple(matches), tuple(mismatches))
+    return ComparabilityResult(not mismatches, tuple(matches), tuple(mismatches), sales.observation_id, market.observation_id)
 
 
 @dataclass(frozen=True, slots=True)
@@ -201,6 +207,7 @@ class MarketDataResult:
     limitations: tuple[str, ...] = ()
     errors: tuple[str, ...] = ()
     missing_data: tuple[MissingData, ...] = ()
+    calculations: tuple[CalculationRecord, ...] = ()
 
     def __post_init__(self) -> None:
         if self.status not in {"ok", "partial", "no_results", "error"}:
@@ -212,6 +219,7 @@ class MarketDataResult:
         return {
             "status": self.status,
             "observations": [item.to_dict() for item in self.observations],
+            "calculations": [item.to_dict() for item in self.calculations],
             "limitations": list(self.limitations),
             "errors": list(self.errors),
             "missing_data": [item.to_dict() for item in self.missing_data],

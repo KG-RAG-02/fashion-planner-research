@@ -55,6 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--market-manifest", default="", help="Explicit source/permission manifest path for the market CSV")
     parser.add_argument("--proposal-v1-1", action="store_true", help="Emit the explicitly unratified sales-data extension")
     parser.add_argument("--proposal-v1-2", action="store_true", help="Emit the explicitly unratified separated sales, market, and unit-economics proposal")
+    parser.add_argument("--proposal-v1-3", action="store_true", help="Emit the explicitly unratified calculations, comparability, and retrieval proposal")
     args = parser.parse_args(argv)
 
     try:
@@ -75,6 +76,10 @@ def main(argv: list[str] | None = None) -> int:
             requested_geography=args.geography.strip() or None,
             requested_channel=args.channel.strip() or None,
             requested_query=query.strip() if isinstance(query, str) and query.strip() else None,
+            requested_period=(
+                context_data.get("period") if isinstance(context_data.get("period"), str)
+                else request.get("period") if isinstance(request.get("period"), str) else None
+            ),
         )
         sources = []
         if bool(args.market_observations_csv) != bool(args.market_manifest):
@@ -98,9 +103,12 @@ def main(argv: list[str] | None = None) -> int:
             ))
         source = CompositeMarketResearchSource(sources) if sources else NoConfiguredSources()
         result = MarketResearchAgent(source).run(context)
-        if args.proposal_v1_1 and args.proposal_v1_2:
+        if sum((args.proposal_v1_1, args.proposal_v1_2, args.proposal_v1_3)) > 1:
             raise ValueError("Choose only one proposal schema version.")
         output = (
+            result.to_proposal_v1_3_dict()
+            if args.proposal_v1_3
+            else
             result.to_proposal_v1_2_dict()
             if args.proposal_v1_2
             else result.to_proposal_dict()

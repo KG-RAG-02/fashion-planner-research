@@ -24,10 +24,11 @@ Project_06의 책임 정리 과정에서 H&M 과거자료 처리·품질·집계
 - `CompositeMarketResearchSource`는 호출자가 제공한 source adapter들의 결과를 결합하고, 일부 source 실패 시 가용 결과와 오류를 함께 보존합니다. 현재 승인된 source adapter는 연결되어 있지 않습니다.
 - H&M historical adapter는 카테고리 매핑 후 `purchase_rows`를 주 단위 관측으로 보존합니다. 이 값은 역사적 거래 행 수이며 현재 판매나 수요를 뜻하지 않습니다.
 - `ObservationComparabilityValidator` / `compare_sales_to_market`는 판매·시장 관측의 지역, 채널, 기간, 카테고리, 단위, 정의, 매핑 및 권한을 확인합니다. 이는 비교 가능성만 판정하고 비율·시장점유율·마진을 계산하지 않습니다. 미확인 범위, 권한 미승인, H&M `purchase_rows`는 비교를 차단합니다.
-- 검색/RAG는 아직 MarketResearchAgent 실행 경로에 연결되어 있지 않습니다. 숫자 분석은 결정론적 계산으로, RAG는 권한 확인된 설명 문서의 정의·방법론 검색에 한정하는 설계 제안입니다. 실제 문서 색인과 외부 자료원 호출은 승인·설정 전에는 수행하지 않습니다.
-- `MarketEvidenceRetriever`는 원문 query와 구조화 scope, 출처·위치·시점·지역·채널·분류·문서 버전이 포함된 청크 및 검색 결과 계약만 정의합니다. 승인되지 않은 청크는 색인 후보에서 제외하고 결과 생성도 거부합니다. 벡터 저장소/모델은 선택하지 않았고 MarketResearchAgent 호출에 아직 연결되지 않았습니다.
+- 숫자 분석은 구조화된 승인 관측값에 한해 결정론적으로 수행합니다. 시장 시계열 변화 계산은 같은 지표·측정 유형·단위·지역·채널·분류·모집단·매핑·주기·정의이고 기간이 순차일 때만 가능합니다. 계산에는 입력 Observation/Evidence ID와 공식 버전을 기록합니다. 미승인 산식의 원가마진은 계산하지 않습니다.
+- `MarketEvidenceRetriever`는 주입 가능한 경로로 MarketResearchAgent에 연결되어 원문 query와 구조화 scope를 전달하고 승인된 결과만 Evidence로 보존합니다. 기본 실행에는 retriever, 벡터 저장소, 임베딩·생성 모델이 설정되어 있지 않습니다. 검색 근거를 바탕으로 서술형 시장 주장을 생성하는 기능도 구현하지 않았습니다.
+- 판매-시장 비교 가능성은 카테고리 내 observation pair별로 차원별 일치/불일치와 `not_comparable`을 기록하며 산술·점유율을 계산하지 않습니다. 비교 행렬은 최대 5,000쌍이며 초과 시 제한을 기록합니다.
 
-이 패키지는 요청·트렌드·재고 입력을 opaque dictionary로 전달합니다. 실제 공통 입력 스키마가 다른 저장소와 합의되면 해당 계약 어댑터를 추가해야 합니다. `contracts/schemas/market-research-result.schema.json`은 현재 로컬 1.0 구현을 설명하며, `contracts/schemas/proposals/`의 1.1은 새 판매·시장 경계를 검토하기 위한 제안입니다. 어느 파일도 다른 에이전트 저장소와 합의된 wire contract를 뜻하지 않습니다.
+이 패키지는 요청·트렌드·재고 입력을 opaque dictionary로 전달합니다. 실제 공통 입력 스키마가 다른 저장소와 합의되면 해당 계약 어댑터를 추가해야 합니다. `contracts/schemas/market-research-result.schema.json`은 현재 로컬 1.0 구현을 설명하며, `contracts/schemas/proposals/`의 1.1·1.2·1.3은 새 판매·시장 경계를 검토하기 위한 제안입니다. 어느 파일도 다른 에이전트 저장소와 합의된 wire contract를 뜻하지 않습니다.
 
 ## 빠른 실행
 
@@ -60,9 +61,9 @@ PYTHONPATH=src python3 -m market_research_agent.cli \\
   --proposal-v1-2
 ```
 
-입력 예시 파일은 이 저장소의 `examples/fixtures/market-research-input.example.json`을 참고하세요. 모든 상위 결과의 `request_id`가 일치해야 합니다. H&M 어댑터는 승인 여부가 별도 확인되지 않으면 수치 관측을 출력하지 않습니다. 실제 데이터 사용 승인을 받은 뒤에만 `--hm-usage-authorized`를 지정하십시오. 이 플래그는 승인 절차가 아니며, 호출자가 외부에서 확인한 승인을 선언합니다. 기본 1.0 직렬화는 기존 결과 스키마를 유지합니다. `--proposal-v1-1`은 이전 미합의 판매 데이터 확장, `--proposal-v1-2`는 판매·시장·원가/마진 영역이 분리된 최신 proposal을 출력합니다. 둘 다 공통 wire contract를 뜻하지 않습니다.
+입력 예시 파일은 이 저장소의 `examples/fixtures/market-research-input.example.json`을 참고하세요. 모든 상위 결과의 `request_id`가 일치해야 합니다. H&M 어댑터는 승인 여부가 별도 확인되지 않으면 파일을 읽지 않고 수치 관측을 내보내지 않습니다. 실제 데이터 사용 승인을 받은 뒤에만 `--hm-usage-authorized`를 지정하십시오. 이 플래그는 승인 절차가 아니며, 호출자가 외부에서 확인한 승인을 선언합니다. 기본 1.0 직렬화는 기존 결과 스키마를 유지합니다. `--proposal-v1-1`, `--proposal-v1-2`, `--proposal-v1-3`은 각각 명시적인 미합의 계약 제안을 출력하며 공통 wire contract를 뜻하지 않습니다. v1.3은 계산·비교 가능성·검색 결과를 추가합니다.
 
-승인된 시장자료 파일은 `--market-observations-csv`와 `--market-manifest`로 함께 전달할 수 있습니다. manifest의 `permission_status`가 `authorized`가 아니면 관측을 내보내지 않습니다. 입력의 원문 `planning_request.query`는 각 source adapter로 전달되고 1.2 proposal의 `requested_scope.query`에도 보존됩니다. CSV `search_text` 열이 있으면 원문 쿼리로 literal 검색하며, 열이 없으면 검색이 적용되지 않았다는 제한을 `partial` 상태로 표시합니다. 이 로컬 CSV 어댑터는 외부 API를 호출하지 않으며, KOSIS/Euromonitor/WGSN에 자동 연결되지 않습니다. CSV 열 정의, manifest 예시, H&M 처리 파일 준비와 두 어댑터를 한 번에 실행하는 방법은 [`docs/design/local-market-data-connection.md`](docs/design/local-market-data-connection.md)를 참고하세요. API 자격 증명은 CLI 인수나 데이터 manifest에 넣지 마세요.
+승인된 시장자료 파일은 `--market-observations-csv`와 `--market-manifest`로 함께 전달할 수 있습니다. manifest의 `permission_status`가 `authorized`가 아니면 관측을 내보내지 않습니다. 입력의 원문 `planning_request.query`는 source adapter에 전달되고 proposal의 `requested_scope.query`에도 보존됩니다. CSV `search_text`는 literal 필터이며 RAG가 아닙니다. 이 로컬 CSV 어댑터는 외부 API를 호출하지 않으며, KOSIS/Euromonitor/WGSN에 자동 연결되지 않습니다. CSV 열 정의, manifest 예시, H&M 처리 파일 준비와 두 어댑터를 한 번에 실행하는 방법은 [`docs/design/local-market-data-connection.md`](docs/design/local-market-data-connection.md)를 참고하세요. API 자격 증명은 CLI 인수나 데이터 manifest에 넣지 마세요.
 
 핵심 설정 환경변수는 `VOGUE_HM_PROCESSED_DIR`(처리 데이터 경로)와 `VOGUE_HM_MAPPING_VERSION`(분류 매핑 버전)입니다. 기존 `VOGUE_HM_ANALYSIS_PATH`는 historical prototype 경로 설정입니다. 이 패키지는 `.env`를 자동 로드하지 않으며, 필요한 값을 셸 또는 실행환경에서 설정해야 합니다. `.env`는 Git 제외 상태를 유지하십시오.
 

@@ -47,6 +47,7 @@ class MarketResearchContext:
     requested_geography: str | None = "KR"
     requested_channel: str | None = "online"
     requested_query: str | None = None
+    requested_period: str | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -130,6 +131,9 @@ class MarketResearchResult:
     market_data: MarketDataResult | None = None
     unit_economics: UnitEconomicsResult | None = None
     requested_scope: dict[str, Any] | None = None
+    sales_retrieval: Any | None = None
+    market_retrieval: Any | None = None
+    comparability: tuple[Any, ...] = ()
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible object matching the local result schema."""
@@ -139,6 +143,9 @@ class MarketResearchResult:
         payload.pop("market_data", None)
         payload.pop("unit_economics", None)
         payload.pop("requested_scope", None)
+        payload.pop("sales_retrieval", None)
+        payload.pop("market_retrieval", None)
+        payload.pop("comparability", None)
         payload |= {
             "status": self.status.value,
             "findings": [
@@ -160,6 +167,7 @@ class MarketResearchResult:
         payload["sales_data"] = self.sales_data.to_dict() if self.sales_data else None
         if payload["sales_data"] is not None:
             payload["sales_data"].pop("missing_data", None)
+            payload["sales_data"].pop("calculations", None)
         payload["data_limitations"] = [
             asdict(item) for item in self.data_limitations
         ]
@@ -188,6 +196,7 @@ class MarketResearchResult:
             for item in (self.sales_data.observations if self.sales_data else ())
         ]
         payload["sales_data"] = sales_block
+        sales_block.pop("calculations", None)
         payload["market_data"] = (
             self.market_data.to_dict()
             if self.market_data
@@ -197,6 +206,7 @@ class MarketResearchResult:
                 missing_data=(MissingData("market_data", "source_not_configured", "No market data source was configured."),),
             ).to_dict()
         )
+        payload["market_data"].pop("calculations", None)
         payload["unit_economics"] = (
             self.unit_economics.to_dict()
             if self.unit_economics
@@ -211,4 +221,15 @@ class MarketResearchResult:
             for block in (payload["sales_data"], payload["market_data"], payload["unit_economics"])
             for item in block["missing_data"]
         ]
+        return payload
+
+    def to_proposal_v1_3_dict(self) -> dict[str, Any]:
+        """Serialize the explicit, unratified analysis and retrieval proposal."""
+        payload = self.to_proposal_v1_2_dict()
+        payload["schema_version"] = "1.3-proposal"
+        for name, block in (("sales_data", self.sales_data), ("market_data", self.market_data)):
+            payload[name]["calculations"] = [item.to_dict() for item in block.calculations] if block else []
+        payload["sales_retrieval"] = self.sales_retrieval.to_dict() if self.sales_retrieval else None
+        payload["market_retrieval"] = self.market_retrieval.to_dict() if self.market_retrieval else None
+        payload["comparability"] = [asdict(item) for item in self.comparability]
         return payload
