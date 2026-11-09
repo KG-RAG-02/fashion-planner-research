@@ -4,7 +4,7 @@ VOGUE의 시장성 조사 단계에서 사용할 수 있는 계약 중립적 Pyt
 
 현재 저장소에는 승인된 실제 판매 원장·시장 자료 어댑터가 없어 운영 분석 시스템으로 동작하지 않습니다. 판매 관측 모델과 결과 정규화 경계는 Project_07 책임으로 구현하되, 자료원이 미구성된 경우 `no_results`와 제한 사유를 전달합니다. Kaggle/H&M 공개 과거 데이터와 합성 fixture는 운영 데이터로 사용하지 않습니다.
 
-Project_06의 책임 정리 과정에서 H&M 과거자료 처리·품질·집계 adapter, 판매 domain model 및 합성 판매/운영 시나리오 예제와 관련 테스트가 이 저장소로 옮겨졌습니다. Project_06은 새상품 기획 전용입니다. Project_07의 합성 merchandising 시나리오는 이관된 소프트웨어 검증/역사 데모이며, 현재 Market Research Agent의 승인 자료원이나 운영 분석 기능을 뜻하지 않습니다. 이동한 H&M adapter 역시 local historical research용이며 승인된 사내 sales connector가 아닙니다. 테스트는 임시 fixture를 만들며 원본 CSV나 Project_06의 로컬 `data/`를 필요로 하지 않습니다. 실제 원본·처리 데이터, `.env`, SQLite 데이터는 복사·이동하지 않았습니다.
+Project_06의 책임 정리 과정에서 H&M 과거자료 처리·품질·집계 adapter, 판매 domain model 및 합성 판매/운영 시나리오 예제와 관련 테스트가 이 저장소로 옮겨졌습니다. 2026-11-09에는 작업공간의 H&M Kaggle 원본 ZIP과 처리 산출물 디렉터리도 Project_06에서 이 저장소의 `data/raw/` 및 `data/processed/`로 이동했습니다. 이 파일들은 Git 제외 상태이며 이동은 이용 권한을 승인하지 않습니다. `.env`와 SQLite 데이터는 옮기지 않았습니다. Project_06은 새상품 기획 전용입니다. Project_07의 합성 merchandising 시나리오는 소프트웨어 검증/역사 데모이며 운영 분석 결과가 아닙니다. 이동한 H&M adapter는 local historical research용이며 승인된 사내 sales connector가 아닙니다. 테스트는 임시 fixture를 만들며 실제 Kaggle 원본 CSV를 요구하지 않습니다.
 
 ## 현재 동작
 
@@ -113,6 +113,8 @@ print(result.to_dict())
 - 시장 조사 품질 평가용 승인 데이터와 팀이 정할 합격 기준
 
 승인된 source adapter가 연결되기 전에는 판매량이나 시장 수치를 반환하지 않으며, 재고 스냅샷을 수요나 판매량의 대리 지표로 사용하지 않습니다. 출처·구현 경계의 검토 기록은 [`docs/design/notion-review.md`](docs/design/notion-review.md), 계층 구조와 의존 방향은 [`docs/design/project-structure.md`](docs/design/project-structure.md)에 있습니다.
+
+현재 판매·시장 검색 경로의 RAG 검토와 단계별 고도화 계획은 [`docs/design/sales-market-rag-analysis-roadmap.md`](docs/design/sales-market-rag-analysis-roadmap.md)에 정리되어 있습니다.
 
 Notion 합의에서 구현 순서와 미결정 사항까지 연결한 전체 방향은 [`docs/design/implementation-direction.md`](docs/design/implementation-direction.md)에 정리되어 있습니다.
 
