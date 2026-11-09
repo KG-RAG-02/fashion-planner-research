@@ -42,7 +42,17 @@
       "type": "string"
     },
     "requested_scope": {
-      "type": "object"
+      "type": "object",
+      "properties": {
+        "population": {"type": ["string", "null"]},
+        "unit": {"type": ["string", "null"]},
+        "currency": {"type": ["string", "null"]},
+        "measure_type": {"type": ["string", "null"]},
+        "mapping_id": {"type": ["string", "null"]},
+        "mapping_version": {"type": ["string", "null"]},
+        "period_grain": {"type": ["string", "null"]},
+        "document_version": {"type": ["string", "null"]}
+      }
     },
     "sales_data": {
       "$ref": "#/$defs/data_block"
@@ -1010,7 +1020,17 @@
         "page_or_section",
         "content_hash",
         "mapping_version",
-        "access_scope"
+        "access_scope",
+        "period_start",
+        "period_end",
+        "period_grain",
+        "population",
+        "unit",
+        "currency",
+        "measure_type",
+        "metric_name",
+        "metric_definition",
+        "mapping_id"
       ],
       "properties": {
         "evidence_id": {
@@ -1101,7 +1121,17 @@
             "string",
             "null"
           ]
-        }
+        },
+        "period_start": {"type": ["string", "null"]},
+        "period_end": {"type": ["string", "null"]},
+        "period_grain": {"type": ["string", "null"]},
+        "population": {"type": ["string", "null"]},
+        "unit": {"type": ["string", "null"]},
+        "currency": {"type": ["string", "null"]},
+        "measure_type": {"type": ["string", "null"]},
+        "metric_name": {"type": ["string", "null"]},
+        "metric_definition": {"type": ["string", "null"]},
+        "mapping_id": {"type": ["string", "null"]}
       }
     }
   }

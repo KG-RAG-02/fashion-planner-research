@@ -86,6 +86,11 @@ class RetrievalAndPermissionTests(unittest.TestCase):
             evidence_id="E-doc-1", source_id="approved-docs", source_name="Synthetic approved guide",
             text="Synthetic explanatory excerpt", locator="fixture://page/2",
             permission_status=PermissionStatus.AUTHORIZED, page_or_section="page 2", content_hash="abc",
+            published_at="2026-01-02T00:00:00Z", observed_at="2025-12-31T00:00:00Z",
+            fetched_at="2026-01-03T00:00:00Z", period_start="2025-10-01", period_end="2025-12-31",
+            period_grain="quarter", population="test population", unit="index points", currency=None,
+            measure_type="aggregate_index", metric_name="retail_sales_index",
+            metric_definition="Synthetic index definition", mapping_id="test-map", mapping_version="v2",
         )
 
         class Retriever:
@@ -100,13 +105,34 @@ class RetrievalAndPermissionTests(unittest.TestCase):
         result = MarketResearchAgent(sales_retriever=retriever).run(MarketResearchContext(
             request_id="synthetic-request", planning_request={}, requested_query="방수 아노락 시장 규모",
             requested_category="Outerwear", requested_metrics=("market_size",),
-            requested_period="2026-Q1",
+            requested_period="2026-Q1", requested_geography="KR", requested_channel="online",
+            requested_population="online shoppers", requested_unit="KRW million", requested_currency="KRW",
+            requested_measure_type="market_estimate", requested_mapping_id="taxonomy-kr-v2",
+            requested_mapping_version="2.0", requested_period_grain="quarter",
+            requested_document_version="release-3",
         ))
         self.assertEqual(retriever.query.raw_query, "방수 아노락 시장 규모")
         self.assertEqual(retriever.query.category, "Outerwear")
+        self.assertEqual(retriever.query.geography, "KR")
+        self.assertEqual(retriever.query.channel, "online")
+        self.assertEqual(retriever.query.metrics, ("market_size",))
         self.assertEqual(retriever.query.as_of_or_period, "2026-Q1")
+        self.assertEqual(retriever.query.population, "online shoppers")
+        self.assertEqual(retriever.query.unit, "KRW million")
+        self.assertEqual(retriever.query.currency, "KRW")
+        self.assertEqual(retriever.query.measure_type, "market_estimate")
+        self.assertEqual(retriever.query.mapping_id, "taxonomy-kr-v2")
+        self.assertEqual(retriever.query.mapping_version, "2.0")
+        self.assertEqual(retriever.query.period_grain, "quarter")
+        self.assertEqual(retriever.query.document_version, "release-3")
         payload = result.to_proposal_v1_3_dict()
         self.assertEqual(payload["sales_retrieval"]["hits"][0]["chunk"]["page_or_section"], "page 2")
+        retrieved_chunk = payload["sales_retrieval"]["hits"][0]["chunk"]
+        self.assertEqual(retrieved_chunk["period_start"], "2025-10-01")
+        self.assertEqual(retrieved_chunk["population"], "test population")
+        self.assertEqual(retrieved_chunk["metric_name"], "retail_sales_index")
+        self.assertEqual(retrieved_chunk["mapping_id"], "test-map")
+        self.assertNotIn("sales_retrieval", result.to_dict())
         self.assertIn("E-doc-1", {item.evidence_id for item in result.evidence})
 
     def test_hm_permission_gate_does_not_read_or_probe_files(self) -> None:

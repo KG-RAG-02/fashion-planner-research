@@ -134,21 +134,43 @@ class MarketResearchAgent:
                     missing = ("retriever_not_configured",)
                 else:
                     try:
-                        raw_hits = retriever.retrieve(RetrievalQuery(
+                        raw_hits = tuple(retriever.retrieve(RetrievalQuery(
                             raw_query=context.requested_query,
                             category=context.requested_category,
                             geography=context.requested_geography,
                             channel=context.requested_channel,
                             metrics=context.requested_metrics,
                             as_of_or_period=context.requested_period,
-                        ))
-                        hits = tuple(hit for hit in raw_hits if isinstance(hit, RetrievedEvidence)
-                                     and hit.chunk.permission_status == PermissionStatus.AUTHORIZED
-                                     and math.isfinite(hit.score))
+                            population=context.requested_population,
+                            unit=context.requested_unit,
+                            currency=context.requested_currency,
+                            measure_type=context.requested_measure_type,
+                            mapping_id=context.requested_mapping_id,
+                            mapping_version=context.requested_mapping_version,
+                            period_grain=context.requested_period_grain,
+                            document_version=context.requested_document_version,
+                        )))
+                        valid_hits = []
+                        invalid_hit_count = 0
+                        for hit in raw_hits:
+                            if (isinstance(hit, RetrievedEvidence)
+                                    and hit.chunk.permission_status == PermissionStatus.AUTHORIZED
+                                    and math.isfinite(hit.score)):
+                                valid_hits.append(hit)
+                            else:
+                                invalid_hit_count += 1
+                        hits = tuple(valid_hits)
                         status = "ok" if hits else "no_results"
-                        if len(hits) != len(raw_hits):
+                        if invalid_hit_count:
                             missing = ("unauthorized_or_invalid_hits_omitted",)
-                            status = "partial" if hits else "no_results"
+                            if hits:
+                                status = "partial"
+                            else:
+                                status = "error"
+                                retrieval_errors.append(AgentError(
+                                    "RETRIEVAL_INVALID_HITS",
+                                    f"The {domain} evidence retriever returned no usable authorized evidence.",
+                                ))
                     except PermissionError:
                         missing = ("access_denied",)
                         status = "error"
@@ -192,6 +214,14 @@ class MarketResearchAgent:
                 "channel": context.requested_channel,
                 "query": context.requested_query,
                 "period": context.requested_period,
+                "population": context.requested_population,
+                "unit": context.requested_unit,
+                "currency": context.requested_currency,
+                "measure_type": context.requested_measure_type,
+                "mapping_id": context.requested_mapping_id,
+                "mapping_version": context.requested_mapping_version,
+                "period_grain": context.requested_period_grain,
+                "document_version": context.requested_document_version,
             },
             sales_retrieval=retrieval_results.get("sales"),
             market_retrieval=retrieval_results.get("market"),
@@ -355,7 +385,7 @@ class MarketResearchAgent:
             removed = len(kept) != len(retrieval.hits)
             return RetrievalResult(
                 retrieval.domain,
-                "partial" if removed and kept else "no_results" if removed or not kept else retrieval.status,
+                "partial" if removed and kept else "error" if removed else retrieval.status,
                 kept,
                 (*retrieval.missing_data, *(("evidence_identity_conflict",) if removed else ())),
             )

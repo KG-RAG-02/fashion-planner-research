@@ -48,6 +48,16 @@ class MarketResearchContext:
     requested_channel: str | None = "online"
     requested_query: str | None = None
     requested_period: str | None = None
+    # Optional local retrieval scope. These fields are not part of an approved
+    # shared input contract; 1.0 output continues to omit requested_scope.
+    requested_population: str | None = None
+    requested_unit: str | None = None
+    requested_currency: str | None = None
+    requested_measure_type: str | None = None
+    requested_mapping_id: str | None = None
+    requested_mapping_version: str | None = None
+    requested_period_grain: str | None = None
+    requested_document_version: str | None = None
 
 
 @dataclass(frozen=True, slots=True)

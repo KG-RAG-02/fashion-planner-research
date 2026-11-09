@@ -101,7 +101,18 @@ def lexical_retrieve(bundle: Mapping[str, Any], query_fixture: Mapping[str, Any]
         unique.append({
             "evidence_id": chunk["evidence_id"], "locator": chunk["locator"],
             "score": score, "content_hash": chunk["content_hash"],
-            "source_id": chunk["source_id"], "permission_status": chunk["permission_status"],
+            "source_id": chunk["source_id"], "source_type": chunk["source_type"],
+            "source_name": chunk["source_name"], "page_or_section": chunk["page_or_section"],
+            "published_at": chunk["published_at"], "observed_at": chunk["observed_at"],
+            "fetched_at": chunk["fetched_at"], "period_start": chunk["period_start"],
+            "period_end": chunk["period_end"], "period_grain": chunk["period_grain"],
+            "geography": chunk["geography"], "channel": chunk["channel"],
+            "category": chunk["category"], "mapping_id": chunk["mapping_id"],
+            "mapping_version": chunk["mapping_version"], "document_version": chunk["document_version"],
+            "population": chunk["population"], "metric_name": chunk["metric_name"],
+            "metric_definition": chunk["metric_definition"], "measure_type": chunk["measure_type"],
+            "unit": chunk["unit"], "currency": chunk["currency"],
+            "permission_status": chunk["permission_status"],
             "simulated_source_permission_status": chunk["simulated_source_permission_status"],
             "synthetic": chunk["synthetic"], "data_nature": chunk["data_nature"],
             "scenario": chunk.get("scenario"),
@@ -135,7 +146,30 @@ def evaluate_fixture(bundle: Mapping[str, Any], fixture: Mapping[str, Any], *, k
     """Compute Recall@k, Precision@k, MRR, nDCG, citation accuracy, and negative rejection."""
     if k < 1:
         raise ValueError("k must be positive.")
-    result = lexical_retrieve(bundle, fixture, limit=k)
+    from .retriever import SyntheticMarketEvidenceRetriever, retrieval_query_from_fixture
+    retriever = SyntheticMarketEvidenceRetriever(bundle)
+    query = retrieval_query_from_fixture(fixture, limit=k)
+    # Simulated source-permission selection is fixture evaluator metadata, not
+    # part of the production RetrievalQuery contract.
+    result = retriever.search_synthetic(
+        query,
+        test_permission_scope=fixture.get("scope", {}).get("simulated_source_permission_status"),
+    )
+    from market_research_agent import MarketResearchAgent, MarketResearchContext
+    workflow_result = MarketResearchAgent(market_retriever=retriever).run(MarketResearchContext(
+        request_id=f"synthetic-eval-{fixture['query_id']}", planning_request={},
+        requested_query=query.raw_query, requested_category=query.category,
+        requested_geography=query.geography, requested_channel=query.channel,
+        requested_metrics=query.metrics, requested_period=query.as_of_or_period,
+        requested_population=query.population, requested_unit=query.unit,
+        requested_currency=query.currency, requested_measure_type=query.measure_type,
+        requested_mapping_id=query.mapping_id, requested_mapping_version=query.mapping_version,
+        requested_period_grain=query.period_grain, requested_document_version=query.document_version,
+    ))
+    workflow_query_forwarded = retriever.last_query == query
+    synthetic_promotion_count = sum(
+        item.evidence_id.startswith("synthetic-rag:") for item in workflow_result.evidence
+    ) + len(workflow_result.market_retrieval.hits if workflow_result.market_retrieval else ())
     hits = result["hits"]
     relevant = set(fixture.get("expected_relevant_evidence_ids", ()))
     retrieved_ids = [hit["evidence_id"] for hit in hits]
@@ -157,6 +191,13 @@ def evaluate_fixture(bundle: Mapping[str, Any], fixture: Mapping[str, Any], *, k
         "recall_at_k": recall, "precision_at_k": precision, "mrr": reciprocal_rank,
         "ndcg_at_k": ndcg, "citation_accuracy": citation_accuracy,
         "hard_negative_rejection": hard_negative_rejection,
+        "permission_violation_count": sum(
+            hit.get("permission_status") != TEST_PERMISSION or hit.get("synthetic") is not True
+            for hit in hits
+        ),
+        "raw_query_forwarded": workflow_query_forwarded and retriever.last_query.raw_query == fixture.get("raw_query"),
+        "structured_scope_forwarded": workflow_query_forwarded,
+        "synthetic_promotion_count": synthetic_promotion_count,
         "retrieved_evidence_ids": retrieved_ids, "restricted_match_count": result["restricted_match_count"],
         "synthetic": True, "data_nature": "synthetic_test", "permission_status": TEST_PERMISSION,
     }
@@ -172,6 +213,9 @@ def evaluate_corpus(bundle: Mapping[str, Any], *, k: int = 8) -> dict[str, Any]:
         "k": k, "query_count": len(results),
         "status_accuracy": sum(item["status_match"] for item in results) / count,
         "metrics": {name: sum(item[name] for item in results) / count for name in metric_names},
+        "permission_violation_count": sum(item["permission_violation_count"] for item in results),
+        "query_forwarding_rate": sum(item["raw_query_forwarded"] and item["structured_scope_forwarded"] for item in results) / count,
+        "synthetic_promotion_count": sum(item["synthetic_promotion_count"] for item in results),
         "per_query": results,
     }
 

@@ -32,6 +32,16 @@ class EvidenceChunk:
     content_hash: str | None = None
     mapping_version: str | None = None
     access_scope: str | None = None
+    period_start: str | None = None
+    period_end: str | None = None
+    period_grain: str | None = None
+    population: str | None = None
+    unit: str | None = None
+    currency: str | None = None
+    measure_type: str | None = None
+    metric_name: str | None = None
+    metric_definition: str | None = None
+    mapping_id: str | None = None
 
     def __post_init__(self) -> None:
         required = (self.evidence_id, self.source_id, self.source_name, self.text, self.locator)
@@ -48,6 +58,14 @@ class RetrievalQuery:
     metrics: tuple[str, ...] = ()
     as_of_or_period: str | None = None
     limit: int = 8
+    population: str | None = None
+    unit: str | None = None
+    currency: str | None = None
+    measure_type: str | None = None
+    mapping_id: str | None = None
+    mapping_version: str | None = None
+    period_grain: str | None = None
+    document_version: str | None = None
 
     def __post_init__(self) -> None:
         if not self.raw_query.strip():

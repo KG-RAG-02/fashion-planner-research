@@ -16,7 +16,15 @@
     "agent_id": {"const": "market-research-agent"},
     "status": {"$ref": "#/$defs/status"},
     "summary": {"type": "string"},
-    "requested_scope": {"type": "object"},
+    "requested_scope": {
+      "type": "object",
+      "properties": {
+        "population": {"type": ["string", "null"]}, "unit": {"type": ["string", "null"]},
+        "currency": {"type": ["string", "null"]}, "measure_type": {"type": ["string", "null"]},
+        "mapping_id": {"type": ["string", "null"]}, "mapping_version": {"type": ["string", "null"]},
+        "period_grain": {"type": ["string", "null"]}, "document_version": {"type": ["string", "null"]}
+      }
+    },
     "sales_data": {"$ref": "#/$defs/data_block"},
     "market_data": {"$ref": "#/$defs/data_block"},
     "unit_economics": {"$ref": "#/$defs/unit_economics_block"},

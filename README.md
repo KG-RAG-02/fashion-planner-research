@@ -79,7 +79,7 @@ PYTHONPATH=src:. python3 -m tools.synthetic_market_rag.evaluate --input-dir test
 python3 -m unittest tests.test_synthetic_market_rag
 ```
 
-평가기는 외부 의존성이 없는 lexical baseline입니다. Recall@k, Precision@k, MRR, nDCG@k, citation 정확도, hard-negative 배제율, 상태 일치율을 출력하며 합성 fixture에서의 도구 동작 점검용으로만 해석해야 합니다. 현재 실제 production RAG provider는 구성되어 있지 않으므로 이 점수는 운영 retriever 품질을 나타내지 않습니다. 시나리오 설명은 [`docs/design/synthetic-market-rag-evaluation.md`](docs/design/synthetic-market-rag-evaluation.md)에 있습니다.
+평가기는 외부 의존성이 없는 lexical baseline입니다. test-only retriever probe가 실제 agent 주입 경로의 query 전달을 확인하지만, 합성 결과를 운영 `authorized` Evidence로 바꾸지 않고 workflow에는 hit을 반환하지 않습니다. Recall@k, Precision@k, MRR, nDCG@k, citation 정확도, hard-negative 배제율, 상태 일치율, 권한 위반·합성 hit 승격 건수와 workflow query 전달률은 fixture 동작 점검용입니다. 현재 실제 production RAG provider는 구성되어 있지 않으므로 점수는 운영 retriever 품질을 나타내지 않습니다. 시나리오 설명은 [`docs/design/synthetic-market-rag-evaluation.md`](docs/design/synthetic-market-rag-evaluation.md)에 있습니다.
 
 ## Docker
 
