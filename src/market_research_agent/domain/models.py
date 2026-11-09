@@ -102,7 +102,6 @@ class SourceReport:
     errors: tuple[AgentError, ...] = ()
     data_limitations: tuple[DataLimitation, ...] = ()
     sales_data: SalesDataResult | None = None
-    proposal: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -118,14 +117,12 @@ class MarketResearchResult:
     errors: tuple[AgentError, ...] = ()
     data_limitations: tuple[DataLimitation, ...] = ()
     sales_data: SalesDataResult | None = None
-    proposal: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible object matching the local result schema."""
         payload = asdict(self)
         payload.pop("data_limitations", None)
         payload.pop("sales_data", None)
-        payload.pop("proposal", None)
         payload |= {
             "status": self.status.value,
             "findings": [
@@ -148,7 +145,6 @@ class MarketResearchResult:
         payload["data_limitations"] = [
             asdict(item) for item in self.data_limitations
         ]
-        payload["proposal"] = self.proposal
         payload["evidence"] = [
             asdict(item) | {"permission_status": item.permission_status.value}
             for item in self.evidence

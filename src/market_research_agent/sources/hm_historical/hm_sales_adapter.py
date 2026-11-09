@@ -61,31 +61,32 @@ class HmHistoricalSalesSource:
         period = manifest.get("observation_period", {})
         evidence: list[EvidenceRecord] = []
         observations = []
-        for item in sales.observations:
-            for evidence_id, source_name, source_type in (
-                (item.evidence_ids[0], "H&M Kaggle transactions_train historical purchase rows", "historical_sales"),
-                (item.evidence_ids[1], "H&M Kaggle articles product taxonomy", "product_catalog"),
-            ):
-                evidence.append(EvidenceRecord(
-                    evidence_id=evidence_id,
-                    source_id="hm-kaggle-personalized-fashion-recommendations",
-                    source_type=source_type,
-                    source_name=source_name,
-                    locator="https://www.kaggle.com/competitions/h-and-m-personalized-fashion-recommendations/data",
-                    period_start=period.get("start"), period_end=period.get("end"),
-                    geography=None, channel=item.channel,
-                    product_mapping=self.mapping_version,
-                    unit=item.unit,
-                    metric_definition="Historical purchase transaction rows; not current sales, market demand, customer preference, or forecast.",
-                    manifest_id=manifest.get("manifest_id"),
-                    permission_status=permission,
-                ))
-            observations.append(item)
         if not permitted:
             sales = SalesDataResult(
                 status="no_results",
                 limitations=(*sales.limitations, "Kaggle data usage authorization is not confirmed; observations withheld until explicitly authorized."),
             )
+        else:
+            for item in sales.observations:
+                for evidence_id, source_name, source_type in (
+                    (item.evidence_ids[0], "H&M Kaggle transactions_train historical purchase rows", "historical_sales"),
+                    (item.evidence_ids[1], "H&M Kaggle articles product taxonomy", "product_catalog"),
+                ):
+                    evidence.append(EvidenceRecord(
+                        evidence_id=evidence_id,
+                        source_id="hm-kaggle-personalized-fashion-recommendations",
+                        source_type=source_type,
+                        source_name=source_name,
+                        locator="https://www.kaggle.com/competitions/h-and-m-personalized-fashion-recommendations/data",
+                        period_start=period.get("start"), period_end=period.get("end"),
+                        geography=None, channel=item.channel,
+                        product_mapping=self.mapping_version,
+                        unit=item.unit,
+                        metric_definition="Historical purchase transaction rows; not current sales, market demand, customer preference, or forecast.",
+                        manifest_id=manifest.get("manifest_id"),
+                        permission_status=permission,
+                    ))
+                observations.append(item)
         limitations = (*sales.limitations, "Historical Kaggle data is not live/current H&M sales. Its observed period is retained from the local manifest.")
         return SourceReport(
             status=ResultStatus.OK if permitted and observations else ResultStatus.NO_RESULTS,

@@ -15,8 +15,7 @@
     "limitations",
     "errors",
     "sales_data",
-    "data_limitations",
-    "proposal"
+    "data_limitations"
   ],
   "properties": {
     "schema_version": {
@@ -77,32 +76,9 @@
       "items": {
         "$ref": "#/$defs/data_limitation"
       }
-    },
-    "proposal": {
-      "anyOf": [
-        {"$ref": "#/$defs/proposal"},
-        {"type": "null"}
-      ]
     }
   },
   "$defs": {
-    "proposal": {
-      "type": "object",
-      "required": ["format", "request_id", "concept", "trend_analysis", "historical_sales", "market_viability", "competitor_benchmark", "inventory_and_production", "design_brief", "ai_visualization", "limitations"],
-      "properties": {
-        "format": {"const": "merchandising_proposal_dashboard"},
-        "request_id": {"type": "string"},
-        "concept": {"type": "object"},
-        "trend_analysis": {"type": "object"},
-        "historical_sales": {"type": "object"},
-        "market_viability": {"type": "object"},
-        "competitor_benchmark": {"type": "object"},
-        "inventory_and_production": {"type": "object"},
-        "design_brief": {"type": "object"},
-        "ai_visualization": {"type": "object"},
-        "limitations": {"type": "array", "items": {"type": "string"}}
-      }
-    },
     "sales_data": {
       "type": "object",
       "additionalProperties": false,

@@ -253,7 +253,6 @@ class MarketResearchAgent:
             errors=tuple(errors),
             data_limitations=report.data_limitations,
             sales_data=sales_data,
-            proposal=report.proposal,
         )
 
     def _failure(

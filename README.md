@@ -44,21 +44,19 @@ PYTHONPATH=src python3 examples/synthetic_demo.py
 
 ## 시장성 조사 결과 생성
 
-통합 결과 CLI는 요청 카테고리와 지표를 받고, H&M 과거자료 어댑터와 별도 시장 자료원 어댑터 결과를 한 제안 결과로 조립합니다. 시장 자료원은 현재 미연결 상태이므로 시장 값은 생성하지 않습니다. H&M 처리 데이터도 이 저장소의 기본 `data/processed/`에 포함되지 않습니다.
+CLI는 `PlanningRequest`, `TrendResult`, `InventoryProductResult` 입력 JSON을 검증하고 판매·시장 조사 결과만 반환합니다. Project_07은 새상품 콘셉트나 기획안을 생성하지 않습니다. 시장 자료원은 현재 미연결 상태이므로 기본 실행은 시장값을 만들지 않고 `no_results`를 반환합니다.
 
 ```bash
 PYTHONPATH=src python3 -m market_research_agent.cli \\
-  --request-id req-2027ss-outerwear \\
-  --category Outerwear \\
+  --inputs-json examples/fixtures/market-research-input.example.json \\
   --metrics "category_sales,market_size,price_band" \\
-  --planning-request "2027SS 경량 아우터 상품성 검토" \\
   --hm-processed-dir data/processed/hm-personalized-fashion-recommendations \\
   --hm-category-map "Garment Upper body=Outerwear" \\
   --hm-mapping-version "vogue-taxonomy-2026-11-01" \\
   --proposal-v1-1
 ```
 
-H&M 원본 어댑터는 승인 여부가 별도 확인되지 않으면 수치 관측을 출력하지 않습니다. 실제 데이터 사용 승인을 받은 뒤에만 `--hm-usage-authorized`를 지정하십시오. 이 플래그는 승인 절차가 아니며, 호출자가 외부에서 확인한 승인을 선언합니다. 기본 1.0 직렬화는 기존 결과 스키마를 유지하고, 이미지형 `proposal`과 `sales_data`를 포함하려면 명시적으로 `--proposal-v1-1`을 선택합니다. 시장 어댑터는 `MarketResearchSource` 프로토콜을 구현해 `UnconfiguredMarketDataSource` 대신 명시적으로 연결해야 합니다. API 자격 증명은 CLI 인수로 전달하지 말고 승인된 비밀 관리 방식으로 공급해야 합니다.
+입력 예시 파일은 이 저장소의 `examples/fixtures/market-research-input.example.json`을 참고하세요. 모든 상위 결과의 `request_id`가 일치해야 합니다. H&M 어댑터는 승인 여부가 별도 확인되지 않으면 수치 관측을 출력하지 않습니다. 실제 데이터 사용 승인을 받은 뒤에만 `--hm-usage-authorized`를 지정하십시오. 이 플래그는 승인 절차가 아니며, 호출자가 외부에서 확인한 승인을 선언합니다. 기본 1.0 직렬화는 기존 결과 스키마를 유지합니다. `--proposal-v1-1`은 미합의 판매 데이터 확장만 출력하며 공통 wire contract를 뜻하지 않습니다. 시장 어댑터는 `MarketResearchSource` 프로토콜을 구현해 명시적으로 연결해야 합니다. API 자격 증명은 CLI 인수로 전달하지 말고 승인된 비밀 관리 방식으로 공급해야 합니다.
 
 핵심 설정 환경변수는 `VOGUE_HM_PROCESSED_DIR`(처리 데이터 경로)와 `VOGUE_HM_MAPPING_VERSION`(분류 매핑 버전)입니다. 기존 `VOGUE_HM_ANALYSIS_PATH`는 historical prototype 경로 설정입니다. 이 패키지는 `.env`를 자동 로드하지 않으며, 필요한 값을 셸 또는 실행환경에서 설정해야 합니다. `.env`는 Git 제외 상태를 유지하십시오.
 
