@@ -25,7 +25,7 @@ class SalesDomainTests(unittest.TestCase):
 class HmSalesAdapterTests(unittest.TestCase):
     def _fixture(self, root: Path):
         (root / "manifest.json").write_text(json.dumps({
-            "observation_period": {"start": "2018-01-01", "end": "2018-01-07"},
+            "observation_period": {"start": "2018-01-01", "end": "2018-01-14"},
             "source_transactions": {"container_sha256": "saleshash"},
             "source_articles": {"container_sha256": "cataloghash"},
         }), encoding="utf-8")
@@ -48,7 +48,7 @@ class HmSalesAdapterTests(unittest.TestCase):
             result = load_hm_sales_analysis(request_id="r1", schema_version="1.0",
                 requested_category="shorts", source_category_map={"Shorts":"shorts"},
                 category_mapping_version="test-map", processed_dir=root)
-        self.assertEqual(result.status, "ok")
+        self.assertEqual(result.status, "partial")
         self.assertEqual(len(result.observations), 1)
         observation = result.observations[0]
         self.assertEqual(observation.value, 3)
