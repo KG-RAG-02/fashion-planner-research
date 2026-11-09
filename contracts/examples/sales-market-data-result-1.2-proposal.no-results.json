@@ -1,0 +1,50 @@
+{
+  "schema_version": "1.2-proposal",
+  "request_id": "req-example-online-fashion-001",
+  "agent_id": "market-research-agent",
+  "status": "no_results",
+  "summary": "No sales ledger or market provider is configured; no commercial inputs are available for unit-economics calculations.",
+  "requested_scope": {
+    "geography": "KR",
+    "channel": "online",
+    "category": null,
+    "metrics": ["sales", "market_size", "retail_sales_index", "unit_margin"]
+  },
+  "sales_data": {
+    "status": "no_results",
+    "observations": [],
+    "limitations": ["Internal sales source access and permitted grain have not been configured."],
+    "errors": [],
+    "missing_data": [
+      {"field": "sales_data", "reason": "source_not_configured", "message": "Configure an approved internal sales source and mapping.", "source_id": null, "retryable": false}
+    ]
+  },
+  "market_data": {
+    "status": "no_results",
+    "observations": [],
+    "limitations": ["KOSIS table and any paid provider access remain under review; no market data was queried."],
+    "errors": [],
+    "missing_data": [
+      {"field": "market_data.market_size", "reason": "source_not_configured", "message": "No approved market-size provider is configured.", "source_id": null, "retryable": false},
+      {"field": "market_data.retail_sales_index", "reason": "source_not_configured", "message": "No approved index series is configured; online-only scope has not been validated.", "source_id": null, "retryable": false}
+    ]
+  },
+  "unit_economics": {
+    "status": "no_results",
+    "calculations": [],
+    "limitations": ["No formula or input definitions have been approved; no margin calculation was performed."],
+    "errors": [],
+    "missing_data": [
+      {"field": "unit_economics", "reason": "source_not_configured", "message": "Approved price/cost inputs and a versioned formula are required.", "source_id": null, "retryable": false}
+    ]
+  },
+  "findings": [],
+  "evidence": [],
+  "missing_data": [
+    {"field": "sales_data", "reason": "source_not_configured", "message": "Internal sales data is not connected.", "source_id": null, "retryable": false},
+    {"field": "market_data", "reason": "source_not_configured", "message": "Market providers are not connected.", "source_id": null, "retryable": false},
+    {"field": "unit_economics", "reason": "source_not_configured", "message": "Approved inputs and formula are not configured.", "source_id": null, "retryable": false}
+  ],
+  "limitations": ["This is a proposal example only. It contains no measured or synthetic business values."],
+  "errors": []
+}
