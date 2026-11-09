@@ -120,6 +120,8 @@ print(result.to_dict())
 
 현재 판매·시장 검색 경로의 RAG 검토와 단계별 고도화 계획은 [`docs/design/sales-market-rag-analysis-roadmap.md`](docs/design/sales-market-rag-analysis-roadmap.md)에 정리되어 있습니다.
 
+판매와 시장을 각각 어떤 지표/정형 계산으로 분석하고 RAG를 어디에 제한해서 쓸지에 대한 전문가 설계는 [`docs/design/sales-market-analysis-expert-design.md`](docs/design/sales-market-analysis-expert-design.md)를 참고하세요. 해당 내용은 구현/자료원 승인을 대신하지 않는 설계 제안입니다.
+
 Notion 합의에서 구현 순서와 미결정 사항까지 연결한 전체 방향은 [`docs/design/implementation-direction.md`](docs/design/implementation-direction.md)에 정리되어 있습니다.
 
 ## 폴더 구조
