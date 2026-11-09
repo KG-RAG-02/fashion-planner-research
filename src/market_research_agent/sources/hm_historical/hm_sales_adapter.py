@@ -12,9 +12,87 @@ import json
 from pathlib import Path
 from typing import Mapping
 
+from ...domain.models import EvidenceRecord, MarketResearchContext, PermissionStatus, ResultStatus, SourceReport
 from ...domain.sales import SalesDataResult, SalesObservation
 
 DEFAULT_PROCESSED_DIR = Path("data/processed/hm-personalized-fashion-recommendations")
+
+
+class HmHistoricalSalesSource:
+    """Optional historical H&M/Kaggle source; permission is unconfirmed by default."""
+
+    def __init__(self, processed_dir: Path, category_map: Mapping[str, str], mapping_version: str,
+                 *, usage_authorized: bool = False) -> None:
+        self.processed_dir = processed_dir
+        self.category_map = dict(category_map)
+        self.mapping_version = mapping_version
+        self.usage_authorized = usage_authorized
+
+    def research(self, context: MarketResearchContext) -> SourceReport:
+        category = context.requested_category
+        if not category:
+            return SourceReport(
+                status=ResultStatus.ERROR,
+                limitations=("H&M historical sales were not queried: requested_category is required.",),
+            )
+        try:
+            sales = load_hm_sales_analysis(
+                request_id=context.request_id,
+                schema_version="1.1-proposal",
+                requested_category=category,
+                source_category_map=self.category_map,
+                category_mapping_version=self.mapping_version,
+                processed_dir=self.processed_dir,
+            )
+            manifest = json.loads((self.processed_dir.expanduser().resolve() / "manifest.json").read_text(encoding="utf-8"))
+        except FileNotFoundError:
+            return SourceReport(
+                status=ResultStatus.NO_RESULTS,
+                limitations=(f"H&M historical data is not available at {self.processed_dir}; provide processed manifest.json, article_catalog.csv, and weekly_sales_by_article_channel.csv.",),
+            )
+        except (OSError, ValueError, json.JSONDecodeError):
+            return SourceReport(
+                status=ResultStatus.ERROR,
+                limitations=("H&M historical data could not be read or its category mapping is invalid.",),
+            )
+
+        permitted = self.usage_authorized
+        permission = PermissionStatus.AUTHORIZED if permitted else PermissionStatus.UNKNOWN
+        period = manifest.get("observation_period", {})
+        evidence: list[EvidenceRecord] = []
+        observations = []
+        for item in sales.observations:
+            for evidence_id, source_name, source_type in (
+                (item.evidence_ids[0], "H&M Kaggle transactions_train historical purchase rows", "historical_sales"),
+                (item.evidence_ids[1], "H&M Kaggle articles product taxonomy", "product_catalog"),
+            ):
+                evidence.append(EvidenceRecord(
+                    evidence_id=evidence_id,
+                    source_id="hm-kaggle-personalized-fashion-recommendations",
+                    source_type=source_type,
+                    source_name=source_name,
+                    locator="https://www.kaggle.com/competitions/h-and-m-personalized-fashion-recommendations/data",
+                    period_start=period.get("start"), period_end=period.get("end"),
+                    geography=None, channel=item.channel,
+                    product_mapping=self.mapping_version,
+                    unit=item.unit,
+                    metric_definition="Historical purchase transaction rows; not current sales, market demand, customer preference, or forecast.",
+                    manifest_id=manifest.get("manifest_id"),
+                    permission_status=permission,
+                ))
+            observations.append(item)
+        if not permitted:
+            sales = SalesDataResult(
+                status="no_results",
+                limitations=(*sales.limitations, "Kaggle data usage authorization is not confirmed; observations withheld until explicitly authorized."),
+            )
+        limitations = (*sales.limitations, "Historical Kaggle data is not live/current H&M sales. Its observed period is retained from the local manifest.")
+        return SourceReport(
+            status=ResultStatus.OK if permitted and observations else ResultStatus.NO_RESULTS,
+            evidence=tuple(evidence),
+            limitations=limitations,
+            sales_data=sales,
+        )
 
 
 def load_hm_sales_analysis(

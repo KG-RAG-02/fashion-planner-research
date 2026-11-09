@@ -10,6 +10,7 @@ from ..domain.models import (
     ResultStatus,
     SourceReport,
 )
+from ..domain.sales import SalesDataResult
 from .protocol import MarketResearchSource
 
 
@@ -100,7 +101,22 @@ class CompositeMarketResearchSource:
             item for report in reports for item in report.limitations
         )
         errors.extend(error for report in reports for error in report.errors)
+        sales_reports = [report.sales_data for report in reports if report.sales_data is not None]
+        sales_data = None
+        if sales_reports:
+            observations = tuple(item for sales in sales_reports for item in sales.observations)
+            sales_statuses = {sales.status for sales in sales_reports}
+            sales_status = "ok" if observations and sales_statuses == {"ok"} else "partial" if observations else "no_results"
+            sales_data = SalesDataResult(
+                status=sales_status,
+                observations=observations,
+                limitations=tuple(dict.fromkeys(item for sales in sales_reports for item in sales.limitations)),
+                errors=tuple(item for sales in sales_reports for item in sales.errors),
+                follow_up_questions=tuple(item for sales in sales_reports for item in sales.follow_up_questions),
+            )
 
+        has_sales_observations = bool(sales_data and sales_data.observations)
+        has_source_content = bool(findings or evidence or has_sales_observations)
         if not reports:
             status = ResultStatus.ERROR
         elif any(report.status == ResultStatus.PARTIAL for report in reports):
@@ -116,8 +132,10 @@ class CompositeMarketResearchSource:
                 status = ResultStatus.ERROR
         elif errors:
             status = ResultStatus.PARTIAL
-        elif findings or evidence:
-            status = ResultStatus.OK
+        elif has_source_content:
+            successful = any(report.status == ResultStatus.OK for report in reports)
+            missing = any(report.status == ResultStatus.NO_RESULTS for report in reports)
+            status = ResultStatus.PARTIAL if successful and missing else ResultStatus.OK
         elif all(report.status == ResultStatus.NO_RESULTS for report in reports):
             status = ResultStatus.NO_RESULTS
         else:
@@ -129,4 +147,5 @@ class CompositeMarketResearchSource:
             evidence=evidence,
             limitations=tuple(dict.fromkeys(limitations)),
             errors=tuple(errors),
+            sales_data=sales_data,
         )

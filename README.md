@@ -4,7 +4,7 @@ VOGUE의 시장성 조사 단계에서 사용할 수 있는 계약 중립적 Pyt
 
 현재 저장소에는 승인된 실제 판매 원장·시장 자료 어댑터가 없어 운영 분석 시스템으로 동작하지 않습니다. 판매 관측 모델과 결과 정규화 경계는 Project_07 책임으로 구현하되, 자료원이 미구성된 경우 `no_results`와 제한 사유를 전달합니다. Kaggle/H&M 공개 과거 데이터와 합성 fixture는 운영 데이터로 사용하지 않습니다.
 
-Project_06의 기존 판매 책임 정리 과정에서 H&M 과거자료 처리·품질·집계 adapter, 판매 domain model, synthetic sales/operations demo와 관련 테스트 및 설계 기록을 이 저장소로 옮겼습니다. Project_06은 새상품 기획 전용입니다. 이동한 H&M adapter는 local historical research용이며 승인된 사내 sales connector가 아닙니다. 테스트는 임시 fixture를 만들며 원본 CSV나 Project_06의 로컬 `data/`를 필요로 하지 않습니다. 실제 원본·처리 데이터, `.env`, SQLite 데이터는 복사·이동하지 않았습니다.
+Project_06의 책임 정리 과정에서 H&M 과거자료 처리·품질·집계 adapter, 판매 domain model 및 합성 판매/운영 시나리오 예제와 관련 테스트가 이 저장소로 옮겨졌습니다. Project_06은 새상품 기획 전용입니다. Project_07의 합성 merchandising 시나리오는 이관된 소프트웨어 검증/역사 데모이며, 현재 Market Research Agent의 승인 자료원이나 운영 분석 기능을 뜻하지 않습니다. 이동한 H&M adapter 역시 local historical research용이며 승인된 사내 sales connector가 아닙니다. 테스트는 임시 fixture를 만들며 원본 CSV나 Project_06의 로컬 `data/`를 필요로 하지 않습니다. 실제 원본·처리 데이터, `.env`, SQLite 데이터는 복사·이동하지 않았습니다.
 
 ## 현재 동작
 
@@ -41,6 +41,26 @@ PYTHONPATH=src python3 -m unittest discover -s tests -v
 ```bash
 PYTHONPATH=src python3 examples/synthetic_demo.py
 ```
+
+## 시장성 조사 결과 생성
+
+통합 결과 CLI는 요청 카테고리와 지표를 받고, H&M 과거자료 어댑터와 별도 시장 자료원 어댑터 결과를 한 제안 결과로 조립합니다. 시장 자료원은 현재 미연결 상태이므로 시장 값은 생성하지 않습니다. H&M 처리 데이터도 이 저장소의 기본 `data/processed/`에 포함되지 않습니다.
+
+```bash
+PYTHONPATH=src python3 -m market_research_agent.cli \\
+  --request-id req-2027ss-outerwear \\
+  --category Outerwear \\
+  --metrics "category_sales,market_size,price_band" \\
+  --planning-request "2027SS 경량 아우터 상품성 검토" \\
+  --hm-processed-dir data/processed/hm-personalized-fashion-recommendations \\
+  --hm-category-map "Garment Upper body=Outerwear" \\
+  --hm-mapping-version "vogue-taxonomy-2026-11-01" \\
+  --proposal-v1-1
+```
+
+H&M 원본 어댑터는 승인 여부가 별도 확인되지 않으면 수치 관측을 출력하지 않습니다. 실제 데이터 사용 승인을 받은 뒤에만 `--hm-usage-authorized`를 지정하십시오. 이 플래그는 승인 절차가 아니며, 호출자가 외부에서 확인한 승인을 선언합니다. 기본 1.0 직렬화는 기존 결과 스키마를 유지하고, 이미지형 `proposal`과 `sales_data`를 포함하려면 명시적으로 `--proposal-v1-1`을 선택합니다. 시장 어댑터는 `MarketResearchSource` 프로토콜을 구현해 `UnconfiguredMarketDataSource` 대신 명시적으로 연결해야 합니다. API 자격 증명은 CLI 인수로 전달하지 말고 승인된 비밀 관리 방식으로 공급해야 합니다.
+
+핵심 설정 환경변수는 `VOGUE_HM_PROCESSED_DIR`(처리 데이터 경로)와 `VOGUE_HM_MAPPING_VERSION`(분류 매핑 버전)입니다. 기존 `VOGUE_HM_ANALYSIS_PATH`는 historical prototype 경로 설정입니다. 이 패키지는 `.env`를 자동 로드하지 않으며, 필요한 값을 셸 또는 실행환경에서 설정해야 합니다. `.env`는 Git 제외 상태를 유지하십시오.
 
 ## Docker
 

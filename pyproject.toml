@@ -10,5 +10,8 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.scripts]
+vogue-market-research = "market_research_agent.cli:main"
+
 [tool.setuptools.packages.find]
 where = ["src"]
