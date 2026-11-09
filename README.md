@@ -67,6 +67,20 @@ PYTHONPATH=src python3 -m market_research_agent.cli \\
 
 핵심 설정 환경변수는 `VOGUE_HM_PROCESSED_DIR`(처리 데이터 경로)와 `VOGUE_HM_MAPPING_VERSION`(분류 매핑 버전)입니다. 기존 `VOGUE_HM_ANALYSIS_PATH`는 historical prototype 경로 설정입니다. 이 패키지는 `.env`를 자동 로드하지 않으며, 필요한 값을 셸 또는 실행환경에서 설정해야 합니다. `.env`는 Git 제외 상태를 유지하십시오.
 
+## 합성 RAG 평가 자료
+
+RAG 검색의 query 전달, 메타데이터 범위 필터, Evidence citation, 권한 차단 및 검색 순위를 개발 환경에서 평가하려면 전용 합성 fixture generator를 사용합니다. 이 fixture는 실제 통계·판매·시장 근거가 아니며 사업 의사결정에 사용할 수 없습니다. 운영 retriever, source manifest 또는 기본 workflow에서 자동 선택되지 않고, 외부 임베딩·모델·저장소에 연결되지 않습니다. 테스트 전용 permission 값 `authorized_for_synthetic_testing_only`는 운영의 `authorized`와 별개입니다.
+
+기본 seed `20261109`는 문서 120개, chunk 359개, 검색 query 22개를 만듭니다. 생성량은 20–1000개 문서 범위에서 조절합니다. 생성 파일은 `tests/fixtures/synthetic_market_rag/` 아래에만 둘 수 있습니다.
+
+```bash
+PYTHONPATH=src:. python3 -m tools.synthetic_market_rag.generate --seed 20261109 --documents 120
+PYTHONPATH=src:. python3 -m tools.synthetic_market_rag.evaluate --input-dir tests/fixtures/synthetic_market_rag --output tests/fixtures/synthetic_market_rag/evaluation-baseline.json
+python3 -m unittest tests.test_synthetic_market_rag
+```
+
+평가기는 외부 의존성이 없는 lexical baseline입니다. Recall@k, Precision@k, MRR, nDCG@k, citation 정확도, hard-negative 배제율, 상태 일치율을 출력하며 합성 fixture에서의 도구 동작 점검용으로만 해석해야 합니다. 현재 실제 production RAG provider는 구성되어 있지 않으므로 이 점수는 운영 retriever 품질을 나타내지 않습니다. 시나리오 설명은 [`docs/design/synthetic-market-rag-evaluation.md`](docs/design/synthetic-market-rag-evaluation.md)에 있습니다.
+
 ## Docker
 
 Docker Desktop 또는 Docker Engine과 Compose를 설치한 뒤 프로젝트 루트에서 개발 컨테이너를 시작합니다.
