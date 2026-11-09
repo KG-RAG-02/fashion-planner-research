@@ -34,10 +34,6 @@ def _read_inputs(path: str) -> tuple[dict[str, Any], dict[str, Any] | None, dict
     for name, item in (("trend_result", trend), ("inventory_product_result", inventory)):
         if item is not None and not isinstance(item, dict):
             raise ValueError(f"{name} must be an object when supplied.")
-        if isinstance(item, dict) and item.get("request_id") != request_id:
-            raise ValueError(f"{name} request_id does not match planning_request.")
-        if isinstance(item, dict) and item.get("schema_version") != "1.0":
-            raise ValueError(f"{name}.schema_version must be 1.0.")
     return request, trend, inventory
 
 

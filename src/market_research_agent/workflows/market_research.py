@@ -17,8 +17,10 @@ from ..domain.sales import ComparabilityResult, MarketDataResult, MissingData, U
 from ..sources.market.analysis import calculate_market_series_change
 from ..sources.market.evidence_retrieval import MarketEvidenceRetriever, RetrievalQuery, RetrievedEvidence
 from ..domain.models import EvidenceRecord
-from dataclasses import asdict, dataclass
+import json
 import math
+from copy import deepcopy
+from dataclasses import asdict, dataclass
 
 
 @dataclass(frozen=True, slots=True)
@@ -54,22 +56,22 @@ class MarketResearchAgent:
         self._market_retriever = market_retriever
 
     def run(self, context: MarketResearchContext) -> MarketResearchResult:
-        if not context.request_id.strip():
+        if not isinstance(context.request_id, str) or not context.request_id.strip():
             raise ValueError("request_id must not be empty")
 
         context_limitations, incomplete_context = self._context_limitations(context)
-        mismatched_input = self._request_id_mismatch(context)
-        if mismatched_input:
+        invalid_upstream = self._validate_upstream_context(context)
+        if invalid_upstream:
+            error_code, invalid_input = invalid_upstream
             return self._failure(
                 context.request_id,
                 AgentError(
-                    code="UPSTREAM_REQUEST_ID_MISMATCH",
-                    message=(
-                        f"Upstream input '{mismatched_input}' belongs to a different request."
-                    ),
+                    code=error_code,
+                    message=f"Upstream input '{invalid_input}' did not satisfy the local safety envelope.",
                 ),
                 limitations=context_limitations,
             )
+        upstream_context = self._snapshot_upstream_context(context)
 
         try:
             report = self._source.research(context)
@@ -81,6 +83,7 @@ class MarketResearchAgent:
                     message="The configured source denied access.",
                 ),
                 limitations=context_limitations,
+                upstream_context=upstream_context,
             )
         except TimeoutError:
             return self._failure(
@@ -90,6 +93,7 @@ class MarketResearchAgent:
                     message="The configured source did not respond in time.",
                 ),
                 limitations=context_limitations,
+                upstream_context=upstream_context,
             )
         except Exception:
             # Avoid returning exception strings that may contain credentials or source data.
@@ -100,6 +104,7 @@ class MarketResearchAgent:
                     message="The configured source could not be queried.",
                 ),
                 limitations=context_limitations,
+                upstream_context=upstream_context,
             )
 
         if not isinstance(report, SourceReport):
@@ -110,6 +115,7 @@ class MarketResearchAgent:
                     message="The source adapter returned an unsupported report type.",
                 ),
                 limitations=context_limitations,
+                upstream_context=upstream_context,
             )
         if not isinstance(report.status, ResultStatus):
             return self._failure(
@@ -119,6 +125,7 @@ class MarketResearchAgent:
                     message="The source adapter returned an unsupported result status.",
                 ),
                 limitations=context_limitations,
+                upstream_context=upstream_context,
             )
 
         retrieval_evidence: list[EvidenceRecord] = []
@@ -225,6 +232,7 @@ class MarketResearchAgent:
             },
             sales_retrieval=retrieval_results.get("sales"),
             market_retrieval=retrieval_results.get("market"),
+            upstream_context=upstream_context,
         )
 
     def _assemble(
@@ -237,6 +245,7 @@ class MarketResearchAgent:
         requested_scope: dict | None = None,
         sales_retrieval=None,
         market_retrieval=None,
+        upstream_context=None,
     ) -> MarketResearchResult:
         errors = list(report.errors)
         limitations = [*report.limitations, *context_limitations]
@@ -518,6 +527,7 @@ class MarketResearchAgent:
             sales_retrieval=sales_retrieval,
             market_retrieval=market_retrieval,
             comparability=tuple(comparisons),
+            upstream_context=upstream_context,
         )
 
     def _failure(
@@ -526,6 +536,7 @@ class MarketResearchAgent:
         error: AgentError,
         *,
         limitations: tuple[str, ...] = (),
+        upstream_context: dict | None = None,
     ) -> MarketResearchResult:
         return MarketResearchResult(
             schema_version=self.schema_version,
@@ -535,6 +546,7 @@ class MarketResearchAgent:
             summary="Market research did not produce a usable result.",
             limitations=limitations,
             errors=(error,),
+            upstream_context=upstream_context,
         )
 
     @staticmethod
@@ -618,19 +630,70 @@ class MarketResearchAgent:
         return tuple(dict.fromkeys(notes)), incomplete
 
     @staticmethod
-    def _request_id_mismatch(context: MarketResearchContext) -> str | None:
-        """Reject conflicting common-envelope request IDs when a caller provides them."""
+    def _validate_upstream_context(context: MarketResearchContext) -> tuple[str, str] | None:
+        """Validate only the minimal safe envelope; leave producer payload opaque.
 
-        for name in ("planning_request", "trend_result", "inventory_product_result"):
+        Producer schema versions are not compared with this agent's local result
+        version. The common cross-agent envelope remains unratified.
+        """
+        if not isinstance(context.planning_request, dict):
+            return "UPSTREAM_CONTRACT_INVALID", "planning_request"
+        try:
+            json.dumps(context.planning_request, allow_nan=False)
+        except (TypeError, ValueError):
+            return "UPSTREAM_CONTRACT_INVALID", "planning_request"
+
+        request_id = context.request_id
+        planning_id = context.planning_request.get("request_id")
+        if planning_id is not None:
+            if not isinstance(planning_id, str) or not planning_id.strip():
+                return "UPSTREAM_REQUEST_ID_INVALID", "planning_request"
+            if planning_id != request_id:
+                return "UPSTREAM_REQUEST_ID_MISMATCH", "planning_request"
+
+        for name in ("trend_result", "inventory_product_result"):
             payload = getattr(context, name)
-            if not isinstance(payload, dict):
+            if payload is None:
                 continue
-            nested_result = payload.get("result")
-            metadata = nested_result if isinstance(nested_result, dict) else payload
-            request_id = metadata.get("request_id", payload.get("request_id"))
-            if request_id is not None and request_id != context.request_id:
-                return name
+            if not isinstance(payload, dict):
+                return "UPSTREAM_CONTRACT_INVALID", name
+            try:
+                json.dumps(payload, allow_nan=False)
+            except (TypeError, ValueError):
+                return "UPSTREAM_CONTRACT_INVALID", name
+            if "result" in payload and not isinstance(payload["result"], dict):
+                return "UPSTREAM_CONTRACT_INVALID", name
+
+            nested = payload.get("result") if isinstance(payload.get("result"), dict) else None
+            identifiers = [payload[key] for key in ("request_id",) if key in payload]
+            if nested is not None and "request_id" in nested:
+                identifiers.append(nested["request_id"])
+            if not identifiers:
+                return "UPSTREAM_REQUEST_ID_INVALID", name
+            if any(not isinstance(item, str) or not item.strip() for item in identifiers):
+                return "UPSTREAM_REQUEST_ID_INVALID", name
+            if any(item != request_id for item in identifiers):
+                return "UPSTREAM_REQUEST_ID_MISMATCH", name
+
+            versions = [payload[key] for key in ("schema_version",) if key in payload]
+            if nested is not None and "schema_version" in nested:
+                versions.append(nested["schema_version"])
+            if any(not isinstance(item, str) or not item.strip() for item in versions):
+                return "UPSTREAM_CONTRACT_INVALID", name
+            metadata = nested if nested is not None else payload
+            status = metadata.get("status")
+            if not isinstance(status, str) or status not in {item.value for item in ResultStatus}:
+                return "UPSTREAM_CONTRACT_INVALID", name
         return None
+
+    @staticmethod
+    def _snapshot_upstream_context(context: MarketResearchContext) -> dict:
+        """Capture an immutable-before-source-call review snapshot of input JSON."""
+        return deepcopy({
+            "planning_request": context.planning_request,
+            "trend_result": context.trend_result,
+            "inventory_product_result": context.inventory_product_result,
+        })
 
     @staticmethod
     def _string_items(value: object) -> tuple[str, ...]:

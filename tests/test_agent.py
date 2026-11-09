@@ -21,8 +21,8 @@ def make_context() -> MarketResearchContext:
     return MarketResearchContext(
         request_id="request-123",
         planning_request={"query": "spring knitwear"},
-        trend_result={"status": "ok"},
-        inventory_product_result={"status": "ok"},
+        trend_result={"request_id": "request-123", "status": "ok"},
+        inventory_product_result={"request_id": "request-123", "status": "ok"},
     )
 
 
@@ -287,7 +287,9 @@ class MarketResearchAgentTests(unittest.TestCase):
             request_id="request-123",
             planning_request={"query": "spring knitwear"},
             trend_result={
+                "request_id": "request-123",
                 "result": {
+                    "request_id": "request-123",
                     "status": "partial",
                     "limitations": ["Some trend sources were unavailable."],
                     "errors": [
@@ -297,7 +299,7 @@ class MarketResearchAgentTests(unittest.TestCase):
                 "missing_fields": ["market"],
                 "evidence_ids": ["trend:E-001"],
             },
-            inventory_product_result={"status": "ok"},
+            inventory_product_result={"request_id": "request-123", "status": "ok"},
         )
         source = StaticSource(report)
 
@@ -345,10 +347,11 @@ class MarketResearchAgentTests(unittest.TestCase):
             request_id="request-123",
             planning_request={"query": "spring knitwear"},
             trend_result={
+                "request_id": "request-123",
                 "status": "partial",
                 "limitations": ["Trend coverage is incomplete."],
             },
-            inventory_product_result={"status": "ok"},
+            inventory_product_result={"request_id": "request-123", "status": "ok"},
         )
 
         result = MarketResearchAgent(

@@ -7,7 +7,7 @@
   "additionalProperties": false,
   "required": [
     "schema_version", "request_id", "agent_id", "status", "summary",
-    "requested_scope", "sales_data", "market_data", "unit_economics",
+    "requested_scope", "upstream_context", "sales_data", "market_data", "unit_economics",
     "findings", "evidence", "missing_data", "limitations", "errors"
   ],
   "properties": {
@@ -23,6 +23,15 @@
         "currency": {"type": ["string", "null"]}, "measure_type": {"type": ["string", "null"]},
         "mapping_id": {"type": ["string", "null"]}, "mapping_version": {"type": ["string", "null"]},
         "period_grain": {"type": ["string", "null"]}, "document_version": {"type": ["string", "null"]}
+      }
+    },
+    "upstream_context": {
+      "type": ["object", "null"],
+      "required": ["planning_request", "trend_result", "inventory_product_result"],
+      "properties": {
+        "planning_request": {"type": "object"},
+        "trend_result": {"type": ["object", "null"]},
+        "inventory_product_result": {"type": ["object", "null"]}
       }
     },
     "sales_data": {"$ref": "#/$defs/data_block"},

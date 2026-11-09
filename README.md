@@ -8,7 +8,7 @@ Project_06의 책임 정리 과정에서 H&M 과거자료 처리·품질·집계
 
 ## 현재 동작
 
-- `MarketResearchResult` 공통 응답 envelope와 Evidence 참조 모델을 제공합니다.
+- 이 저장소 안에서만 쓰는 `MarketResearchResult` 로컬 응답 envelope와 Evidence 참조 모델을 제공합니다. 타 저장소와 공통 계약으로 합의된 상태는 아닙니다.
 - 조사 출처는 `MarketResearchSource` 인터페이스로 연결하도록 분리했습니다.
 - 출처가 설정되지 않으면 `no_results`와 사유를 반환합니다. 이를 시장값 0으로 표현하지 않습니다.
 - 권한이 `authorized`로 확인되지 않은 Evidence와 이를 근거로 삼은 finding은 출력하지 않습니다.
@@ -28,7 +28,7 @@ Project_06의 책임 정리 과정에서 H&M 과거자료 처리·품질·집계
 - `MarketEvidenceRetriever`는 주입 가능한 경로로 MarketResearchAgent에 연결되어 원문 query와 구조화 scope를 전달하고 승인된 결과만 Evidence로 보존합니다. 기본 실행에는 retriever, 벡터 저장소, 임베딩·생성 모델이 설정되어 있지 않습니다. 검색 근거를 바탕으로 서술형 시장 주장을 생성하는 기능도 구현하지 않았습니다.
 - 판매-시장 비교 가능성은 카테고리 내 observation pair별로 차원별 일치/불일치와 `not_comparable`을 기록하며 산술·점유율을 계산하지 않습니다. 비교 행렬은 최대 5,000쌍이며 초과 시 제한을 기록합니다.
 
-이 패키지는 요청·트렌드·재고 입력을 opaque dictionary로 전달합니다. 실제 공통 입력 스키마가 다른 저장소와 합의되면 해당 계약 어댑터를 추가해야 합니다. `contracts/schemas/market-research-result.schema.json`은 현재 로컬 1.0 구현을 설명하며, `contracts/schemas/proposals/`의 1.1·1.2·1.3은 새 판매·시장 경계를 검토하기 위한 제안입니다. 어느 파일도 다른 에이전트 저장소와 합의된 wire contract를 뜻하지 않습니다.
+이 패키지는 요청·트렌드·재고 입력을 opaque dictionary로 source adapter에 그대로 전달합니다. trend/product-inventory 결과에는 현재 요청과 일치하는 `request_id`와 지원 상태가 있어야 하며, 불일치·누락·잘못된 형식은 source 호출 전에 거부합니다. producer `schema_version`은 이 저장소의 로컬 결과 버전과 비교하지 않습니다. 입력 원문 review snapshot은 명시적 1.2/1.3 proposal에만 포함되고 1.0 serializer에서는 제외됩니다. 실제 공통 입력 스키마가 다른 저장소와 합의되면 별도 계약 어댑터를 추가해야 합니다. `contracts/schemas/market-research-result.schema.json`은 현재 로컬 1.0 구현을 설명하며, `contracts/schemas/proposals/`의 1.1·1.2·1.3은 새 판매·시장 경계를 검토하기 위한 제안입니다. 어느 파일도 다른 에이전트 저장소와 합의된 wire contract를 뜻하지 않습니다. 상세 동작은 [`docs/design/upstream-context-preservation.md`](docs/design/upstream-context-preservation.md)를 참고하세요.
 
 ## 빠른 실행
 
@@ -61,7 +61,7 @@ PYTHONPATH=src python3 -m market_research_agent.cli \\
   --proposal-v1-2
 ```
 
-입력 예시 파일은 이 저장소의 `examples/fixtures/market-research-input.example.json`을 참고하세요. 모든 상위 결과의 `request_id`가 일치해야 합니다. H&M 어댑터는 승인 여부가 별도 확인되지 않으면 파일을 읽지 않고 수치 관측을 내보내지 않습니다. 실제 데이터 사용 승인을 받은 뒤에만 `--hm-usage-authorized`를 지정하십시오. 이 플래그는 승인 절차가 아니며, 호출자가 외부에서 확인한 승인을 선언합니다. 기본 1.0 직렬화는 기존 결과 스키마를 유지합니다. `--proposal-v1-1`, `--proposal-v1-2`, `--proposal-v1-3`은 각각 명시적인 미합의 계약 제안을 출력하며 공통 wire contract를 뜻하지 않습니다. v1.3은 계산·비교 가능성·검색 결과를 추가합니다.
+입력 예시 파일은 이 저장소의 `examples/fixtures/market-research-input.example.json`을 참고하세요. 모든 상위 결과의 `request_id`가 일치해야 합니다. `--proposal-v1-2`/`--proposal-v1-3`에서만 upstream 입력 snapshot이 포함됩니다. H&M 어댑터는 승인 여부가 별도 확인되지 않으면 파일을 읽지 않고 수치 관측을 내보내지 않습니다. 실제 데이터 사용 승인을 받은 뒤에만 `--hm-usage-authorized`를 지정하십시오. 이 플래그는 승인 절차가 아니며, 호출자가 외부에서 확인한 승인을 선언합니다. 기본 1.0 직렬화는 기존 결과 스키마를 유지합니다. `--proposal-v1-1`, `--proposal-v1-2`, `--proposal-v1-3`은 각각 명시적인 미합의 계약 제안을 출력하며 공통 wire contract를 뜻하지 않습니다. v1.3은 계산·비교 가능성·검색 결과를 추가합니다.
 
 승인된 시장자료 파일은 `--market-observations-csv`와 `--market-manifest`로 함께 전달할 수 있습니다. manifest의 `permission_status`가 `authorized`가 아니면 관측을 내보내지 않습니다. 입력의 원문 `planning_request.query`는 source adapter에 전달되고 proposal의 `requested_scope.query`에도 보존됩니다. CSV `search_text`는 literal 필터이며 RAG가 아닙니다. 이 로컬 CSV 어댑터는 외부 API를 호출하지 않으며, KOSIS/Euromonitor/WGSN에 자동 연결되지 않습니다. CSV 열 정의, manifest 예시, H&M 처리 파일 준비와 두 어댑터를 한 번에 실행하는 방법은 [`docs/design/local-market-data-connection.md`](docs/design/local-market-data-connection.md)를 참고하세요. API 자격 증명은 CLI 인수나 데이터 manifest에 넣지 마세요.
 
@@ -113,8 +113,8 @@ from market_research_agent import MarketResearchAgent, MarketResearchContext
 context = MarketResearchContext(
     request_id="req-123",
     planning_request={"query": "2027SS 한국 여성 니트"},
-    trend_result={"status": "ok", "findings": []},
-    inventory_product_result={"status": "ok", "findings": []},
+    trend_result={"request_id": "req-123", "status": "ok", "findings": []},
+    inventory_product_result={"request_id": "req-123", "status": "ok", "findings": []},
 )
 
 # 승인된 source adapter를 넘기기 전에는 안전하게 no_results를 반환합니다.

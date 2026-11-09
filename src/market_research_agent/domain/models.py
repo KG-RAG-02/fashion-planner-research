@@ -144,6 +144,7 @@ class MarketResearchResult:
     sales_retrieval: Any | None = None
     market_retrieval: Any | None = None
     comparability: tuple[Any, ...] = ()
+    upstream_context: dict[str, Any] | None = None
 
     def to_dict(self) -> dict[str, Any]:
         """Return a JSON-compatible object matching the local result schema."""
@@ -153,6 +154,7 @@ class MarketResearchResult:
         payload.pop("market_data", None)
         payload.pop("unit_economics", None)
         payload.pop("requested_scope", None)
+        payload.pop("upstream_context", None)
         payload.pop("sales_retrieval", None)
         payload.pop("market_retrieval", None)
         payload.pop("comparability", None)
@@ -192,6 +194,7 @@ class MarketResearchResult:
         payload = self.to_dict()
         payload["schema_version"] = "1.2-proposal"
         payload["requested_scope"] = self.requested_scope or {}
+        payload["upstream_context"] = self.upstream_context
         sales_block = (
             self.sales_data.to_dict()
             if self.sales_data

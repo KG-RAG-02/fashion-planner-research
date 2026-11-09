@@ -33,8 +33,8 @@ def context() -> MarketResearchContext:
     return MarketResearchContext(
         request_id="req-1",
         planning_request={"query": "women's spring knitwear"},
-        trend_result={"status": "ok"},
-        inventory_product_result={"status": "ok"},
+        trend_result={"request_id": "req-1", "status": "ok"},
+        inventory_product_result={"request_id": "req-1", "status": "ok"},
     )
 
 
