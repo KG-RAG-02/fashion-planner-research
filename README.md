@@ -99,6 +99,20 @@ curl -sS -X POST http://127.0.0.1:8766/v1/agents/sales-market-agent/runs \
 
 기본 실행은 승인된 자료원을 주입하지 않으므로 응답 상태는 `no_results`이며, 숫자 분석 결과를 만들지 않습니다. HTTP `result.schema_version`은 `1.0`입니다. 로컬 분석 확장 serializer 1.1–1.3은 계속 사용할 수 있지만 공통 HTTP wire result로 채택되지는 않았습니다.
 
+생성된 fixture로 제한된 질의 분석 응답을 확인하려면 `--synthetic-demo`를 명시해 실행합니다. 이 모드는 실제 source와 H&M Kaggle을 사용하지 않으며, findings와 limitations에 합성 테스트임을 표시합니다. 결과는 `partial`이고 합성 수치는 사업 근거가 아닙니다. 안정된 HTTP 1.0에는 구조화된 sales/market 블록과 chart artifact가 없으므로 이 모드는 명시적으로 표시된 proposal finding만 반환합니다.
+
+```bash
+PYTHONPATH=src python3 -m market_research_agent.http_server --host 127.0.0.1 --port 8766 --synthetic-demo
+```
+
+시연 데이터 차원, 요청 지원 범위, 제한은 [합성 질의 커버리지 문서](docs/design/synthetic-query-coverage.md)를 참고하세요.
+
+```bash
+curl -sS -X POST http://127.0.0.1:8766/v1/agents/sales-market-agent/runs \
+  -H 'Content-Type: application/json' \
+  --data-binary @examples/fixtures/http_json_handoff/project-07-synthetic-demo.request.json
+```
+
 실제 자료원 기반 판매·시장 분석 에이전트로 발전시키기 위한 현재 갭, 자료원 후보, 권한·데이터 계약, 처리 구조와 단계별 acceptance criteria는 [운영 분석 에이전트 설계 제안](docs/design/operational-market-analysis-agent-design.md)에 정리되어 있습니다. 실제 자료 연결이나 권한 승인은 포함하지 않습니다.
 
 기본 seed `20261109`는 문서 120개, chunk 359개, 검색 query 22개를 만듭니다. 생성량은 20–1000개 문서 범위에서 조절합니다. 생성 파일은 `tests/fixtures/synthetic_market_rag/` 아래에만 둘 수 있습니다.

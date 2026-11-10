@@ -14,6 +14,7 @@ from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
 from .domain.models import MarketResearchContext
+from .sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
 from .workflows.market_research import MarketResearchAgent
 
 
@@ -286,12 +287,18 @@ def make_handler(agent_factory: Callable[[], MarketResearchAgent] | None = None)
     return Project07Handler
 
 
-def serve(host: str = "127.0.0.1", port: int = 8766) -> None:
+def serve(host: str = "127.0.0.1", port: int = 8766, *, synthetic_demo: bool = False) -> None:
     """Start the local, unauthenticated proposal server on loopback only."""
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("The local proposal server may only bind to loopback.")
-    server = ThreadingHTTPServer((host, port), make_handler())
+    agent_factory = (
+        (lambda: MarketResearchAgent(SyntheticQueryCoverageSource()))
+        if synthetic_demo else None
+    )
+    server = ThreadingHTTPServer((host, port), make_handler(agent_factory))
     print(f"Project_07 local HTTP API (vogue-handoff/0.1): http://{host}:{port}")
+    if synthetic_demo:
+        print("Synthetic demonstration mode is enabled; every result is labeled synthetic and is not business evidence.")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -304,8 +311,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
+    parser.add_argument("--synthetic-demo", action="store_true", help="Use only the local test-only synthetic query coverage fixture.")
     args = parser.parse_args(argv)
-    serve(args.host, args.port)
+    serve(args.host, args.port, synthetic_demo=args.synthetic_demo)
     return 0
 
 

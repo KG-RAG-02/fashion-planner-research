@@ -14,6 +14,8 @@ from market_research_agent.http_server import (
     context_from_handoff_request,
     make_handler,
 )
+from market_research_agent.sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
+from market_research_agent.workflows.market_research import MarketResearchAgent
 
 
 REQUEST_ID = "synthetic-p07-http-001"
@@ -23,6 +25,11 @@ RESPONSE_FIELDS = {"contract_version", "request_id", "producer", "status", "resu
 
 def valid_request() -> dict:
     path = ROOT / "examples/fixtures/http_json_handoff/project-07-run.request.synthetic.json"
+    return json.loads(path.read_text(encoding="utf-8"))
+
+
+def valid_demo_request() -> dict:
+    path = ROOT / "examples/fixtures/http_json_handoff/project-07-synthetic-demo.request.json"
     return json.loads(path.read_text(encoding="utf-8"))
 
 
@@ -79,6 +86,26 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertEqual(response["result"]["request_id"], REQUEST_ID)
         self.assertEqual(response["result"]["schema_version"], "1.0")
         self.assertEqual(set(response), RESPONSE_FIELDS)
+
+    def test_opt_in_synthetic_demo_returns_labeled_analysis_without_changing_v01_envelope(self):
+        request = valid_demo_request()
+        status, response, _ = self.post(
+            request,
+            agent_factory=lambda: MarketResearchAgent(SyntheticQueryCoverageSource()),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(set(response), RESPONSE_FIELDS)
+        self.assertEqual(response["contract_version"], "vogue-handoff/0.1")
+        self.assertEqual(response["producer"]["schema_version"], "1.0")
+        self.assertEqual(response["status"], "partial")
+        self.assertEqual(response["result"]["status"], "partial")
+        self.assertEqual(response["result"]["request_id"], request["request_id"])
+        self.assertEqual(len(response["result"]["findings"]), 2)
+        self.assertTrue(all(item["kind"] == "proposal" for item in response["result"]["findings"]))
+        self.assertTrue(all("[SYNTHETIC TEST DATA]" in item["statement"] for item in response["result"]["findings"]))
+        self.assertTrue(all("excluded colors=black" in item["statement"] for item in response["result"]["findings"]))
+        self.assertTrue(any("not actual H&M/VOGUE sales" in item for item in response["result"]["limitations"]))
+        self.assertEqual(response["result"]["evidence"], [])
 
     def test_project08_route_alias_is_supported_for_local_proposal_client(self):
         status, response, headers = self.post(
