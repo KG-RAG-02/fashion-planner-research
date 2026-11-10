@@ -30,14 +30,18 @@ def _months() -> list[tuple[int, int]]:
 def generate(seed: int, output_dir: Path) -> dict[str, Any]:
     rng = random.Random(seed)
     output_dir.mkdir(parents=True, exist_ok=True)
-    rows: list[dict[str, Any]] = []
-    base = [76, 79, 88, 98, 108, 112, 105, 96, 91, 103, 118, 132]
+    raw_rows: list[tuple[int, int, float]] = []
+    seasonal_shape = [76, 79, 88, 98, 108, 112, 105, 96, 91, 103, 118, 132]
     for year, month in _months():
         offset = 0 if year == 2024 else 12
-        seasonal = base[month - 1]
+        seasonal = seasonal_shape[month - 1]
         trend = offset * 0.65
         noise = rng.uniform(-3.0, 3.0)
-        index = round(seasonal + trend + noise, 1)
+        raw_rows.append((year, month, seasonal + trend + noise))
+    base_mean = sum(value for year, _month, value in raw_rows if year == 2024) / 12
+    rows: list[dict[str, Any]] = []
+    for year, month, raw_value in raw_rows:
+        index = round(raw_value / base_mean * 100, 1)
         rows.append({
             "observation_id": f"syn-market-{year}-{month:02d}",
             "metric_name": "retail_sales_index",
@@ -59,7 +63,7 @@ def generate(seed: int, output_dir: Path) -> dict[str, Any]:
         })
     csv_path = output_dir / "synthetic_market_observations.csv"
     with csv_path.open("w", encoding="utf-8", newline="") as stream:
-        writer = csv.DictWriter(stream, fieldnames=list(rows[0]))
+        writer = csv.DictWriter(stream, fieldnames=list(rows[0]), lineterminator="\n")
         writer.writeheader()
         writer.writerows(rows)
 
@@ -67,19 +71,19 @@ def generate(seed: int, output_dir: Path) -> dict[str, Any]:
     mean_2025 = sum(float(row["value"]) for row in rows[12:]) / 12
     yoy = round((mean_2025 / mean_2024 - 1) * 100, 2)
     evidence = [{
-        "evidence_id": "syn-evidence-series",
+        "evidence_id": row["evidence_id"],
         "source_id": "synthetic-generator",
         "source_type": "synthetic_test_dataset",
         "source_name": "Deterministic synthetic market series",
-        "locator": "synthetic_market_observations.csv",
+        "locator": f"synthetic_market_observations.csv#{row['observation_id']}",
         "published_at": None,
-        "observed_at": None,
+        "observed_at": f"{row['period_end']}T00:00:00Z",
         "fetched_at": None,
         "permission_status": "authorized_for_synthetic_testing_only",
         "manifest_id": f"synthetic-seed-{seed}",
         "synthetic": True,
         "data_nature": "synthetic_test",
-    }]
+    } for row in rows]
     result = {
         "schema_version": "1.0-proposal",
         "request_id": f"synthetic-demo-seed-{seed}",
@@ -148,7 +152,8 @@ def generate(seed: int, output_dir: Path) -> dict[str, Any]:
             "seed": seed,
             "generator": "tools/synthetic_market_analysis.py",
             "rule": "monthly seasonal template + linear drift + uniform noise in [-3, 3]",
-            "seasonal_template_2024": base,
+            "seasonal_template_2024": seasonal_shape,
+            "base_period_normalization": "divide each synthetic value by the generated 2024 mean and multiply by 100",
             "monthly_drift_per_elapsed_month": 0.65,
             "noise_distribution": "uniform(-3, 3)",
         },
@@ -163,6 +168,11 @@ def generate(seed: int, output_dir: Path) -> dict[str, Any]:
         "permission_status": "authorized_for_synthetic_testing_only",
         "operational_eligible": False, "seed": seed,
         "rows": len(rows), "usage_restriction": SYNTHETIC_NOTICE,
+        "empirical_calibration": False,
+        "value_basis": "generator assumptions only; not calibrated to observed market values",
+        "metric_definition": "Synthetic retail sales index, with generated 2024 monthly mean normalized to 100",
+        "shape_reference": "Statistics Korea Online Shopping Trends publication dimensions only; no observed values copied or used for calibration",
+        "shape_reference_url": "https://www.kostat.go.kr/board.es?act=view&bid=241&list_no=437829&mid=a10301010000",
     }
     (output_dir / "manifest.json").write_text(json.dumps(manifest, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     return result

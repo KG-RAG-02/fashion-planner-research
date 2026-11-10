@@ -75,6 +75,8 @@ RAG 검색의 query 전달, 메타데이터 범위 필터, Evidence citation, �
 
 향후 생성 모델의 프롬프트 인젝션 방어 설계는 [시스템 프롬프트 제안](docs/design/market-analysis-system-prompt.proposal.md), 합성 공격·정상 평가 사례는 `tests/fixtures/market_analysis_prompt_injection/cases.json`에 있습니다. 현재 런타임에는 모델이나 이 프롬프트가 연결되어 있지 않습니다.
 
+Project_06 및 오케스트레이터와 HTTP/JSON 계약을 검토할 자료는 [HTTP handoff 설계 제안](docs/design/http-json-handoff.proposal.md)과 [합성 계약 fixture](examples/fixtures/http_json_handoff/cases.json)에 있습니다. 계약·호출 방식 합의 전 검토용이며 Project_07 HTTP API는 구현되어 있지 않습니다.
+
 기본 seed `20261109`는 문서 120개, chunk 359개, 검색 query 22개를 만듭니다. 생성량은 20–1000개 문서 범위에서 조절합니다. 생성 파일은 `tests/fixtures/synthetic_market_rag/` 아래에만 둘 수 있습니다.
 
 ```bash
