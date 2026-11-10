@@ -71,6 +71,10 @@ PYTHONPATH=src python3 -m market_research_agent.cli \\
 
 RAG 검색의 query 전달, 메타데이터 범위 필터, Evidence citation, 권한 차단 및 검색 순위를 개발 환경에서 평가하려면 전용 합성 fixture generator를 사용합니다. 이 fixture는 실제 통계·판매·시장 근거가 아니며 사업 의사결정에 사용할 수 없습니다. 운영 retriever, source manifest 또는 기본 workflow에서 자동 선택되지 않고, 외부 임베딩·모델·저장소에 연결되지 않습니다. 테스트 전용 permission 값 `authorized_for_synthetic_testing_only`는 운영의 `authorized`와 별개입니다.
 
+판매·시장 분석 결과 전달 형식과 차트를 살펴보려면 [합성 분석 demo](docs/design/synthetic-analysis-demo.md)를 참고하세요. `python3 tools/synthetic_market_analysis.py --seed 20261110`은 합성 시장 시계열, 로컬 proposal JSON, SVG 차트를 생성합니다. H&M 판매값은 Kaggle 사용 권한이 확인되지 않아 읽지 않으며 결과에서 `no_results`로 표시됩니다. 따라서 이 demo는 두 데이터의 직접 비교를 `not_comparable`로 반환합니다.
+
+향후 생성 모델의 프롬프트 인젝션 방어 설계는 [시스템 프롬프트 제안](docs/design/market-analysis-system-prompt.proposal.md), 합성 공격·정상 평가 사례는 `tests/fixtures/market_analysis_prompt_injection/cases.json`에 있습니다. 현재 런타임에는 모델이나 이 프롬프트가 연결되어 있지 않습니다.
+
 기본 seed `20261109`는 문서 120개, chunk 359개, 검색 query 22개를 만듭니다. 생성량은 20–1000개 문서 범위에서 조절합니다. 생성 파일은 `tests/fixtures/synthetic_market_rag/` 아래에만 둘 수 있습니다.
 
 ```bash
