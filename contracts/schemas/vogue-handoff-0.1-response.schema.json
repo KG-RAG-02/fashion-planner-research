@@ -18,7 +18,7 @@
       "additionalProperties": false,
       "required": ["agent_id", "schema_version"],
       "properties": {
-        "agent_id": {"const": "market-research-agent"},
+        "agent_id": {"const": "sales-market-agent"},
         "schema_version": {"const": "1.0"}
       }
     }
