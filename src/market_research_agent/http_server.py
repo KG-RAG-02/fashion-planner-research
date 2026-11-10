@@ -1,14 +1,16 @@
 """Loopback development HTTP adapter for the VOGUE handoff v0.1 contract.
 
-This module is a local integration scaffold, not an approved production API.
-It deliberately has no source configuration, authentication, retry, or deploy
-policy. Callers may inject an explicitly configured agent in Python.
+This module is a local integration adapter, not a production deployment. It
+requires the shared Bearer token on run routes and has no source configuration,
+retry, or deploy policy. Callers may inject an explicitly configured agent in Python.
 """
 
 from __future__ import annotations
 
 import argparse
+import hmac
 import json
+import os
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
@@ -220,6 +222,12 @@ def make_handler(agent_factory: Callable[[], MarketResearchAgent] | None = None)
             else:
                 self._send_json(404, _error_payload("NOT_FOUND", "Route not found."))
 
+        def _authorized(self) -> bool:
+            expected = os.environ.get("VOGUE_AGENT_SERVICE_BEARER_TOKEN", "")
+            authorization = self.headers.get("Authorization", "")
+            supplied = authorization[7:].strip() if authorization.startswith("Bearer ") else ""
+            return bool(expected and supplied) and hmac.compare_digest(supplied, expected)
+
         def do_POST(self) -> None:
             path = unquote(urlsplit(self.path).path)
             prefix = "/v1/agents/"
@@ -230,6 +238,9 @@ def make_handler(agent_factory: Callable[[], MarketResearchAgent] | None = None)
             route_agent = path[len(prefix):-len(suffix)]
             if route_agent not in {CANONICAL_ROUTE_ID, *DEPRECATED_ROUTE_IDS} or "/" in route_agent:
                 self._send_json(404, _error_payload("AGENT_NOT_FOUND", "Agent route not found."))
+                return
+            if not self._authorized():
+                self._send_json(401, _error_payload("UNAUTHORIZED", "Bearer authentication required."))
                 return
             if self.headers.get_content_type() != "application/json":
                 self._send_json(415, _error_payload("UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json."))
@@ -288,7 +299,7 @@ def make_handler(agent_factory: Callable[[], MarketResearchAgent] | None = None)
 
 
 def serve(host: str = "127.0.0.1", port: int = 8766, *, synthetic_demo: bool = False) -> None:
-    """Start the local, unauthenticated proposal server on loopback only."""
+    """Start the local proposal server on loopback; run routes require the shared bearer token."""
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("The local proposal server may only bind to loopback.")
     agent_factory = (

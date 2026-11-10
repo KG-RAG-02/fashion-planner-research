@@ -81,7 +81,7 @@ RAG 검색의 query 전달, 메타데이터 범위 필터, Evidence citation, �
 
 향후 생성 모델의 판매·시장 분석 프롬프트 원본은 역할별 [`prompts/`](prompts/README.md)에서 관리합니다. 보안 원칙·평가 기준은 [프롬프트 제안 문서](docs/design/market-analysis-system-prompt.proposal.md), 합성 공격·정상 평가 사례는 `tests/fixtures/market_analysis_prompt_injection/cases.json`에 있습니다. 현재 런타임에는 모델이나 이 프롬프트가 연결되어 있지 않습니다. 검토용 렌더링은 `python3 scripts/render_market_analysis_prompt.py --prompt sales_analysis --version v1` 또는 `--prompt market_analysis --version v1`로 생성합니다.
 
-VOGUE 공통 HTTP handoff v0.1은 [계약 및 Project_07 구현 문서](docs/design/http-json-handoff.proposal.md)에 정리되어 있습니다. Project_07에는 loopback 개발 서버가 있으며, 운영 서비스 배포·인증은 포함되지 않습니다. 승인된 source를 주입하지 않으면 `no_results`를 반환하고, runtime chart artifact는 생성하지 않습니다.
+VOGUE 공통 HTTP handoff v0.1은 [계약 및 Project_07 구현 문서](docs/design/http-json-handoff.proposal.md)에 정리되어 있습니다. Project_07에는 loopback 개발 서버가 있으며, 운영 배포는 별도입니다. `/runs`는 `VOGUE_AGENT_SERVICE_BEARER_TOKEN` Bearer 인증을 요구합니다. 승인된 source를 주입하지 않으면 `no_results`를 반환하고, runtime chart artifact는 생성하지 않습니다.
 
 로컬 HTTP 요청/응답 흐름은 다음과 같이 실행할 수 있습니다.
 
@@ -89,7 +89,7 @@ VOGUE 공통 HTTP handoff v0.1은 [계약 및 Project_07 구현 문서](docs/des
 PYTHONPATH=src python3 -m market_research_agent.http_server --host 127.0.0.1 --port 8766
 ```
 
-Canonical endpoint는 `POST http://127.0.0.1:8766/v1/agents/sales-market-agent/runs`입니다. 이전 `/v1/agents/market-research-agent/runs` 경로는 deprecated alias로 유지됩니다. 기본 서버는 loopback에만 바인딩하고 인증이 없어 외부 공개·운영 배포에 사용할 수 없습니다. 정상 응답은 공통 envelope v0.1과 안정된 producer payload 1.0을 사용합니다. 차트 artifact는 별도 후속 계약입니다.
+Canonical endpoint는 `POST http://127.0.0.1:8766/v1/agents/sales-market-agent/runs`입니다. 이전 `/v1/agents/market-research-agent/runs` 경로는 deprecated alias로 유지됩니다. 기본 서버는 loopback에만 바인딩하고 `/runs`에서 `VOGUE_AGENT_SERVICE_BEARER_TOKEN`을 검증합니다. 외부 공개·운영 배포에는 HTTPS/TLS가 추가로 필요합니다. 정상 응답은 공통 envelope v0.1과 안정된 producer payload 1.0을 사용합니다. 차트 artifact는 별도 후속 계약입니다.
 
 다른 터미널에서 합성 입력 fixture를 보낼 수 있습니다.
 

@@ -4,9 +4,11 @@ from __future__ import annotations
 
 import io
 import json
+import os
 from email.message import Message
 from pathlib import Path
 import unittest
+from unittest.mock import patch
 
 from market_research_agent.http_server import (
     MAX_BODY_BYTES,
@@ -34,7 +36,7 @@ def valid_demo_request() -> dict:
 
 
 class Project07HttpServerTests(unittest.TestCase):
-    def post(self, request_body: dict | bytes, *, path="/v1/agents/sales-market-agent/runs", content_type="application/json", agent_factory=None):
+    def post(self, request_body: dict | bytes, *, path="/v1/agents/sales-market-agent/runs", content_type="application/json", agent_factory=None, token="test-agent-token"):
         handler_type = make_handler(agent_factory)
         handler = object.__new__(handler_type)
         data = request_body if isinstance(request_body, bytes) else json.dumps(request_body).encode()
@@ -42,6 +44,8 @@ class Project07HttpServerTests(unittest.TestCase):
         handler.headers = Message()
         handler.headers["Content-Type"] = content_type
         handler.headers["Content-Length"] = str(len(data))
+        if token is not None:
+            handler.headers["Authorization"] = f"Bearer {token}"
         handler.rfile = io.BytesIO(data)
         handler.wfile = io.BytesIO()
         handler.response_status = None
@@ -49,8 +53,16 @@ class Project07HttpServerTests(unittest.TestCase):
         handler.send_response = lambda status, *args: setattr(handler, "response_status", status)
         handler.send_header = lambda name, value: handler.response_headers.__setitem__(name, value)
         handler.end_headers = lambda: None
-        handler_type.do_POST(handler)
+        with patch.dict(os.environ, {"VOGUE_AGENT_SERVICE_BEARER_TOKEN": "test-agent-token"}):
+            handler_type.do_POST(handler)
         return handler.response_status, json.loads(handler.wfile.getvalue()), handler.response_headers
+
+    def test_canonical_routes_require_matching_shared_bearer_token(self):
+        for token in (None, "wrong-token"):
+            with self.subTest(token="missing" if token is None else "wrong"):
+                status, response, _ = self.post(valid_request(), token=token)
+                self.assertEqual(status, 401)
+                self.assertEqual(response["error"]["code"], "UNAUTHORIZED")
 
     def test_contract_schema_and_mixed_version_fixture_match_v01(self):
         fixture = json.loads((ROOT / "examples/fixtures/http_json_handoff/cases.json").read_text(encoding="utf-8"))
