@@ -83,7 +83,7 @@ def main() -> None:
         "operational_eligible": False,
     }
     envelope = {
-        "contract_version": "vogue-handoff/0.1-proposal",
+        "contract_version": "vogue-handoff/0.2-proposal",
         "request_id": result["request_id"],
         "producer": {"agent_id": result["agent_id"], "schema_version": result["schema_version"]},
         "status": result["status"],

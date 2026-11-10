@@ -1,4 +1,4 @@
-"""Loopback development HTTP adapter for the Project_07 run proposal.
+"""Loopback development HTTP adapter for the VOGUE handoff v0.1 contract.
 
 This module is a local integration scaffold, not an approved production API.
 It deliberately has no source configuration, authentication, retry, or deploy
@@ -17,9 +17,14 @@ from .domain.models import MarketResearchContext
 from .workflows.market_research import MarketResearchAgent
 
 
-CONTRACT_VERSION = "vogue-handoff/0.1-proposal"
+CONTRACT_VERSION = "vogue-handoff/0.1"
 AGENT_ID = MarketResearchAgent.agent_id
-ROUTE_ALIASES = {AGENT_ID, "sales-market-agent"}
+CANONICAL_ROUTE_ID = "sales-market-agent"
+DEPRECATED_ROUTE_IDS = {AGENT_ID}
+SUPPORTED_UPSTREAM_SCHEMA_VERSIONS = {
+    "trend_result": {"1.0", "1.1"},
+    "inventory_product_result": {"1.0"},
+}
 MAX_BODY_BYTES = 1_048_576
 
 _STRING_FIELDS = (
@@ -29,6 +34,11 @@ _STRING_FIELDS = (
     "requested_mapping_id", "requested_mapping_version", "requested_period_grain",
     "requested_document_version",
 )
+_REQUEST_FIELDS = {"contract_version", "request_id", "input"}
+_INPUT_FIELDS = {
+    "request_id", "planning_request", "trend_result", "inventory_product_result",
+    "requested_metrics", *_STRING_FIELDS,
+}
 
 
 def _safe_error_request_id(value: Any) -> str | None:
@@ -41,8 +51,16 @@ def _safe_error_request_id(value: Any) -> str | None:
     return None
 
 
+def _error_payload(code: str, message: str, request_id: str | None = None) -> dict[str, Any]:
+    return {
+        "contract_version": CONTRACT_VERSION,
+        "request_id": request_id,
+        "error": {"code": code, "message": message},
+    }
+
+
 class RequestValidationError(ValueError):
-    def __init__(self, code: str, message: str, http_status: int = 400) -> None:
+    def __init__(self, code: str, message: str, http_status: int = 422) -> None:
         super().__init__(message)
         self.code = code
         self.http_status = http_status
@@ -67,10 +85,13 @@ def _validate_json_tree(value: Any, field: str) -> None:
         raise RequestValidationError("INVALID_INPUT", f"{field} must contain valid JSON values.") from None
 
 
-def context_from_proposal_request(value: Any) -> MarketResearchContext:
-    """Validate the candidate envelope and map its input to the local context."""
+def context_from_handoff_request(value: Any) -> MarketResearchContext:
+    """Validate the v0.1 envelope and map its input to the local context."""
     if not isinstance(value, dict):
         raise RequestValidationError("INVALID_ENVELOPE", "JSON request body must be an object.")
+    extra_request_fields = set(value) - _REQUEST_FIELDS
+    if extra_request_fields:
+        raise RequestValidationError("INVALID_ENVELOPE", "Request contains unsupported top-level fields.")
     if value.get("contract_version") != CONTRACT_VERSION:
         raise RequestValidationError(
             "UNSUPPORTED_CONTRACT_VERSION", "Unsupported contract_version.", 422,
@@ -81,6 +102,9 @@ def context_from_proposal_request(value: Any) -> MarketResearchContext:
     payload = value.get("input")
     if not isinstance(payload, dict):
         raise RequestValidationError("INVALID_INPUT", "input must be an object.")
+    extra_input_fields = set(payload) - _INPUT_FIELDS
+    if extra_input_fields:
+        raise RequestValidationError("INVALID_INPUT", "input contains unsupported fields.")
     if payload.get("request_id") != request_id:
         raise RequestValidationError("REQUEST_ID_MISMATCH", "Envelope and input request_id must match.", 422)
 
@@ -96,6 +120,9 @@ def context_from_proposal_request(value: Any) -> MarketResearchContext:
 
     trend_result = _object_or_none(payload.get("trend_result"), "trend_result")
     inventory_result = _object_or_none(payload.get("inventory_product_result"), "inventory_product_result")
+    for required in ("trend_result", "inventory_product_result"):
+        if required not in payload:
+            raise RequestValidationError("INVALID_INPUT", f"input.{required} is required; use null when absent.")
     for field, upstream in (("trend_result", trend_result), ("inventory_product_result", inventory_result)):
         if upstream is not None:
             upstream_id = upstream.get("request_id")
@@ -121,6 +148,12 @@ def context_from_proposal_request(value: Any) -> MarketResearchContext:
                 ):
                     raise RequestValidationError(
                         "INVALID_PRODUCER_SCHEMA", f"{field} schema_version must be a non-empty string.", 422,
+                    )
+                if "schema_version" in version_owner and version_owner["schema_version"] not in SUPPORTED_UPSTREAM_SCHEMA_VERSIONS[field]:
+                    raise RequestValidationError(
+                        "UNSUPPORTED_PRODUCER_SCHEMA",
+                        f"{field} schema_version is not supported by this adapter.",
+                        422,
                     )
         _validate_json_tree(upstream, field)
     _validate_json_tree(planning_request, "planning_request")
@@ -161,86 +194,94 @@ def make_handler(agent_factory: Callable[[], MarketResearchAgent] | None = None)
     build_agent = agent_factory or MarketResearchAgent
 
     class Project07Handler(BaseHTTPRequestHandler):
-        server_version = "Project07LocalProposal/0.1"
+        server_version = "Project07Local/0.1"
 
         def log_message(self, fmt: str, *args: object) -> None:
             # Do not write request bodies or URL query data to the default log.
             return
 
-        def _send_json(self, status: int, body: dict[str, Any]) -> None:
+        def _send_json(self, status: int, body: dict[str, Any], *, headers: dict[str, str] | None = None) -> None:
             encoded = json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(encoded)))
             self.send_header("Cache-Control", "no-store")
             self.send_header("X-Content-Type-Options", "nosniff")
+            for name, value in (headers or {}).items():
+                self.send_header(name, value)
             self.end_headers()
             self.wfile.write(encoded)
 
         def do_GET(self) -> None:
             path = urlsplit(self.path).path
             if path == "/api/health":
-                self._send_json(200, {"status": "ok", "mode": "local-proposal"})
+                self._send_json(200, {"status": "ok", "mode": "local-development"})
             else:
-                self._send_json(404, {"error": {"code": "NOT_FOUND", "message": "Route not found."}})
+                self._send_json(404, _error_payload("NOT_FOUND", "Route not found."))
 
         def do_POST(self) -> None:
             path = unquote(urlsplit(self.path).path)
             prefix = "/v1/agents/"
             suffix = "/runs"
             if not (path.startswith(prefix) and path.endswith(suffix)):
-                self._send_json(404, {"error": {"code": "NOT_FOUND", "message": "Route not found."}})
+                self._send_json(404, _error_payload("NOT_FOUND", "Route not found."))
                 return
             route_agent = path[len(prefix):-len(suffix)]
-            if route_agent not in ROUTE_ALIASES or "/" in route_agent:
-                self._send_json(404, {"error": {"code": "AGENT_NOT_FOUND", "message": "Agent route not found."}})
+            if route_agent not in {CANONICAL_ROUTE_ID, *DEPRECATED_ROUTE_IDS} or "/" in route_agent:
+                self._send_json(404, _error_payload("AGENT_NOT_FOUND", "Agent route not found."))
                 return
             if self.headers.get_content_type() != "application/json":
-                self._send_json(415, {"error": {"code": "UNSUPPORTED_MEDIA_TYPE", "message": "Content-Type must be application/json."}})
+                self._send_json(415, _error_payload("UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json."))
                 return
             if self.headers.get("Transfer-Encoding"):
-                self._send_json(400, {"error": {"code": "UNSUPPORTED_TRANSFER_ENCODING", "message": "Transfer-Encoding is unsupported."}})
+                self._send_json(400, _error_payload("UNSUPPORTED_TRANSFER_ENCODING", "Transfer-Encoding is unsupported."))
                 return
             try:
                 raw_length = self.headers.get("Content-Length")
                 try:
                     length = int(raw_length) if raw_length is not None else 0
                 except ValueError:
-                    raise RequestValidationError("INVALID_CONTENT_LENGTH", "Content-Length is invalid.") from None
+                    raise RequestValidationError("INVALID_CONTENT_LENGTH", "Content-Length is invalid.", 400) from None
                 if length <= 0:
-                    raise RequestValidationError("EMPTY_BODY", "A JSON request body is required.")
+                    raise RequestValidationError("EMPTY_BODY", "A JSON request body is required.", 400)
                 if length > MAX_BODY_BYTES:
                     raise RequestValidationError("REQUEST_TOO_LARGE", "Request body exceeds the local limit.", 413)
                 raw_body = self.rfile.read(length)
                 if len(raw_body) != length:
-                    raise RequestValidationError("INCOMPLETE_BODY", "Request body was incomplete.")
+                    raise RequestValidationError("INCOMPLETE_BODY", "Request body was incomplete.", 400)
                 body = json.loads(raw_body, parse_constant=_reject_json_constant)
-                context = context_from_proposal_request(body)
+                context = context_from_handoff_request(body)
             except RequestValidationError as exc:
-                self._send_json(exc.http_status, {"request_id": _safe_error_request_id(body.get("request_id")) if "body" in locals() and isinstance(body, dict) else None,
-                                                  "error": {"code": exc.code, "message": str(exc)}})
+                request_id = _safe_error_request_id(body.get("request_id")) if "body" in locals() and isinstance(body, dict) else None
+                self._send_json(exc.http_status, _error_payload(exc.code, str(exc), request_id))
                 return
-            except (ValueError, json.JSONDecodeError):
-                self._send_json(400, {"error": {"code": "INVALID_JSON", "message": "Request body must be valid JSON."}})
+            except (ValueError, json.JSONDecodeError, RecursionError):
+                self._send_json(400, _error_payload("INVALID_JSON", "Request body must be valid JSON."))
                 return
             try:
-                result = build_agent().run(context).to_proposal_v1_3_dict()
+                result = build_agent().run(context).to_dict()
+                if (
+                    result.get("schema_version") != "1.0"
+                    or result.get("request_id") != context.request_id
+                    or result.get("agent_id") != AGENT_ID
+                    or result.get("status") not in {"ok", "partial", "no_results", "error"}
+                ):
+                    raise RuntimeError("Producer result violates the v0.1 response contract.")
                 response = {
                     "contract_version": CONTRACT_VERSION,
                     "request_id": context.request_id,
                     "producer": {"agent_id": result["agent_id"], "schema_version": result["schema_version"]},
                     "status": result["status"],
                     "result": result,
-                    # Project_07 does not render runtime charts yet. Keep the
-                    # candidate response shape explicit without inventing assets.
-                    "artifacts": [],
                 }
-                self._send_json(200, response)
+                if route_agent in DEPRECATED_ROUTE_IDS:
+                    self._send_json(200, response, headers={"Deprecation": "true"})
+                else:
+                    self._send_json(200, response)
+            except (ConnectionError, TimeoutError, OSError):
+                self._send_json(503, _error_payload("SERVICE_UNAVAILABLE", "Project_07 is temporarily unavailable.", context.request_id))
             except Exception:
-                self._send_json(500, {
-                    "request_id": context.request_id,
-                    "error": {"code": "RUN_FAILED", "message": "Project_07 run failed."},
-                })
+                self._send_json(500, _error_payload("RUN_FAILED", "Project_07 run failed.", context.request_id))
 
     return Project07Handler
 
@@ -250,7 +291,7 @@ def serve(host: str = "127.0.0.1", port: int = 8766) -> None:
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("The local proposal server may only bind to loopback.")
     server = ThreadingHTTPServer((host, port), make_handler())
-    print(f"Project_07 local proposal API: http://{host}:{port}")
+    print(f"Project_07 local HTTP API (vogue-handoff/0.1): http://{host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
