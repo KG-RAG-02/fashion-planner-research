@@ -27,10 +27,35 @@ def main() -> None:
         row for row in result["market_analysis"]["observations"]
         if row["metric_name"] == "market_transaction_value" and row["scope_level"] == "parent_category_total"
     ]
+    if not chart_rows:
+        raise ValueError("Synthetic result has no parent-category market observations for the chart.")
+
+    observation_ids = {row.get("observation_id") for row in result["market_analysis"]["observations"]}
+    evidence_ids = {item.get("evidence_id") for item in result.get("evidence", [])}
+    chart_observation_ids = [row.get("observation_id") for row in chart_rows]
+    chart_evidence_ids = [evidence_id for row in chart_rows for evidence_id in row.get("evidence_ids", [])]
+    if any(not item for item in chart_observation_ids) or not set(chart_observation_ids) <= observation_ids:
+        raise ValueError("Chart refers to a missing or empty observation_id.")
+    if any(not item for item in chart_evidence_ids) or not set(chart_evidence_ids) <= evidence_ids:
+        raise ValueError("Chart refers to a missing or empty evidence_id.")
+    for field, expected in (
+        ("synthetic", True),
+        ("data_nature", "synthetic_test"),
+        ("permission_status", "authorized_for_synthetic_testing_only"),
+    ):
+        if result.get(field) != expected:
+            raise ValueError(f"Synthetic result has invalid {field} marker.")
+    if ("operational_eligible" in result and result["operational_eligible"] is not False):
+        raise ValueError("Synthetic result must not be operationally eligible.")
+    if manifest.get("operational_eligible") is not False:
+        raise ValueError("Synthetic manifest must not be operationally eligible.")
+
     artifact = {
         "artifact_id": "synthetic-market-value-trend-v1",
+        "request_id": result["request_id"],
         "artifact_type": "chart",
         "format": "image/svg+xml",
+        "status": "ready",
         "artifact_uri": "fixture://synthetic_market_scenario/generated/market_value_trend.svg",
         "sha256": chart_sha256,
         "byte_length": len(chart_bytes),
@@ -44,8 +69,8 @@ def main() -> None:
             "channel": result["requested_scope"]["channel"],
             "category": result["requested_scope"]["category"],
             "population": result["requested_scope"]["population"],
-            "observation_ids": [row["observation_id"] for row in chart_rows],
-            "evidence_ids": [row["evidence_ids"][0] for row in chart_rows],
+            "observation_ids": chart_observation_ids,
+            "evidence_ids": chart_evidence_ids,
             "alt_text": "합성 가정으로 생성된 한국 온라인 여성 아우터 월별 거래액 예시. 실제 시장 관측이나 전망이 아니다.",
             "limitations": [
                 result["usage_restriction"],
@@ -74,8 +99,16 @@ def main() -> None:
             result["usage_restriction"],
         ],
     }
-    # Guard the core preservation invariant: the producer body is embedded unchanged.
-    assert envelope["result"] == result
+    # Guard the core preservation and artifact-lineage invariants. Use explicit
+    # errors rather than assert so checks also run under optimized Python.
+    if envelope["request_id"] != result.get("request_id"):
+        raise ValueError("Handoff and producer request_id mismatch.")
+    if envelope["result"] != result:
+        raise ValueError("Producer result body was changed while building the handoff.")
+    if any(item.get("request_id") != envelope["request_id"] for item in envelope["artifacts"]):
+        raise ValueError("Artifact request_id does not match the handoff request_id.")
+    if hashlib.sha256(chart_bytes).hexdigest() != artifact["sha256"]:
+        raise ValueError("Chart artifact hash validation failed.")
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(envelope, ensure_ascii=False, indent=2) + "\n", encoding="utf-8")
     print(json.dumps({"output": str(args.output), "request_id": envelope["request_id"], "chart_sha256": chart_sha256, "result_body_preserved": True}, ensure_ascii=False))

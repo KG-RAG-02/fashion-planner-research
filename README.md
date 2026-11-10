@@ -79,7 +79,25 @@ RAG 검색의 query 전달, 메타데이터 범위 필터, Evidence citation, �
 
 향후 생성 모델의 프롬프트 인젝션 방어 설계는 [시스템 프롬프트 제안](docs/design/market-analysis-system-prompt.proposal.md), 합성 공격·정상 평가 사례는 `tests/fixtures/market_analysis_prompt_injection/cases.json`에 있습니다. 현재 런타임에는 모델이나 이 프롬프트가 연결되어 있지 않습니다.
 
-Project_06 및 오케스트레이터와 HTTP/JSON 계약을 검토할 자료는 [HTTP handoff 설계 제안](docs/design/http-json-handoff.proposal.md)과 [합성 계약 fixture](examples/fixtures/http_json_handoff/cases.json)에 있습니다. 계약·호출 방식 합의 전 검토용이며 Project_07 HTTP API는 구현되어 있지 않습니다.
+Project_06 및 오케스트레이터와 HTTP/JSON 계약을 검토할 자료는 [HTTP handoff 설계 제안](docs/design/http-json-handoff.proposal.md)과 [합성 계약 fixture](examples/fixtures/http_json_handoff/cases.json)에 있습니다. Project_07에는 제안 계약을 시험하는 로컬 loopback 서버가 있습니다. 아직 운영 API나 팀 승인 계약은 아닙니다. 승인된 source를 주입하지 않으면 `no_results`를 반환하고, runtime chart artifact는 생성하지 않습니다.
+
+로컬 HTTP 요청/응답 흐름은 다음과 같이 실행할 수 있습니다.
+
+```bash
+PYTHONPATH=src python3 -m market_research_agent.http_server --host 127.0.0.1 --port 8766
+```
+
+후보 endpoint는 `POST http://127.0.0.1:8766/v1/agents/market-research-agent/runs`입니다. Project_08 proposal connector와의 개발 검토를 위해 `sales-market-agent` 경로 alias도 받습니다. 기본 서버는 loopback에만 바인딩하고 인증은 없으므로 외부 공개·운영 배포에 사용할 수 없습니다. 요청 envelope, 오류/status mapping, schema 제한과 아직 미구현된 Project_08→Project_06 artifact 전달은 [설계 제안](docs/design/http-json-handoff.proposal.md)을 참고하세요.
+
+다른 터미널에서 합성 입력 fixture를 보낼 수 있습니다.
+
+```bash
+curl -sS -X POST http://127.0.0.1:8766/v1/agents/market-research-agent/runs \
+  -H 'Content-Type: application/json' \
+  --data-binary @examples/fixtures/http_json_handoff/project-07-run.request.synthetic.json
+```
+
+기본 실행은 승인된 자료원을 주입하지 않으므로 응답 상태는 `no_results`이며, 숫자 분석 결과를 만들지 않습니다. 응답 schema version은 `1.3-proposal`이고 `artifacts`는 현재 빈 배열입니다.
 
 실제 자료원 기반 판매·시장 분석 에이전트로 발전시키기 위한 현재 갭, 자료원 후보, 권한·데이터 계약, 처리 구조와 단계별 acceptance criteria는 [운영 분석 에이전트 설계 제안](docs/design/operational-market-analysis-agent-design.md)에 정리되어 있습니다. 실제 자료 연결이나 권한 승인은 포함하지 않습니다.
 
