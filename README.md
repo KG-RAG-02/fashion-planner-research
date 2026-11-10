@@ -73,9 +73,15 @@ RAG 검색의 query 전달, 메타데이터 범위 필터, Evidence citation, �
 
 판매·시장 분석 결과 전달 형식과 차트를 살펴보려면 [합성 분석 demo](docs/design/synthetic-analysis-demo.md)를 참고하세요. `python3 tools/synthetic_market_analysis.py --seed 20261110`은 합성 시장 시계열, 로컬 proposal JSON, SVG 차트를 생성합니다. H&M 판매값은 Kaggle 사용 권한이 확인되지 않아 읽지 않으며 결과에서 `no_results`로 표시됩니다. 따라서 이 demo는 두 데이터의 직접 비교를 `not_comparable`로 반환합니다.
 
+보다 구체적인 시장조사 절차용 합성 시나리오는 [synthetic market scenario 안내](docs/design/synthetic-market-scenario.md)를 참고하세요. `python3 tools/synthetic_market_scenario.py --config examples/synthetic_market_scenario/scenario-config.json`은 월별·카테고리별·판매매체별 fixture, 합성 조사 문서와 Evidence, 품질 시나리오, 분석 proposal과 시각화를 생성합니다. 모든 값은 명시된 가정으로 만든 비운영 합성값입니다.
+
+분석 JSON과 차트 artifact를 함께 오케스트레이터로 전달하는 후보 구조는 [시각화·handoff 설계 제안](docs/design/visual-analysis-orchestrator-handoff.proposal.md)과 [합성 end-to-end handoff fixture](examples/fixtures/synthetic_chart_handoff/handoff.proposal.json)에 있습니다. `fixture://` 경로는 로컬 검토용이며 실제 전송 경로가 아닙니다.
+
 향후 생성 모델의 프롬프트 인젝션 방어 설계는 [시스템 프롬프트 제안](docs/design/market-analysis-system-prompt.proposal.md), 합성 공격·정상 평가 사례는 `tests/fixtures/market_analysis_prompt_injection/cases.json`에 있습니다. 현재 런타임에는 모델이나 이 프롬프트가 연결되어 있지 않습니다.
 
 Project_06 및 오케스트레이터와 HTTP/JSON 계약을 검토할 자료는 [HTTP handoff 설계 제안](docs/design/http-json-handoff.proposal.md)과 [합성 계약 fixture](examples/fixtures/http_json_handoff/cases.json)에 있습니다. 계약·호출 방식 합의 전 검토용이며 Project_07 HTTP API는 구현되어 있지 않습니다.
+
+실제 자료원 기반 판매·시장 분석 에이전트로 발전시키기 위한 현재 갭, 자료원 후보, 권한·데이터 계약, 처리 구조와 단계별 acceptance criteria는 [운영 분석 에이전트 설계 제안](docs/design/operational-market-analysis-agent-design.md)에 정리되어 있습니다. 실제 자료 연결이나 권한 승인은 포함하지 않습니다.
 
 기본 seed `20261109`는 문서 120개, chunk 359개, 검색 query 22개를 만듭니다. 생성량은 20–1000개 문서 범위에서 조절합니다. 생성 파일은 `tests/fixtures/synthetic_market_rag/` 아래에만 둘 수 있습니다.
 
