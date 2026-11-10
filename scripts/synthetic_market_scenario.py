@@ -251,7 +251,7 @@ def build(config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
         "comparability": [{"status": "not_comparable", "mismatches": ["sales observations withheld", "synthetic market scenario", "measure and population not aligned"], "reason": "H&M 사용 권한 미확인으로 판매값이 없고 합성 시장 추정값은 실제 판매와 비교할 수 없다."}],
         "evidence": evidence, "limitations": [NOTICE, "합성 결과는 실제 시장성 검증이나 판매 전망이 아니다."], "errors": [],
         "generation_metadata": {
-            "seed": seed, "generator": "tools/synthetic_market_scenario.py",
+            "seed": seed, "generator": "scripts/synthetic_market_scenario.py",
             "seasonality_multipliers": seasonal, "annual_drift_assumption": generation["annual_drift"],
             "category_noise_range": [-generation["category_noise"], generation["category_noise"]],
             "sales_media_noise_range": [-generation["media_noise"], generation["media_noise"]],
@@ -269,7 +269,7 @@ def build(config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
         "manifest_id": f"synthetic-seed-{seed}", "request_id": config["request_id"],
         "synthetic": True, "data_nature": "synthetic_test", "permission_status": PERMISSION,
         "operational_eligible": False, "empirical_calibration": False,
-        "generator": "tools/synthetic_market_scenario.py", "seed": seed,
+        "generator": "scripts/synthetic_market_scenario.py", "seed": seed,
         "observation_count": len(obs), "document_count": len(docs),
         "quality_scenario_count": len(qa["scenarios"]), "generated_at_utc": config["generated_at_utc"],
         "usage_restriction": NOTICE,

@@ -21,7 +21,7 @@ from .workflows.market_research import MarketResearchAgent
 CONTRACT_VERSION = "vogue-handoff/0.1"
 AGENT_ID = MarketResearchAgent.agent_id
 CANONICAL_ROUTE_ID = "sales-market-agent"
-DEPRECATED_ROUTE_IDS = {AGENT_ID}
+DEPRECATED_ROUTE_IDS = {"market-research-agent"}
 SUPPORTED_UPSTREAM_SCHEMA_VERSIONS = {
     "trend_result": {"1.0", "1.1"},
     "inventory_product_result": {"1.0"},

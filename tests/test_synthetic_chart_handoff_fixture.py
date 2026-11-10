@@ -23,7 +23,7 @@ class SyntheticChartHandoffFixtureTests(unittest.TestCase):
             subprocess.run(
                 [
                     sys.executable,
-                    str(ROOT / "tools/build_synthetic_chart_handoff_fixture.py"),
+                    str(ROOT / "scripts/build_synthetic_chart_handoff_fixture.py"),
                     "--output",
                     str(output),
                 ],

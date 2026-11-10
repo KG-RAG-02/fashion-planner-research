@@ -79,7 +79,7 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertEqual(response["contract_version"], "vogue-handoff/0.1")
         self.assertEqual(response["request_id"], REQUEST_ID)
-        self.assertEqual(response["producer"]["agent_id"], "market-research-agent")
+        self.assertEqual(response["producer"]["agent_id"], "sales-market-agent")
         self.assertEqual(response["producer"]["schema_version"], "1.0")
         self.assertEqual(response["status"], "no_results")
         self.assertEqual(response["result"]["status"], "no_results")
@@ -112,7 +112,7 @@ class Project07HttpServerTests(unittest.TestCase):
             valid_request(), path="/v1/agents/market-research-agent/runs",
         )
         self.assertEqual(status, 200)
-        self.assertEqual(response["producer"]["agent_id"], "market-research-agent")
+        self.assertEqual(response["producer"]["agent_id"], "sales-market-agent")
         self.assertEqual(headers["Deprecation"], "true")
 
     def test_all_domain_statuses_use_http_200_and_preserve_result_body(self):
@@ -121,7 +121,7 @@ class Project07HttpServerTests(unittest.TestCase):
                 raw_result = {
                     "schema_version": "1.0",
                     "request_id": REQUEST_ID,
-                    "agent_id": "market-research-agent",
+                    "agent_id": "sales-market-agent",
                     "status": domain_status,
                     "summary": "synthetic exact body",
                     "findings": [], "evidence": [], "limitations": ["synthetic"], "errors": [],

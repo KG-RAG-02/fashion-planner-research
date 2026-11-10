@@ -1,5 +1,7 @@
 # VOGUE Market Research Agent
 
+공통 저장소 레이아웃과 HTTP 책임 경계는 [`docs/repository-boundaries.md`](docs/repository-boundaries.md)를 참고하세요.
+
 VOGUE의 시장성 조사 단계에서 사용할 수 있는 계약 중립적 Python 도메인 코어입니다. 현재 구현은 승인된 시장 자료원이 정해지지 않은 상태를 반영해 외부 API, 크롤러, 모델, 그래프 저장소를 포함하지 않습니다.
 
 현재 저장소에는 승인된 실제 판매 원장·시장 자료 어댑터가 없어 운영 분석 시스템으로 동작하지 않습니다. 판매 관측 모델과 결과 정규화 경계는 Project_07 책임으로 구현하되, 자료원이 미구성된 경우 `no_results`와 제한 사유를 전달합니다. Kaggle/H&M 공개 과거 데이터와 합성 fixture는 운영 데이터로 사용하지 않습니다.
@@ -71,13 +73,13 @@ PYTHONPATH=src python3 -m market_research_agent.cli \\
 
 RAG 검색의 query 전달, 메타데이터 범위 필터, Evidence citation, 권한 차단 및 검색 순위를 개발 환경에서 평가하려면 전용 합성 fixture generator를 사용합니다. 이 fixture는 실제 통계·판매·시장 근거가 아니며 사업 의사결정에 사용할 수 없습니다. 운영 retriever, source manifest 또는 기본 workflow에서 자동 선택되지 않고, 외부 임베딩·모델·저장소에 연결되지 않습니다. 테스트 전용 permission 값 `authorized_for_synthetic_testing_only`는 운영의 `authorized`와 별개입니다.
 
-판매·시장 분석 결과 전달 형식과 차트를 살펴보려면 [합성 분석 demo](docs/design/synthetic-analysis-demo.md)를 참고하세요. `python3 tools/synthetic_market_analysis.py --seed 20261110`은 합성 시장 시계열, 로컬 proposal JSON, SVG 차트를 생성합니다. H&M 판매값은 Kaggle 사용 권한이 확인되지 않아 읽지 않으며 결과에서 `no_results`로 표시됩니다. 따라서 이 demo는 두 데이터의 직접 비교를 `not_comparable`로 반환합니다.
+판매·시장 분석 결과 전달 형식과 차트를 살펴보려면 [합성 분석 demo](docs/design/synthetic-analysis-demo.md)를 참고하세요. `python3 scripts/synthetic_market_analysis.py --seed 20261110`은 합성 시장 시계열, 로컬 proposal JSON, SVG 차트를 생성합니다. H&M 판매값은 Kaggle 사용 권한이 확인되지 않아 읽지 않으며 결과에서 `no_results`로 표시됩니다. 따라서 이 demo는 두 데이터의 직접 비교를 `not_comparable`로 반환합니다.
 
-보다 구체적인 시장조사 절차용 합성 시나리오는 [synthetic market scenario 안내](docs/design/synthetic-market-scenario.md)를 참고하세요. `python3 tools/synthetic_market_scenario.py --config examples/synthetic_market_scenario/scenario-config.json`은 월별·카테고리별·판매매체별 fixture, 합성 조사 문서와 Evidence, 품질 시나리오, 분석 proposal과 시각화를 생성합니다. 모든 값은 명시된 가정으로 만든 비운영 합성값입니다.
+보다 구체적인 시장조사 절차용 합성 시나리오는 [synthetic market scenario 안내](docs/design/synthetic-market-scenario.md)를 참고하세요. `python3 scripts/synthetic_market_scenario.py --config examples/synthetic_market_scenario/scenario-config.json`은 월별·카테고리별·판매매체별 fixture, 합성 조사 문서와 Evidence, 품질 시나리오, 분석 proposal과 시각화를 생성합니다. 모든 값은 명시된 가정으로 만든 비운영 합성값입니다.
 
 공통 v0.1에서 제외한 차트 artifact 후속 확장안은 [시각화·handoff 설계 제안](docs/design/visual-analysis-orchestrator-handoff.proposal.md)과 [합성 artifact handoff fixture](examples/fixtures/synthetic_chart_handoff/handoff.proposal.json)에 있습니다. 이는 `vogue-handoff/0.2-proposal` 검토용이며 `fixture://` 경로는 실제 전송 주소가 아닙니다.
 
-향후 생성 모델의 프롬프트 인젝션 방어 설계는 [시스템 프롬프트 제안](docs/design/market-analysis-system-prompt.proposal.md), 합성 공격·정상 평가 사례는 `tests/fixtures/market_analysis_prompt_injection/cases.json`에 있습니다. 현재 런타임에는 모델이나 이 프롬프트가 연결되어 있지 않습니다.
+향후 생성 모델의 판매·시장 분석 프롬프트 원본은 역할별 [`prompts/`](prompts/README.md)에서 관리합니다. 보안 원칙·평가 기준은 [프롬프트 제안 문서](docs/design/market-analysis-system-prompt.proposal.md), 합성 공격·정상 평가 사례는 `tests/fixtures/market_analysis_prompt_injection/cases.json`에 있습니다. 현재 런타임에는 모델이나 이 프롬프트가 연결되어 있지 않습니다. 검토용 렌더링은 `python3 scripts/render_market_analysis_prompt.py --prompt sales_analysis --version v1` 또는 `--prompt market_analysis --version v1`로 생성합니다.
 
 VOGUE 공통 HTTP handoff v0.1은 [계약 및 Project_07 구현 문서](docs/design/http-json-handoff.proposal.md)에 정리되어 있습니다. Project_07에는 loopback 개발 서버가 있으며, 운영 서비스 배포·인증은 포함되지 않습니다. 승인된 source를 주입하지 않으면 `no_results`를 반환하고, runtime chart artifact는 생성하지 않습니다.
 
@@ -118,8 +120,8 @@ curl -sS -X POST http://127.0.0.1:8766/v1/agents/sales-market-agent/runs \
 기본 seed `20261109`는 문서 120개, chunk 359개, 검색 query 22개를 만듭니다. 생성량은 20–1000개 문서 범위에서 조절합니다. 생성 파일은 `tests/fixtures/synthetic_market_rag/` 아래에만 둘 수 있습니다.
 
 ```bash
-PYTHONPATH=src:. python3 -m tools.synthetic_market_rag.generate --seed 20261109 --documents 120
-PYTHONPATH=src:. python3 -m tools.synthetic_market_rag.evaluate --input-dir tests/fixtures/synthetic_market_rag --output tests/fixtures/synthetic_market_rag/evaluation-baseline.json
+PYTHONPATH=src:. python3 -m scripts.synthetic_market_rag.generate --seed 20261109 --documents 120
+PYTHONPATH=src:. python3 -m scripts.synthetic_market_rag.evaluate --input-dir tests/fixtures/synthetic_market_rag --output tests/fixtures/synthetic_market_rag/evaluation-baseline.json
 python3 -m unittest tests.test_synthetic_market_rag
 ```
 

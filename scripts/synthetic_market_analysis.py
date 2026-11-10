@@ -150,7 +150,7 @@ def generate(seed: int, output_dir: Path) -> dict[str, Any]:
         "errors": [],
         "generation": {
             "seed": seed,
-            "generator": "tools/synthetic_market_analysis.py",
+            "generator": "scripts/synthetic_market_analysis.py",
             "rule": "monthly seasonal template + linear drift + uniform noise in [-3, 3]",
             "seasonal_template_2024": seasonal_shape,
             "base_period_normalization": "divide each synthetic value by the generated 2024 mean and multiply by 100",

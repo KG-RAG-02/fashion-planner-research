@@ -5,7 +5,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.generate_query_coverage_fixture import DEFAULT_CONFIG, DEFAULT_OUTPUT, generate, match_request
+from scripts.generate_query_coverage_fixture import DEFAULT_CONFIG, DEFAULT_OUTPUT, generate, match_request
 
 
 class SyntheticQueryCoverageTests(unittest.TestCase):

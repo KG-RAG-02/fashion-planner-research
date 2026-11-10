@@ -47,7 +47,7 @@ class SerializationTests(unittest.TestCase):
         self.assertEqual(set(decoded), set(schema["required"]))
         self.assertEqual(decoded["status"], "no_results")
         self.assertEqual(decoded["schema_version"], "1.0")
-        self.assertEqual(decoded["agent_id"], "market-research-agent")
+        self.assertEqual(decoded["agent_id"], "sales-market-agent")
 
     def test_v1_2_proposal_is_explicit_and_separates_data_domains(self) -> None:
         result = MarketResearchAgent().run(

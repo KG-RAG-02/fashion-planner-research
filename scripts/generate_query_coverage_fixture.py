@@ -235,7 +235,7 @@ def generate(config_path: Path = DEFAULT_CONFIG, output_dir: Path = DEFAULT_OUTP
     supported = [{"category": p["category"], "gender": p["gender"]} for p in config["category_gender_pairs"]]
     manifest = {
         "schema_version": "synthetic-query-coverage-manifest/1.0", "request_id": config["request_id"],
-        "generator": "tools/generate_query_coverage_fixture.py", "seed": config["seed"],
+        "generator": "scripts/generate_query_coverage_fixture.py", "seed": config["seed"],
         "config_file": "config.json", "generated_at_utc": config["generated_at_utc"],
         **MARKERS,
         "source": {"source_id": "synthetic-generator-query-coverage", "source_type": "synthetic_generator_output", "permission_status": "authorized_for_synthetic_testing_only"},

@@ -3,9 +3,9 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from tools.synthetic_market_rag.evaluate import evaluate_corpus, lexical_retrieve, load_bundle
-from tools.synthetic_market_rag.retriever import SyntheticMarketEvidenceRetriever, retrieval_query_from_fixture
-from tools.synthetic_market_rag.generate import (
+from scripts.synthetic_market_rag.evaluate import evaluate_corpus, lexical_retrieve, load_bundle
+from scripts.synthetic_market_rag.retriever import SyntheticMarketEvidenceRetriever, retrieval_query_from_fixture
+from scripts.synthetic_market_rag.generate import (
     DEFAULT_DOCUMENT_COUNT, DEFAULT_SEED, MAX_DOCUMENT_COUNT, TEST_PERMISSION,
     SYNTHETIC_WARNING, generate_corpus, write_corpus,
 )

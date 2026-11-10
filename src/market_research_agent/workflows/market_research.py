@@ -45,7 +45,7 @@ class RetrievalResult:
 class MarketResearchAgent:
     """Build a result while enforcing source permission and evidence links."""
 
-    agent_id = "market-research-agent"
+    agent_id = "sales-market-agent"
     # This is the implemented local envelope version. Proposed fields in the
     # schema draft are not advertised as a shared wire-contract version.
     schema_version = "1.0"
