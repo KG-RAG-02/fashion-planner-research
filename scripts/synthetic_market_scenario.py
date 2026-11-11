@@ -158,6 +158,7 @@ def build(config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
             "category": scope["category"], "period_start": config["period_start"],
             "period_months": config["period_months"], "population": scope["population"],
             "permission_status": PERMISSION, "synthetic": True, "data_nature": "synthetic_test",
+            "operational_eligible": False,
             "text": "가상 온라인 패널의 월별 거래액을 생성하는 예시다. 패널 크기와 금액은 생성 설정이며 실제 조사 표본이나 시장값이 아니다. 계절 계수와 연간 drift, 작은 seeded noise를 적용한다. 실제 사업체 조사·브랜드 매출·SKU 거래를 포함하지 않는다."
         },
         {
@@ -170,7 +171,7 @@ def build(config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
             "geography": scope["geography"], "channel": scope["channel"],
             "category": scope["category"], "mapping_id": config["mapping"]["mapping_id"],
             "mapping_version": config["mapping"]["version"], "permission_status": PERMISSION,
-            "synthetic": True, "data_nature": "synthetic_test",
+            "synthetic": True, "data_nature": "synthetic_test", "operational_eligible": False,
             "text": "합성 taxonomy는 women_jackets, women_coats, women_light_outerwear를 synthetic_women_outerwear 아래에 둔다. 이 매핑은 설명 예시이며 실제 회사나 공식 통계 분류의 승인 매핑이 아니다."
         },
         {
@@ -182,7 +183,7 @@ def build(config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
             "published_at": config["generated_at_utc"], "content_hash": "",
             "geography": scope["geography"], "channel": scope["channel"],
             "category": scope["category"], "permission_status": PERMISSION,
-            "synthetic": True, "data_nature": "synthetic_test",
+            "synthetic": True, "data_nature": "synthetic_test", "operational_eligible": False,
             "text": "개정 QA 사례는 v1 원본을 유지하고 별도 v2 vintage로 추가한다. 예시 개정은 회귀 검증을 위한 임의 수정이며 공식 통계의 개정 폭이나 절차를 재현하지 않는다."
         },
     ]
@@ -198,7 +199,8 @@ def build(config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
         "published_at": None, "observed_at": row["as_of"],
         "fetched_at": config["generated_at_utc"], "permission_status": PERMISSION,
         "manifest_id": f"synthetic-seed-{seed}", "synthetic": True,
-        "data_nature": "synthetic_test", "content_hash": _hash(json.dumps(row, ensure_ascii=False, sort_keys=True)),
+        "data_nature": "synthetic_test", "operational_eligible": False,
+        "content_hash": _hash(json.dumps(row, ensure_ascii=False, sort_keys=True)),
     } for row in obs]
     evidence.extend({
         "request_id": config["request_id"],
@@ -207,7 +209,8 @@ def build(config: dict[str, Any], output_dir: Path) -> dict[str, Any]:
         "locator": doc["locator"], "published_at": doc["published_at"],
         "observed_at": None, "fetched_at": config["generated_at_utc"],
         "permission_status": PERMISSION, "manifest_id": f"synthetic-seed-{seed}",
-        "synthetic": True, "data_nature": "synthetic_test", "content_hash": doc["content_hash"],
+        "synthetic": True, "data_nature": "synthetic_test", "operational_eligible": False,
+        "content_hash": doc["content_hash"],
     } for doc in docs)
 
     # Aggregate parent-category monthly values and calculate an annual-mean change.

@@ -229,6 +229,17 @@ def generate(config_path: Path = DEFAULT_CONFIG, output_dir: Path = DEFAULT_OUTP
 
     market.sort(key=lambda x: (x["period_start"], x["geography"], x["channel"], x["category"], x["gender"], x["attributes"]["color"]))
     sales.sort(key=lambda x: (x["period_start"], x["geography"], x["channel"], x["category"], x["gender"]))
+    rows_by_evidence: dict[str, list[dict[str, Any]]] = {}
+    for row in [*market, *sales]:
+        for linked_id in row["evidence_ids"]:
+            rows_by_evidence.setdefault(linked_id, []).append(row)
+    for registry in (evidence, sales_evidence):
+        for evidence_id, record in registry.items():
+            linked_rows = sorted(rows_by_evidence.get(evidence_id, []), key=lambda item: item["observation_id"])
+            if not linked_rows:
+                raise ValueError(f"Evidence record has no linked observation: {evidence_id}")
+            canonical_rows = json.dumps(linked_rows, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            record["content_hash"] = hashlib.sha256(canonical_rows.encode("utf-8")).hexdigest()
     market_shards = _write_year_shards(output_dir / "market_observations", market)
     sales_shards = _write_year_shards(output_dir / "synthetic_sales_observations", sales)
     evidence_shards = _write_year_shards(output_dir / "evidence", [*evidence.values(), *sales_evidence.values()])
