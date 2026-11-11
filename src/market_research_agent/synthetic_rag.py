@@ -10,9 +10,10 @@ from __future__ import annotations
 import hashlib
 import json
 import math
+import calendar
 import re
 from collections import Counter, defaultdict
-from datetime import date
+from datetime import date, timedelta
 from pathlib import Path
 from typing import Any, Mapping
 
@@ -22,7 +23,7 @@ from .orchestration_request import (
     context_from_canonical_request,
 )
 
-SCHEMA_VERSION = "synthetic-rag-analysis/0.1-proposal"
+SCHEMA_VERSION = "synthetic-rag-analysis/0.2-proposal"
 SYNTHETIC_MARKERS = {
     "synthetic": True,
     "data_nature": "synthetic_test",
@@ -142,6 +143,17 @@ def load_fixture_bundle(
                     raise SyntheticFixtureError("observation value must be numeric")
                 if not row.get("observation_id") or not row.get("evidence_ids") or len(set(row["evidence_ids"])) != len(row["evidence_ids"]):
                     raise SyntheticFixtureError("observation is missing ID or Evidence lineage")
+                try:
+                    period_start = date.fromisoformat(row["period_start"])
+                    period_end = date.fromisoformat(row["period_end"])
+                except (KeyError, TypeError, ValueError):
+                    raise SyntheticFixtureError("observation period is missing or invalid") from None
+                if period_start > period_end:
+                    raise SyntheticFixtureError("observation period is inverted")
+                if row.get("period_grain") == "month":
+                    month_end_day = calendar.monthrange(period_start.year, period_start.month)[1]
+                    if period_start.day != 1 or period_end.year != period_start.year or period_end.month != period_start.month or period_end.day != month_end_day:
+                        raise SyntheticFixtureError("monthly observation does not span a complete calendar month")
                 measure = manifest["coverage"]["market_measure" if domain == "market_like" else "sales_measure"]
                 if any(row.get(key) != measure.get(source_key, expected) for key, source_key, expected in (
                     ("metric_name", "metric_name", None), ("unit", "unit", None), ("measure_type", "measure_type", None)
@@ -190,6 +202,17 @@ def load_fixture_bundle(
         ids = [row["observation_id"] for row in observation_sets[domain]]
         if len(ids) != len(set(ids)):
             raise SyntheticFixtureError(f"duplicate observation ID in {domain}")
+        declared_grains = set()
+        for row in observation_sets[domain]:
+            grain = tuple(json.dumps(row.get(key), ensure_ascii=False, sort_keys=True) for key in (
+                "source_id", "metric_name", "metric_definition", "measure_type", "unit", "currency",
+                "period_grain", "period_start", "period_end", "geography", "channel", "gender",
+                "category", "season", "season_year", "population", "product_mapping_id",
+                "product_mapping_version", "attributes", "vintage_id",
+            ))
+            if grain in declared_grains:
+                raise SyntheticFixtureError(f"duplicate observation grain in {domain}")
+            declared_grains.add(grain)
 
     documents = _jsonl(docs_root / "documents.jsonl")
     evidence_data = _json(docs_root / "evidence.json")
@@ -299,7 +322,7 @@ def _format_monthly(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
     evs: dict[str, list[str]] = defaultdict(list)
     dimensions: dict[str, dict[str, Any]] = {}
     group_fields = (
-        "metric_name", "measure_type", "unit", "currency", "geography", "channel", "gender",
+        "source_id", "metric_name", "metric_definition", "measure_type", "unit", "currency", "geography", "channel", "gender",
         "category", "season", "season_year", "population", "product_mapping_id",
         "product_mapping_version", "attributes",
     )
@@ -317,6 +340,88 @@ def _format_monthly(rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
          "evidence_ids": sorted(set(evs[group_key]))}
         for group_key in sorted(totals)
     ]
+
+
+def _format_calculations(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], list[str]]:
+    """Calculate adjacent-month percent changes only within identical synthetic series."""
+    dimensions_fields = (
+        "source_id", "metric_name", "metric_definition", "measure_type", "unit", "currency",
+        "period_grain", "geography", "channel", "gender", "category", "season", "season_year",
+        "population", "product_mapping_id", "product_mapping_version", "attributes", "vintage_id",
+    )
+    groups: dict[str, dict[str, Any]] = {}
+    issues: Counter[str] = Counter()
+    for row in rows:
+        if row.get("period_grain") != "month":
+            issues["unsupported_period_grain"] += 1
+            continue
+        dimensions = {key: row.get(key) for key in dimensions_fields}
+        group_key = json.dumps(dimensions, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+        group = groups.setdefault(group_key, {"dimensions": dimensions, "months": defaultdict(list)})
+        group["months"][row["period_start"][:7]].append(row)
+
+    calculations: list[dict[str, Any]] = []
+    eligible_series = 0
+    for group_key, group in sorted(groups.items()):
+        dimensions = group["dimensions"]
+        if dimensions["metric_name"] not in {"scenario_market_value", "scenario_units_sold"}:
+            issues["unsupported_metric"] += 1
+            continue
+        month_rows = sorted(group["months"].items())
+        if len(month_rows) < 2:
+            issues["single_period"] += 1
+            continue
+        eligible_series += 1
+        for (baseline_month, baseline_rows), (current_month, current_rows) in zip(month_rows, month_rows[1:]):
+            if len(baseline_rows) != 1 or len(current_rows) != 1:
+                issues["duplicate_grain"] += 1
+                continue
+            year, month = (int(part) for part in baseline_month.split("-"))
+            next_month = f"{year + 1:04d}-01" if month == 12 else f"{year:04d}-{month + 1:02d}"
+            if current_month != next_month:
+                issues["period_gap"] += 1
+                continue
+            baseline = baseline_rows[0]
+            current = current_rows[0]
+            try:
+                if date.fromisoformat(current["period_start"]) != date.fromisoformat(baseline["period_end"]) + timedelta(days=1):
+                    issues["period_boundary_mismatch"] += 1
+                    continue
+            except (KeyError, ValueError):
+                issues["period_boundary_incomplete"] += 1
+                continue
+            baseline_value = float(baseline["value"])
+            if baseline_value == 0:
+                issues["zero_baseline"] += 1
+                continue
+            current_value = float(current["value"])
+            observation_ids = [baseline["observation_id"], current["observation_id"]]
+            evidence_ids = sorted(set((*baseline["evidence_ids"], *current["evidence_ids"])))
+            identity = "|".join((*observation_ids, *evidence_ids))
+            calculations.append({
+                "calculation_id": "synthetic-change-" + hashlib.sha256(identity.encode("utf-8")).hexdigest()[:16],
+                "metric_name": f"{dimensions['metric_name']}_relative_change_percent",
+                "value": round((current_value / baseline_value - 1) * 100, 6),
+                "unit": "percent",
+                "formula_id": "adjacent_month_relative_change_percent",
+                "formula_version": "synthetic-analysis/1.0",
+                "formula": "(current_value / baseline_value - 1) * 100",
+                "baseline_period": baseline_month,
+                "current_period": current_month,
+                "baseline_value": baseline_value,
+                "current_value": current_value,
+                "input_unit": dimensions["unit"],
+                "input_observation_ids": observation_ids,
+                "evidence_ids": evidence_ids,
+                "dimensions": dimensions,
+                **SYNTHETIC_MARKERS,
+            })
+    limitations = []
+    if eligible_series and not calculations:
+        limitations.append("비교 가능한 연속 월 구간이 없어 변화율을 계산하지 않았습니다.")
+    for issue, count in sorted(issues.items()):
+        limitations.append(f"합성 시나리오 변화율 계산 {count}건을 차단했습니다: {issue}.")
+    return calculations, limitations
 
 
 def _serialize_observation(row: Mapping[str, Any], evidence_registry: Mapping[str, Mapping[str, Any]]) -> dict[str, Any]:
@@ -476,8 +581,15 @@ def analyze_synthetic_request(
         "observations": [_serialize_observation(row, data["evidence"][domain]) for row in matched],
         "evidence_ids": sorted({eid for row in matched for eid in row["evidence_ids"]}),
         "monthly_aggregates": _format_monthly(matched),
+        "calculations": [],
+        "calculation_limitations": [],
         "limitations": [LIMITATION, "집계는 일치 observation의 단순 합계이며 누락 기간을 0으로 채우지 않습니다."],
     }
+    calculations, calculation_limitations = _format_calculations(matched)
+    block["calculations"] = calculations
+    block["calculation_limitations"] = calculation_limitations
+    block["limitations"].extend(calculation_limitations)
+    result["limitations"].extend(calculation_limitations)
     result["market_like" if domain == "market_like" else "sales_like"] = block
     result["retrieval"].update({
         "status": status,
@@ -502,6 +614,15 @@ def analyze_synthetic_request(
              "unit": measure["unit"], "observation_ids": item["observation_ids"], "evidence_ids": item["evidence_ids"]}
             for item in block["monthly_aggregates"]
         ]
+        result["analysis"]["findings"].extend(
+            {"kind": "synthetic_fixture_calculation", "calculation_id": item["calculation_id"],
+             "statement": (f"[SYNTHETIC TEST DATA] {item['metric_name']} changed {item['value']:g}% from "
+                           f"{item['baseline_period']} to {item['current_period']} using {item['formula']}. "
+                           "This describes only the synthetic scenario and is not a market trend or business result."),
+             "value": item["value"], "unit": item["unit"], "input_observation_ids": item["input_observation_ids"],
+             "evidence_ids": item["evidence_ids"]}
+            for item in calculations
+        )
     return result
 
 

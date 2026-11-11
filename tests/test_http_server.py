@@ -278,6 +278,20 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertEqual(findings[0]["topic"], "synthetic_sales_demo")
         self.assertIn("item_units", findings[0]["statement"])
 
+    def test_unscoped_stable_analysis_keeps_geography_and_channel_series_separate(self):
+        request = valid_demo_request()
+        request["input"]["requested_geography"] = None
+        request["input"]["requested_channel"] = None
+        status, response, _ = self.post(request, synthetic_simulation_enabled=True)
+        self.assertEqual(status, 200)
+        market = next(item for item in response["result"]["findings"] if item["topic"] == "synthetic_market_demo")
+        statement = market["statement"]
+        self.assertIn('geography="KR"', statement)
+        self.assertIn('geography="JP"', statement)
+        self.assertIn('channel="online"', statement)
+        self.assertIn('channel="offline"', statement)
+        self.assertIn("kept separate", statement)
+
     def test_synthetic_simulation_api_is_separate_opt_in_and_keeps_safety_lineage(self):
         request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
         status, disabled, _ = self.post(request, path=SYNTHETIC_SIMULATION_PATH)
@@ -288,7 +302,7 @@ class Project07HttpServerTests(unittest.TestCase):
             request, path=SYNTHETIC_SIMULATION_PATH, synthetic_simulation_enabled=True,
         )
         self.assertEqual(status, 200)
-        self.assertEqual(response["schema_version"], "synthetic-rag-analysis/0.1-proposal")
+        self.assertEqual(response["schema_version"], "synthetic-rag-analysis/0.2-proposal")
         self.assertEqual(response["simulation_mode"], "synthetic_simulation")
         self.assertTrue(response["synthetic"])
         self.assertEqual(response["data_nature"], "synthetic_test")

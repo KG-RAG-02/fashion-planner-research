@@ -76,6 +76,56 @@ class SyntheticRagAnalysisTests(unittest.TestCase):
         self.assertFalse(result["operational_eligible"])
         self.assertIn("합성 테스트", result["limitations"][0])
 
+    def test_adjacent_month_analysis_calculation_links_inputs_and_evidence(self):
+        query = request(period_start="2028-03-01", period_end="2028-05-31")
+        result = analyze_synthetic_request(query, mode="synthetic_test", bundle=self.bundle)
+        block = result["market_like"]
+        self.assertTrue(block["calculations"])
+        observations = {row["observation_id"]: row for row in block["observations"]}
+        evidence_ids = set(block["evidence_ids"])
+        for calculation in block["calculations"]:
+            self.assertEqual(calculation["formula_id"], "adjacent_month_relative_change_percent")
+            self.assertEqual(calculation["formula_version"], "synthetic-analysis/1.0")
+            self.assertEqual(calculation["unit"], "percent")
+            self.assertEqual(len(calculation["input_observation_ids"]), 2)
+            self.assertTrue(set(calculation["input_observation_ids"]).issubset(observations))
+            self.assertTrue(set(calculation["evidence_ids"]).issubset(evidence_ids))
+            baseline_id, current_id = calculation["input_observation_ids"]
+            baseline = observations[baseline_id]
+            current = observations[current_id]
+            expected = (current["value"] / baseline["value"] - 1) * 100
+            self.assertAlmostEqual(calculation["value"], expected, places=5)
+            self.assertTrue(calculation["synthetic"])
+            self.assertFalse(calculation["operational_eligible"])
+        self.assertTrue(any(item["kind"] == "synthetic_fixture_calculation" for item in result["analysis"]["findings"]))
+
+    def test_calculations_block_period_gaps_zero_baselines_and_mixed_populations(self):
+        base = {
+            "source_id": "synthetic-test-source", "metric_name": "scenario_market_value",
+            "metric_definition": "synthetic scenario value", "measure_type": "market_estimate",
+            "unit": "KRW_million", "currency": "KRW", "period_grain": "month",
+            "geography": "KR", "channel": "online", "gender": "women", "category": "knitwear",
+            "season": "SS", "season_year": 2028, "population": "synthetic_panel",
+            "product_mapping_id": "synthetic-map", "product_mapping_version": "1",
+            "attributes": {}, "vintage_id": "synthetic-v1", "evidence_ids": ["evidence"],
+        }
+        january = dict(base, observation_id="jan", period_start="2028-01-01", period_end="2028-01-31", value=10)
+        march = dict(base, observation_id="mar", period_start="2028-03-01", period_end="2028-03-31", value=20)
+        calculations, issues = synthetic_rag._format_calculations([january, march])
+        self.assertEqual(calculations, [])
+        self.assertTrue(any("period_gap" in item for item in issues))
+
+        february_zero = dict(base, observation_id="feb", period_start="2028-02-01", period_end="2028-02-29", value=0)
+        march_after_zero = dict(base, observation_id="mar2", period_start="2028-03-01", period_end="2028-03-31", value=20)
+        calculations, issues = synthetic_rag._format_calculations([february_zero, march_after_zero])
+        self.assertEqual(calculations, [])
+        self.assertTrue(any("zero_baseline" in item for item in issues))
+
+        february_other_population = dict(base, observation_id="feb-other", period_start="2028-02-01", period_end="2028-02-29", value=20, population="different_synthetic_panel")
+        calculations, issues = synthetic_rag._format_calculations([january, february_other_population])
+        self.assertEqual(calculations, [])
+        self.assertTrue(all("period_gap" not in item for item in issues))
+
     def test_sales_and_market_sources_do_not_blend(self):
         sales_request = request(intent="sales_observation", metric="scenario_units_sold")
         result = analyze_synthetic_request(sales_request, mode="synthetic_test", bundle=self.bundle)

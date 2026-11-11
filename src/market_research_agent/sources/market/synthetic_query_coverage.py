@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -15,6 +16,14 @@ LIMITATION = (
     "SYNTHETIC TEST DATA ONLY: generated scenario values are not actual H&M/VOGUE sales, "
     "observed market data, forecasts, or evidence for business decisions."
 )
+_DIMENSION_FIELDS = (
+    "source_id", "source_schema_version", "metric_name", "metric_definition", "measure_type",
+    "unit", "currency", "period_grain", "geography", "channel", "gender", "category",
+    "season", "season_year", "population", "product_mapping_id", "product_mapping_version",
+    "source_category", "vintage_id", "attributes",
+)
+_MAX_SERIES_PER_DOMAIN = 32
+_MAX_MONTHS_PER_SERIES = 24
 
 
 def _extract_scope(context: MarketResearchContext) -> dict[str, Any]:
@@ -143,35 +152,44 @@ class SyntheticQueryCoverageSource:
             )
 
         findings = []
+        limitations = [LIMITATION]
         applied_scope_note = (
             f"Applied canonical scope: {scope['gender']} {scope['category']}, {scope['period_start']}–{scope['period_end']}, "
             f"{scope['geography']}/{scope['channel']}, excluded colors={','.join(scope['colors_exclude']) or 'none'}."
         )
         if matching_sales:
-            monthly = self._sum_by_month(matching_sales)
+            series, omitted_groups, omitted_months, duplicate_months = self._group_monthly_series(matching_sales)
             findings.append(ResearchFinding(
                 finding_id=f"synthetic-sales:{context.request_id}", topic="synthetic_sales_demo",
-                statement=("[SYNTHETIC TEST DATA] " + applied_scope_note + " Retailer-like item-unit scenario totals by month: "
-                           + "; ".join(f"{period}={value:g} item_units" for period, value in monthly.items())
+                statement=("[SYNTHETIC TEST DATA] " + applied_scope_note + " Retailer-like item-unit scenario series, kept separate by geography, channel, population, category, mapping, and other declared dimensions: "
+                           + " | ".join(item["summary"] for item in series)
                            + ". These values are generated fixtures, not Kaggle, H&M internal, or observed company sales."),
                 kind=FindingKind.PROPOSAL,
             ))
+            if omitted_groups or omitted_months:
+                limitations.append(f"Sales-like display was capped: omitted {omitted_groups} compatible dimension groups and {omitted_months} monthly values. No omitted groups were combined.")
+            if duplicate_months:
+                limitations.append(f"Sales-like display omitted {duplicate_months} months with duplicate declared grain rows; those values require source QA.")
         if matching_market:
-            monthly = self._sum_by_month(matching_market)
+            series, omitted_groups, omitted_months, duplicate_months = self._group_monthly_series(matching_market)
             findings.append(ResearchFinding(
                 finding_id=f"synthetic-market:{context.request_id}", topic="synthetic_market_demo",
-                statement=("[SYNTHETIC TEST DATA] " + applied_scope_note + " Generated scenario market-value totals by month: "
-                           + "; ".join(f"{period}={value:g} KRW_million" for period, value in monthly.items())
+                statement=("[SYNTHETIC TEST DATA] " + applied_scope_note + " Generated scenario market-value series, kept separate by geography, channel, population, category, mapping, and other declared dimensions: "
+                           + " | ".join(item["summary"] for item in series)
                            + ". This is not an observed market estimate, forecast, or business evidence."),
                 kind=FindingKind.PROPOSAL,
             ))
+            if omitted_groups or omitted_months:
+                limitations.append(f"Market-like display was capped: omitted {omitted_groups} compatible dimension groups and {omitted_months} monthly values. No omitted groups were combined.")
+            if duplicate_months:
+                limitations.append(f"Market-like display omitted {duplicate_months} months with duplicate declared grain rows; those values require source QA.")
         partial_note = "Sales-like and market-like fixture values use different units and synthetic populations; they are not directly comparable."
         if not matching_sales or not matching_market:
             partial_note += " One domain has no matching fixture rows."
         return SourceReport(
             status=ResultStatus.PARTIAL,
             findings=tuple(findings),
-            limitations=(LIMITATION, partial_note, "The stable HTTP result schema 1.0 has no structured sales_data, market_data, synthetic marker, or chart artifact fields; values are therefore carried as explicitly labeled proposal findings only."),
+            limitations=(*limitations, partial_note, "The stable HTTP result schema 1.0 has no structured sales_data, market_data, synthetic marker, or chart artifact fields; values are therefore carried as explicitly labeled proposal findings only.", "Unscoped dimension series are kept separate; the stable route does not calculate adjacent-period changes."),
             sales_data=SalesDataResult("partial" if matching_sales else "no_results", limitations=(LIMITATION,)),
             market_data=MarketDataResult("partial" if matching_market else "no_results", limitations=(LIMITATION,)),
         )
@@ -203,8 +221,37 @@ class SyntheticQueryCoverageSource:
         return matches
 
     @staticmethod
-    def _sum_by_month(rows: list[dict[str, Any]]) -> dict[str, float]:
-        totals: dict[str, float] = defaultdict(float)
+    def _group_monthly_series(rows: list[dict[str, Any]]) -> tuple[list[dict[str, Any]], int, int, int]:
+        groups: dict[str, dict[str, Any]] = {}
         for row in rows:
-            totals[row["period_start"][:7]] += float(row["value"])
-        return {period: round(value, 2) for period, value in sorted(totals.items())}
+            dimensions = {key: row.get(key) for key in _DIMENSION_FIELDS}
+            group_key = json.dumps(dimensions, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            group = groups.setdefault(group_key, {"dimensions": dimensions, "months": defaultdict(list)})
+            month = row["period_start"][:7]
+            group["months"][month].append(row)
+
+        ordered = sorted(groups.items())
+        visible = ordered[:_MAX_SERIES_PER_DOMAIN]
+        result = []
+        omitted_months = 0
+        duplicate_months = 0
+        for group_key, group in visible:
+            months = sorted(group["months"].items())
+            shown_months = months[:_MAX_MONTHS_PER_SERIES]
+            omitted_months += len(months) - len(shown_months)
+            duplicate_grains = sorted(month for month, month_rows in shown_months if len(month_rows) != 1)
+            duplicate_months += len(duplicate_grains)
+            dimensions = group["dimensions"]
+            dimension_text = ", ".join(
+                f"{key}={json.dumps(value, ensure_ascii=False, sort_keys=True)}"
+                for key, value in dimensions.items() if value not in (None, {}, "")
+            )
+            usable_months = [(month, month_rows[0]) for month, month_rows in shown_months if len(month_rows) == 1]
+            monthly_text = "; ".join(f"{month}={round(float(row['value']), 2):g} {dimensions['unit']}" for month, row in usable_months)
+            note = f"{dimension_text}: {monthly_text}"
+            if duplicate_grains:
+                note += f" [omitted duplicate declared month grain: {','.join(duplicate_grains)}; source QA required]"
+            result.append({"summary": note, "dimensions": dimensions,
+                           "monthly_values": {month: float(row["value"]) for month, row in usable_months},
+                           "duplicate_grains": duplicate_grains})
+        return result, max(0, len(ordered) - len(visible)), omitted_months, duplicate_months
