@@ -78,6 +78,19 @@ RAG 검색의 query 전달, 메타데이터 범위 필터, Evidence citation, �
 
 보다 구체적인 시장조사 절차용 합성 시나리오는 [synthetic market scenario 안내](docs/design/synthetic-market-scenario.md)를 참고하세요. `python3 scripts/synthetic_market_scenario.py --config examples/synthetic_market_scenario/scenario-config.json`은 월별·카테고리별·판매매체별 fixture, 합성 조사 문서와 Evidence, 품질 시나리오, 분석 proposal과 시각화를 생성합니다. 모든 값은 명시된 가정으로 만든 비운영 합성값입니다.
 
+구조화 요청으로 합성 관측 또는 설명 문서를 조회하는 별도 RAG proposal은 아래처럼 명시적 테스트 모드에서 실행합니다. 이 경로는 canonical request만 받고 HTTP·운영 retriever와 분리되어 있습니다. 응답의 수치는 합성 시나리오 안에서만 해석하세요.
+
+```bash
+python3 scripts/run_synthetic_rag_analysis.py \
+  --mode synthetic_test \
+  --request examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json
+
+python3 scripts/evaluate_synthetic_rag_analysis.py
+PYTHONPATH=src:. python3 -m unittest discover -s tests -v
+```
+
+새 평가셋 `tests/fixtures/synthetic_rag_analysis/v1/`은 기존 retrieval baseline과 별도입니다. 현재 7개 사례 결과는 구조화 fixture 경로에 한정되며 자유형 검색이나 실제 시장 정확도를 검증하지 않습니다. 설계와 남은 제한은 [합성 fixture RAG 설계 및 구현 상태](docs/design/synthetic-fixture-rag-analysis-design.md)를 참고하세요.
+
 공통 v0.1에서 제외한 차트 artifact 후속 확장안은 [시각화·handoff 설계 제안](docs/design/visual-analysis-orchestrator-handoff.proposal.md)과 [합성 artifact handoff fixture](examples/fixtures/synthetic_chart_handoff/handoff.proposal.json)에 있습니다. 이는 `vogue-handoff/0.2-proposal` 검토용이며 `fixture://` 경로는 실제 전송 주소가 아닙니다.
 
 향후 생성 모델의 판매·시장 분석 프롬프트 원본은 역할별 [`prompts/`](prompts/README.md)에서 관리합니다. 보안 원칙·평가 기준은 [프롬프트 제안 문서](docs/design/market-analysis-system-prompt.proposal.md), 합성 공격·정상 평가 사례는 `tests/fixtures/market_analysis_prompt_injection/cases.json`에 있습니다. 현재 런타임에는 모델이나 이 프롬프트가 연결되어 있지 않습니다. 검토용 렌더링은 `python3 scripts/render_market_analysis_prompt.py --prompt sales_analysis --version v1` 또는 `--prompt market_analysis --version v1`로 생성합니다.
@@ -183,6 +196,8 @@ print(result.to_dict())
 승인된 source adapter가 연결되기 전에는 판매량이나 시장 수치를 반환하지 않으며, 재고 스냅샷을 수요나 판매량의 대리 지표로 사용하지 않습니다. 출처·구현 경계의 검토 기록은 [`docs/design/notion-review.md`](docs/design/notion-review.md), 계층 구조와 의존 방향은 [`docs/design/project-structure.md`](docs/design/project-structure.md)에 있습니다.
 
 현재 판매·시장 검색 경로의 RAG 검토와 단계별 고도화 계획은 [`docs/design/sales-market-rag-analysis-roadmap.md`](docs/design/sales-market-rag-analysis-roadmap.md)에 정리되어 있습니다.
+
+실제 자료를 받기 전 합성 fixture로 검색·분석 RAG를 개발하는 제안은 [`docs/design/synthetic-fixture-rag-analysis-design.md`](docs/design/synthetic-fixture-rag-analysis-design.md)에 정리되어 있습니다. 이 설계는 합성 결과를 실제 시장 근거로 취급하지 않습니다.
 
 판매와 시장을 각각 어떤 지표/정형 계산으로 분석하고 RAG를 어디에 제한해서 쓸지에 대한 전문가 설계는 [`docs/design/sales-market-analysis-expert-design.md`](docs/design/sales-market-analysis-expert-design.md)를 참고하세요. 해당 내용은 구현/자료원 승인을 대신하지 않는 설계 제안입니다.
 
