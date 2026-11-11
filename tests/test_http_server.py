@@ -113,6 +113,8 @@ class Project07HttpServerTests(unittest.TestCase):
             self.assertEqual(result.sales_data.missing_data[0].reason, "permission_not_confirmed")
 
     def post(self, request_body: dict | bytes, *, path="/v1/agents/sales-market-agent/runs", content_type="application/json", agent_factory=None, token="test-agent-token", synthetic_simulation_enabled=False):
+        if agent_factory is None and synthetic_simulation_enabled:
+            agent_factory = lambda: MarketResearchAgent(SyntheticQueryCoverageSource())
         handler_type = make_handler(agent_factory, synthetic_simulation_enabled=synthetic_simulation_enabled)
         handler = object.__new__(handler_type)
         data = request_body if isinstance(request_body, bytes) else json.dumps(request_body).encode()
@@ -266,6 +268,16 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertGreater(len(response["result"]["findings"]), 0)
         self.assertTrue(all("[SYNTHETIC TEST DATA]" in item["statement"] for item in response["result"]["findings"]))
 
+    def test_synthetic_stable_route_filters_to_the_requested_metric(self):
+        request = valid_demo_request()
+        request["input"]["requested_metrics"] = ["scenario_units_sold"]
+        status, response, _ = self.post(request, synthetic_simulation_enabled=True)
+        self.assertEqual(status, 200)
+        findings = response["result"]["findings"]
+        self.assertEqual(len(findings), 1)
+        self.assertEqual(findings[0]["topic"], "synthetic_sales_demo")
+        self.assertIn("item_units", findings[0]["statement"])
+
     def test_synthetic_simulation_api_is_separate_opt_in_and_keeps_safety_lineage(self):
         request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
         status, disabled, _ = self.post(request, path=SYNTHETIC_SIMULATION_PATH)
@@ -292,11 +304,15 @@ class Project07HttpServerTests(unittest.TestCase):
             self.assertTrue(all(item["locator"] and item["content_hash"] for item in observation["evidence"]))
         self.assertEqual(headers["Cache-Control"], "no-store")
 
-        # Enabling the simulation route never changes the stable operating route.
-        status, regular, _ = self.post(valid_request(), synthetic_simulation_enabled=True)
+        # Explicit simulation service mode also supplies synthetic analysis through the stable handoff route.
+        status, regular, headers = self.post(valid_demo_request(), synthetic_simulation_enabled=True)
         self.assertEqual(status, 200)
         self.assertEqual(regular["contract_version"], "vogue-handoff/0.1")
-        self.assertEqual(regular["status"], "no_results")
+        self.assertIn(regular["status"], {"ok", "partial"})
+        self.assertTrue(any("[SYNTHETIC TEST DATA]" in item["statement"] for item in regular["result"]["findings"]))
+        self.assertEqual(regular["result"]["evidence"], [])
+        self.assertEqual(headers["X-Data-Nature"], "synthetic_test")
+        self.assertEqual(headers["X-Operational-Eligible"], "false")
 
     def test_synthetic_simulation_route_requires_existing_bearer_auth_and_valid_canonical_input(self):
         request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
@@ -330,6 +346,8 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertTrue(response["synthetic"])
 
     def test_synthetic_simulation_ui_is_opt_in_and_has_strong_disclosure(self):
+        status, _, _ = self.get(path="/")
+        self.assertEqual(status, 404)
         status, _, _ = self.get(path=SYNTHETIC_SIMULATION_UI_PATH)
         self.assertEqual(status, 404)
         status, page, headers = self.get(path=SYNTHETIC_SIMULATION_UI_PATH, synthetic_simulation_enabled=True)
@@ -343,7 +361,6 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertEqual(status, 200)
         self.assertIn(b"textContent", script)
         self.assertNotIn(b"localStorage", script)
-        self.assertIn(b"monthly_aggregates", script)
 
     def test_simulation_is_available_from_main_app_entry_and_agent_api_namespace(self):
         request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
@@ -352,12 +369,17 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertIn("합성 데이터 시뮬레이션".encode(), page)
         status, script, _ = self.get(path="/synthetic-simulation.js", synthetic_simulation_enabled=True)
         self.assertEqual(status, 200)
-        self.assertIn(b"/v1/agents/sales-market-agent/simulation-runs", script)
+        self.assertIn(b"/v1/agents/sales-market-agent/runs", script)
 
         status, payload, _ = self.post(request, path=AGENT_SIMULATION_PATH, synthetic_simulation_enabled=True)
         self.assertEqual(status, 200)
         self.assertEqual(payload["simulation_mode"], "synthetic_simulation")
         self.assertTrue(payload["synthetic"])
+        status, health_body, _ = self.get(path="/api/health", synthetic_simulation_enabled=True)
+        self.assertEqual(status, 200)
+        health = json.loads(health_body)
+        self.assertEqual(health["mode"], "synthetic_simulation")
+        self.assertFalse(health["operational_eligible"])
 
     def test_simulation_cli_flag_is_opt_in_and_cannot_mix_with_legacy_demo(self):
         with patch.object(http_server, "serve") as serve:

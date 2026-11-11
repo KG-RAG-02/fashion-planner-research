@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import json
 import re
 from collections import defaultdict
 from pathlib import Path
@@ -11,28 +10,11 @@ from typing import Any
 from ...domain.models import FindingKind, MarketResearchContext, ResearchFinding, ResultStatus, SourceReport
 from ...domain.sales import MarketDataResult, SalesDataResult
 
-DEFAULT_FIXTURE_DIR = Path("examples/query_coverage/generated")
+DEFAULT_FIXTURE_DIR = Path(__file__).resolve().parents[4] / "examples/query_coverage/generated"
 LIMITATION = (
     "SYNTHETIC TEST DATA ONLY: generated scenario values are not actual H&M/VOGUE sales, "
     "observed market data, forecasts, or evidence for business decisions."
 )
-
-
-def _read_jsonl_shards(directory: Path) -> list[dict[str, Any]]:
-    rows: list[dict[str, Any]] = []
-    if not directory.is_dir():
-        return rows
-    for path in sorted(directory.glob("*.jsonl")):
-        for line in path.read_text(encoding="utf-8").splitlines():
-            if line.strip():
-                row = json.loads(line)
-                if (row.get("synthetic") is not True
-                        or row.get("data_nature") != "synthetic_test"
-                        or row.get("permission_status") != "authorized_for_synthetic_testing_only"
-                        or row.get("operational_eligible") is not False):
-                    raise ValueError("Synthetic fixture safety markers are missing or invalid.")
-                rows.append(row)
-    return rows
 
 
 def _extract_scope(context: MarketResearchContext) -> dict[str, Any]:
@@ -120,6 +102,7 @@ def _extract_scope(context: MarketResearchContext) -> dict[str, Any]:
         "geography": context.requested_geography,
         "channel": context.requested_channel,
         "colors_exclude": sorted(normalized_excludes),
+        "metrics": set(context.requested_metrics),
         "query": query,
     }
 
@@ -132,9 +115,12 @@ class SyntheticQueryCoverageSource:
 
     def research(self, context: MarketResearchContext) -> SourceReport:
         try:
-            market_rows = _read_jsonl_shards(self.fixture_dir / "market_observations")
-            sales_rows = _read_jsonl_shards(self.fixture_dir / "synthetic_sales_observations")
-        except (OSError, ValueError, json.JSONDecodeError):
+            from ...synthetic_rag import load_fixture_bundle
+
+            fixture = load_fixture_bundle(query_coverage_root=self.fixture_dir)
+            market_rows = fixture["observations"]["market_like"]
+            sales_rows = fixture["observations"]["sales_like"]
+        except (OSError, ValueError):
             return SourceReport(
                 status=ResultStatus.ERROR,
                 errors=(), limitations=("Synthetic demo fixture is missing or invalid; no generated values were used.", LIMITATION),
@@ -142,6 +128,9 @@ class SyntheticQueryCoverageSource:
                 market_data=MarketDataResult("error", errors=("Synthetic demo fixture is missing or invalid.",)),
             )
         scope = _extract_scope(context)
+        if scope["metrics"]:
+            market_rows = [row for row in market_rows if row.get("metric_name") in scope["metrics"]]
+            sales_rows = [row for row in sales_rows if row.get("metric_name") in scope["metrics"]]
         matching_market = self._filter(market_rows, scope)
         matching_sales = self._filter(sales_rows, scope)
         if not matching_market and not matching_sales:

@@ -352,7 +352,16 @@ def make_handler(
         def do_GET(self) -> None:
             path = urlsplit(self.path).path
             if path == "/api/health":
-                self._send_json(200, {"status": "ok", "mode": "local-development"})
+                health = {"status": "ok", "mode": "local-development"}
+                if synthetic_simulation_enabled:
+                    health.update({
+                        "mode": "synthetic_simulation",
+                        "synthetic": True,
+                        "data_nature": "synthetic_test",
+                        "permission_status": "authorized_for_synthetic_testing_only",
+                        "operational_eligible": False,
+                    })
+                self._send_json(200, health)
             elif synthetic_simulation_enabled and path in {"/", SYNTHETIC_SIMULATION_UI_PATH}:
                 self._send_static(_WEB_ROOT / "synthetic_simulation.html", "text/html; charset=utf-8")
             elif synthetic_simulation_enabled and path in _SYNTHETIC_UI_FILES:
@@ -437,10 +446,15 @@ def make_handler(
                     "status": result["status"],
                     "result": result,
                 }
+                mode_headers = ({
+                    "X-Simulation-Mode": "synthetic_simulation",
+                    "X-Data-Nature": "synthetic_test",
+                    "X-Operational-Eligible": "false",
+                } if synthetic_simulation_enabled else None)
                 if route_agent in DEPRECATED_ROUTE_IDS:
-                    self._send_json(200, response, headers={"Deprecation": "true"})
+                    self._send_json(200, response, headers={"Deprecation": "true", **(mode_headers or {})})
                 else:
-                    self._send_json(200, response)
+                    self._send_json(200, response, headers=mode_headers)
             except (ConnectionError, TimeoutError, OSError):
                 self._send_json(503, _error_payload("SERVICE_UNAVAILABLE", "Project_07 is temporarily unavailable.", context.request_id))
             except Exception:
@@ -479,7 +493,11 @@ def serve(
     """Start the local proposal server on loopback; run routes require the shared bearer token."""
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("The local proposal server may only bind to loopback.")
-    agent_factory = (lambda: MarketResearchAgent(SyntheticQueryCoverageSource())) if synthetic_demo else configured_agent
+    agent_factory = (
+        (lambda: MarketResearchAgent(SyntheticQueryCoverageSource()))
+        if synthetic_demo or enable_synthetic_simulation
+        else configured_agent
+    )
     if synthetic_demo and enable_synthetic_simulation:
         raise ValueError("Choose either legacy --synthetic-demo or --enable-synthetic-simulation, not both.")
     server = ThreadingHTTPServer((host, port), make_handler(
@@ -489,7 +507,7 @@ def serve(
     if synthetic_demo:
         print("Synthetic demonstration mode is enabled; every result is labeled synthetic and is not business evidence.")
     if enable_synthetic_simulation:
-        print(f"Synthetic simulation UI/API enabled: http://{host}:{port}/ and {AGENT_SIMULATION_PATH}")
+        print(f"Synthetic mode enabled: standard /runs uses labeled fixtures; detailed API {AGENT_SIMULATION_PATH}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -503,7 +521,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--synthetic-demo", action="store_true", help="Use only the local test-only synthetic query coverage fixture.")
-    parser.add_argument("--enable-synthetic-simulation", action="store_true", help="Expose an isolated, authenticated simulation API and UI; does not affect normal HTTP routes.")
+    parser.add_argument("--enable-synthetic-simulation", action="store_true", help="Serve the main UI and stable /runs from labeled synthetic fixtures; also expose detailed simulation analysis.")
     args = parser.parse_args(argv)
     serve(args.host, args.port, synthetic_demo=args.synthetic_demo,
           enable_synthetic_simulation=args.enable_synthetic_simulation)
