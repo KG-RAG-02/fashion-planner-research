@@ -9,7 +9,7 @@ from email.message import Message
 from pathlib import Path
 import unittest
 import tempfile
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import market_research_agent.http_server as http_server
 from market_research_agent.http_server import (
@@ -99,10 +99,11 @@ class Project07HttpServerTests(unittest.TestCase):
             settings = {
                 "VOGUE_HM_PROCESSED_DIR": str(root / "does-not-exist"),
                 "VOGUE_HM_CATEGORY_MAP": "Jacket=Outerwear", "VOGUE_HM_MAPPING_VERSION": "test-map-v1",
-                "VOGUE_HM_USAGE_AUTHORIZED": "",
+                "VOGUE_HM_USAGE_AUTHORIZED": "", "R2_DB_KEY": "", "PROJECT07_HM_R2_DB_KEY": "",
             }
             request = valid_request()
             request["input"]["planning_request"]["query"] = "Outerwear purchase rows"
+            request["input"]["requested_category"] = "Outerwear"
             request["input"]["requested_metrics"] = ["purchase_rows"]
             request["input"].pop("requested_geography", None)
             request["input"].pop("requested_channel", None)
@@ -112,10 +113,83 @@ class Project07HttpServerTests(unittest.TestCase):
             self.assertEqual(result.sales_data.status, "no_results")
             self.assertEqual(result.sales_data.missing_data[0].reason, "permission_not_confirmed")
 
-    def post(self, request_body: dict | bytes, *, path="/v1/agents/sales-market-agent/runs", content_type="application/json", agent_factory=None, token="test-agent-token", synthetic_simulation_enabled=False):
+    def test_http_configured_hm_r2_source_does_not_fetch_manifest_without_permission(self):
+        settings = {
+            "VOGUE_HM_CATEGORY_MAP": "Jacket=Outerwear",
+            "VOGUE_HM_MAPPING_VERSION": "test-map-v1",
+            "VOGUE_HM_USAGE_AUTHORIZED": "false",
+            "PROJECT07_HM_R2_PREFIX": "example/hm",
+            "PROJECT07_HM_R2_MANIFEST_KEY": "example/hm/bundle.json",
+            "R2_DB_KEY": "", "PROJECT07_HM_R2_DB_KEY": "",
+        }
+        request = valid_request()
+        request["input"]["planning_request"]["query"] = "Outerwear purchase rows"
+        request["input"]["requested_category"] = "Outerwear"
+        request["input"]["requested_metrics"] = ["purchase_rows"]
+        request["input"].pop("requested_geography", None)
+        request["input"].pop("requested_channel", None)
+        with patch.dict(os.environ, settings, clear=True):
+            result = configured_agent().run(context_from_handoff_request(request))
+        self.assertEqual(result.sales_data.status, "no_results")
+        self.assertEqual(result.sales_data.missing_data[0].reason, "permission_not_confirmed")
+
+    def test_http_prefers_shared_duckdb_over_legacy_bundle_without_reading_before_permission(self):
+        from market_research_agent.sources.sales.hm_kaggle.hm_r2_duckdb_source import R2DuckDBHmHistoricalSalesSource
+        from market_research_agent.sources.shared.r2_object_store import R2ObjectStore
+
+        settings = {
+            "VOGUE_HM_CATEGORY_MAP": "Jacket=Outerwear",
+            "VOGUE_HM_MAPPING_VERSION": "test-map-v1",
+            "VOGUE_HM_USAGE_AUTHORIZED": "false",
+            "R2_DB_KEY": "shared.duckdb",
+            "PROJECT07_HM_R2_PREFIX": "example/hm",
+            "PROJECT07_HM_R2_MANIFEST_KEY": "example/hm/bundle.json",
+        }
+        request = valid_request()
+        request["input"]["planning_request"]["query"] = "Outerwear purchase rows"
+        request["input"]["requested_category"] = "Outerwear"
+        request["input"]["requested_metrics"] = ["purchase_rows"]
+        request["input"].pop("requested_geography", None)
+        request["input"].pop("requested_channel", None)
+        with patch.dict(os.environ, settings, clear=True), \
+             patch("market_research_agent.http_server.R2DuckDBHmHistoricalSalesSource",
+                   wraps=R2DuckDBHmHistoricalSalesSource) as duckdb_source, \
+             patch("market_research_agent.http_server.R2HmHistoricalSalesSource") as csv_source, \
+             patch.object(R2ObjectStore, "from_env") as from_env:
+            agent = configured_agent()
+            result = agent.run(context_from_handoff_request(request))
+        self.assertEqual(result.sales_data.status, "no_results")
+        self.assertEqual(result.sales_data.missing_data[0].reason, "permission_not_confirmed")
+        duckdb_source.from_env.assert_called_once()
+        csv_source.assert_not_called()
+        from_env.assert_not_called()
+
+    def test_http_shared_r2_duckdb_source_keeps_permission_gate_lazy(self):
+        from market_research_agent.sources.shared.r2_object_store import R2ObjectStore
+
+        settings = {
+            "VOGUE_HM_CATEGORY_MAP": "Jacket=Outerwear",
+            "VOGUE_HM_MAPPING_VERSION": "test-map-v1",
+            "VOGUE_HM_USAGE_AUTHORIZED": "false",
+            "R2_DB_KEY": "shared.duckdb",
+        }
+        request = valid_request()
+        request["input"]["planning_request"]["query"] = "Outerwear purchase rows"
+        request["input"]["requested_category"] = "Outerwear"
+        request["input"]["requested_metrics"] = ["purchase_rows"]
+        request["input"].pop("requested_geography", None)
+        request["input"].pop("requested_channel", None)
+        with patch.dict(os.environ, settings, clear=True), patch.object(R2ObjectStore, "from_env") as from_env:
+            result = configured_agent().run(context_from_handoff_request(request))
+        self.assertEqual(result.sales_data.status, "no_results")
+        self.assertEqual(result.sales_data.missing_data[0].reason, "permission_not_confirmed")
+        from_env.assert_not_called()
+
+    def post(self, request_body: dict | bytes, *, path="/v1/agents/sales-market-agent/runs", content_type="application/json", agent_factory=None, token="test-agent-token", synthetic_simulation_enabled=False, synthetic_bundle_provider=None):
         if agent_factory is None and synthetic_simulation_enabled:
             agent_factory = lambda: MarketResearchAgent(SyntheticQueryCoverageSource())
-        handler_type = make_handler(agent_factory, synthetic_simulation_enabled=synthetic_simulation_enabled)
+        handler_type = make_handler(agent_factory, synthetic_simulation_enabled=synthetic_simulation_enabled,
+                                    synthetic_bundle_provider=synthetic_bundle_provider)
         handler = object.__new__(handler_type)
         data = request_body if isinstance(request_body, bytes) else json.dumps(request_body).encode()
         handler.path = path
@@ -328,6 +402,19 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertEqual(headers["X-Data-Nature"], "synthetic_test")
         self.assertEqual(headers["X-Operational-Eligible"], "false")
 
+    def test_detailed_simulation_route_uses_injected_r2_bundle_provider(self):
+        from market_research_agent.synthetic_rag import load_fixture_bundle
+
+        provider = Mock(return_value=load_fixture_bundle())
+        request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
+        status, response, _ = self.post(
+            request, path=AGENT_SIMULATION_PATH, synthetic_simulation_enabled=True,
+            synthetic_bundle_provider=provider,
+        )
+        self.assertEqual(status, 200)
+        provider.assert_called_once_with()
+        self.assertIsNone(response["source_manifests"]["r2_release"])
+
     def test_synthetic_simulation_route_requires_existing_bearer_auth_and_valid_canonical_input(self):
         request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
         for token in (None, "wrong-token"):
@@ -398,14 +485,45 @@ class Project07HttpServerTests(unittest.TestCase):
     def test_simulation_cli_flag_is_opt_in_and_cannot_mix_with_legacy_demo(self):
         with patch.object(http_server, "serve") as serve:
             self.assertEqual(http_server.main([]), 0)
-            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=False)
+            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=False, synthetic_source_backend="r2")
             serve.reset_mock()
             self.assertEqual(http_server.main(["--enable-synthetic-simulation"]), 0)
-            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=True)
+            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=True, synthetic_source_backend="r2")
+            serve.reset_mock()
+            self.assertEqual(http_server.main(["--enable-synthetic-simulation", "--synthetic-source", "local"]), 0)
+            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=True, synthetic_source_backend="local")
         with self.assertRaises(ValueError):
             http_server.serve(synthetic_demo=True, enable_synthetic_simulation=True)
         with self.assertRaises(ValueError):
             http_server.serve(host="0.0.0.0", enable_synthetic_simulation=True)
+
+    def test_service_simulation_uses_r2_bundle_provider_by_default(self):
+        class FakeServer:
+            def __init__(self, address, handler):
+                self.address = address
+                self.handler = handler
+                self.closed = False
+
+            def serve_forever(self):
+                raise KeyboardInterrupt
+
+            def server_close(self):
+                self.closed = True
+
+        class FakeBundleStore:
+            def load_bundle(self):
+                return {}
+
+        store = FakeBundleStore()
+        with (
+            patch.object(http_server.SyntheticR2FixtureBundleStore, "from_env", return_value=store) as from_env,
+            patch.object(http_server, "SyntheticQueryCoverageSource", wraps=SyntheticQueryCoverageSource) as source,
+            patch.object(http_server, "ThreadingHTTPServer", side_effect=FakeServer) as server,
+        ):
+            http_server.serve(enable_synthetic_simulation=True)
+        from_env.assert_called_once_with()
+        source.assert_called_once_with(bundle_loader=store.load_bundle)
+        self.assertIsNotNone(server.call_args.args[1])
 
     def test_project08_route_alias_is_supported_for_local_proposal_client(self):
         status, response, headers = self.post(

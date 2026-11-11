@@ -18,7 +18,10 @@ from urllib.parse import unquote, urlsplit
 
 from .domain.models import MarketResearchContext
 from .sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
+from .sources.market.synthetic_r2 import SyntheticR2FixtureBundleStore
 from .sources.sales.hm_kaggle.hm_sales_adapter import HmHistoricalSalesSource
+from .sources.sales.hm_kaggle.hm_r2_sales_source import R2HmHistoricalSalesSource
+from .sources.sales.hm_kaggle.hm_r2_duckdb_source import R2DuckDBHmHistoricalSalesSource
 from .sources.shared.composite import CompositeMarketResearchSource
 from .sources.shared.noop import NoConfiguredSources
 from .workflows.market_research import MarketResearchAgent
@@ -245,6 +248,7 @@ def make_handler(
     agent_factory: Callable[[], MarketResearchAgent] | None = None,
     *,
     synthetic_simulation_enabled: bool = False,
+    synthetic_bundle_provider: Callable[[], dict[str, Any]] | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     """Create a handler; simulation routes are isolated behind an explicit flag."""
     build_agent = agent_factory or MarketResearchAgent
@@ -336,7 +340,8 @@ def make_handler(
 
             request_id = _safe_error_request_id(request.get("request_id"))
             try:
-                result = analyze_synthetic_request(request, mode="synthetic_test")
+                bundle = synthetic_bundle_provider() if synthetic_bundle_provider is not None else None
+                result = analyze_synthetic_request(request, mode="synthetic_test", bundle=bundle)
             except CanonicalRequestError:
                 self._send_simulation_error(422, "invalid_canonical_request", "Canonical structured request is invalid.", request_id)
                 return
@@ -474,12 +479,23 @@ def configured_agent() -> MarketResearchAgent:
             if not separator or not source.strip() or not target.strip():
                 raise ValueError("VOGUE_HM_CATEGORY_MAP must contain comma-separated source=target pairs.")
             category_map[source.strip()] = target.strip()
-        sources.append(HmHistoricalSalesSource(
-            Path(os.getenv("VOGUE_HM_PROCESSED_DIR", "data/processed/hm-personalized-fashion-recommendations")),
-            category_map,
-            os.getenv("VOGUE_HM_MAPPING_VERSION", ""),
-            usage_authorized=os.getenv("VOGUE_HM_USAGE_AUTHORIZED", "").casefold() == "true",
-        ))
+        mapping_version = os.getenv("VOGUE_HM_MAPPING_VERSION", "")
+        usage_authorized = os.getenv("VOGUE_HM_USAGE_AUTHORIZED", "").casefold() == "true"
+        if (os.getenv("PROJECT07_HM_R2_DB_KEY", "").strip()
+                or os.getenv("R2_DB_KEY", "").strip()):
+            sources.append(R2DuckDBHmHistoricalSalesSource.from_env(
+                category_map, mapping_version, usage_authorized=usage_authorized,
+            ))
+        elif os.getenv("PROJECT07_HM_R2_MANIFEST_KEY", "").strip():
+            sources.append(R2HmHistoricalSalesSource.from_env(
+                category_map, mapping_version, usage_authorized=usage_authorized,
+            ))
+        elif os.getenv("VOGUE_HM_PROCESSED_DIR", "").strip():
+            # Explicit local directory is retained for offline/manual development.
+            sources.append(HmHistoricalSalesSource(
+                Path(os.environ["VOGUE_HM_PROCESSED_DIR"]), category_map, mapping_version,
+                usage_authorized=usage_authorized,
+            ))
     return MarketResearchAgent(CompositeMarketResearchSource(sources) if sources else NoConfiguredSources())
 
 
@@ -489,19 +505,27 @@ def serve(
     *,
     synthetic_demo: bool = False,
     enable_synthetic_simulation: bool = False,
+    synthetic_source_backend: str = "r2",
 ) -> None:
     """Start the local proposal server on loopback; run routes require the shared bearer token."""
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("The local proposal server may only bind to loopback.")
-    agent_factory = (
-        (lambda: MarketResearchAgent(SyntheticQueryCoverageSource()))
-        if synthetic_demo or enable_synthetic_simulation
-        else configured_agent
-    )
     if synthetic_demo and enable_synthetic_simulation:
         raise ValueError("Choose either legacy --synthetic-demo or --enable-synthetic-simulation, not both.")
+    if synthetic_source_backend not in {"r2", "local"}:
+        raise ValueError("Synthetic source backend must be 'r2' or explicit offline 'local'.")
+    bundle_store = None
+    if synthetic_demo or (enable_synthetic_simulation and synthetic_source_backend == "local"):
+        agent_factory = lambda: MarketResearchAgent(SyntheticQueryCoverageSource())
+    elif enable_synthetic_simulation:
+        bundle_store = SyntheticR2FixtureBundleStore.from_env()
+        synthetic_source = SyntheticQueryCoverageSource(bundle_loader=bundle_store.load_bundle)
+        agent_factory = lambda: MarketResearchAgent(synthetic_source)
+    else:
+        agent_factory = configured_agent
     server = ThreadingHTTPServer((host, port), make_handler(
         agent_factory, synthetic_simulation_enabled=enable_synthetic_simulation,
+        synthetic_bundle_provider=bundle_store.load_bundle if bundle_store is not None else None,
     ))
     print(f"Project_07 local service (vogue-handoff/0.1): http://{host}:{port}")
     if synthetic_demo:
@@ -522,9 +546,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--synthetic-demo", action="store_true", help="Use only the local test-only synthetic query coverage fixture.")
     parser.add_argument("--enable-synthetic-simulation", action="store_true", help="Serve the main UI and stable /runs from labeled synthetic fixtures; also expose detailed simulation analysis.")
+    parser.add_argument("--synthetic-source", choices=("r2", "local"), default="r2", help="Synthetic simulation source; R2 is the service default, local is an explicit offline development mode.")
     args = parser.parse_args(argv)
     serve(args.host, args.port, synthetic_demo=args.synthetic_demo,
-          enable_synthetic_simulation=args.enable_synthetic_simulation)
+          enable_synthetic_simulation=args.enable_synthetic_simulation,
+          synthetic_source_backend=args.synthetic_source)
     return 0
 
 

@@ -253,7 +253,7 @@ class SyntheticRagAnalysisTests(unittest.TestCase):
             script = ROOT / "scripts/run_synthetic_rag_analysis.py"
             denied = subprocess.run([sys.executable, str(script), "--request", str(request_path)], cwd=ROOT, capture_output=True, text=True)
             self.assertNotEqual(denied.returncode, 0)
-            run = subprocess.run([sys.executable, str(script), "--mode", "synthetic_test", "--request", str(request_path)], cwd=ROOT, capture_output=True, text=True)
+            run = subprocess.run([sys.executable, str(script), "--mode", "synthetic_test", "--source", "local", "--request", str(request_path)], cwd=ROOT, capture_output=True, text=True)
         self.assertEqual(run.returncode, 0, run.stderr)
         payload = json.loads(run.stdout)
         self.assertTrue(payload["synthetic"])

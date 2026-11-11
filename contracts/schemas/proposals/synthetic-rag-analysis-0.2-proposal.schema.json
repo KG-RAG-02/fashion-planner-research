@@ -22,7 +22,43 @@
     "permission_status": {"const": "authorized_for_synthetic_testing_only"},
     "operational_eligible": {"const": false},
     "requested_scope": {"type": "object"},
-    "source_manifests": {"type": "object"},
+    "source_manifests": {
+      "type": "object",
+      "properties": {
+        "observations": {"type": ["object", "null"]},
+        "explanatory_documents": {"type": ["object", "null"]},
+        "r2_release": {
+          "oneOf": [
+            {"type": "null"},
+            {
+              "type": "object",
+              "required": ["schema_version", "release_id", "manifest_key", "manifest_sha256", "runtime_objects"],
+              "properties": {
+                "schema_version": {"const": "project07-synthetic-r2-bundle/1.0"},
+                "release_id": {"type": "string"},
+                "source_commit": {"type": ["string", "null"]},
+                "manifest_key": {"type": "string"},
+                "manifest_sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"},
+                "runtime_objects": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "required": ["dataset_group", "relative_path", "object_key", "size_bytes", "sha256"],
+                    "properties": {
+                      "dataset_group": {"enum": ["runtime/query_coverage", "runtime/market_scenario"]},
+                      "relative_path": {"type": "string"},
+                      "object_key": {"type": "string"},
+                      "size_bytes": {"type": "integer", "minimum": 0},
+                      "sha256": {"type": "string", "pattern": "^[0-9a-f]{64}$"}
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
     "market_like": {"$ref": "#/$defs/data_block"},
     "sales_like": {"$ref": "#/$defs/data_block"},
     "retrieval": {"type": "object"},

@@ -4,7 +4,7 @@
 
 VOGUE의 시장성 조사 단계에서 사용할 수 있는 계약 중립적 Python 도메인 코어입니다. 현재 구현은 승인된 시장 자료원이 정해지지 않은 상태를 반영해 외부 API, 크롤러, 모델, 그래프 저장소를 포함하지 않습니다.
 
-현재 저장소에는 승인된 실제 판매 원장·시장 자료 어댑터가 없어 운영 분석 시스템으로 동작하지 않습니다. 판매 관측 모델과 결과 정규화 경계는 Project_07 책임으로 구현하되, 자료원이 미구성된 경우 `no_results`와 제한 사유를 전달합니다. Kaggle/H&M 공개 과거 데이터와 합성 fixture는 운영 데이터로 사용하지 않습니다.
+현재 저장소에는 승인된 실시간 판매 원장·시장 자료 어댑터가 없어 실제 운영 분석 시스템으로 동작하지 않습니다. H&M Kaggle은 외부 사용 권한과 명시적 category mapping이 확인된 경우에만 과거 자료로 사용할 수 있습니다. R2 기반 합성 시뮬레이션은 합성 자료임을 계속 표시하며 실제 시장·회사 실적으로 제공하지 않습니다.
 
 Project_06의 책임 정리 과정에서 H&M 과거자료 처리·품질·집계 adapter가 이 저장소로 옮겨졌습니다. 2026-11-09에는 H&M Kaggle 파일도 Git 제외 로컬 데이터 경로로 이동했습니다. 이 이동은 이용 권한을 승인하지 않습니다. `.env`와 SQLite 데이터는 옮기지 않았습니다. 판매와 시장 분석 코드는 각각 `sources/sales/`와 `sources/market/`에 둡니다. 상품기획 초안/시나리오 생성 데모 코드는 Project_06의 `_incoming/project_07-product-planning/`으로 반환했습니다. H&M adapter는 historical research용이며 승인된 사내 sales connector가 아닙니다. 테스트는 임시 합성 fixture를 사용하며 실제 Kaggle 원본 CSV를 요구하지 않습니다.
 
@@ -52,7 +52,7 @@ PYTHONPATH=src python3 examples/synthetic_demo.py
 
 ## 시장성 조사 결과 생성
 
-CLI는 `PlanningRequest`, `TrendResult`, `InventoryProductResult` 입력 JSON을 검증합니다. 현재 허용한 운영 자료는 권한이 확인된 H&M Kaggle 과거 판매 adapter뿐이며 합성 fixture는 demo/test 전용입니다. 외부 시장 자료원은 이 작업 경로에 연결하지 않습니다.
+CLI는 `PlanningRequest`, `TrendResult`, `InventoryProductResult` 입력 JSON을 검증합니다. H&M Kaggle 과거자료는 별도 권한 선언, 명시적 mapping, mapping version이 있어야 조회합니다. R2 합성 fixture는 simulation mode에서만 조회하며 외부 시장 자료원은 연결하지 않습니다.
 
 ```bash
 PYTHONPATH=src python3 -m market_research_agent.cli \\
@@ -66,9 +66,9 @@ PYTHONPATH=src python3 -m market_research_agent.cli \\
 
 입력 예시 파일은 이 저장소의 `examples/fixtures/market-research-input.example.json`을 참고하세요. 모든 상위 결과의 `request_id`가 일치해야 합니다. H&M 어댑터는 권한 확인, 명시적 category mapping, mapping version이 없으면 데이터를 읽지 않습니다. `--hm-usage-authorized`는 승인 절차가 아니며 외부에서 확인한 사용 권한을 호출자가 선언하는 플래그입니다. CLI 기본 요청에 source가 연결되지 않으면 `no_results`를 반환합니다. `--proposal-v1-1`, `--proposal-v1-2`, `--proposal-v1-3`은 명시적인 미합의 계약 제안입니다.
 
-현재 작업 범위는 로컬 H&M Kaggle 과거 판매자료와 저장소의 합성 fixture로 제한됩니다. 일반 CLI/HTTP 실행은 승인 확인 및 명시적 category mapping이 있는 H&M historical adapter만 선택할 수 있으며, 합성 fixture는 별도의 demo/test 경로에서만 사용합니다. 시장 CSV adapter 코드는 남아 있지만 이 작업 범위의 CLI/HTTP source로 연결하지 않습니다. H&M 필수 설정과 합성 데이터 경계는 [`docs/design/sales-search-quality-hm-synthetic.md`](docs/design/sales-search-quality-hm-synthetic.md)를 참고하세요.
+합성 시뮬레이션의 기본 HTTP source는 allowlisted R2 release입니다. `--synthetic-source local`은 명시적인 offline 개발 경로입니다. 일반 HTTP 실행은 합성 source로 자동 fallback하지 않습니다. H&M source는 사용 권한 선언과 명시적 category mapping/version이 있을 때만 읽습니다. 기본 R2 경로는 Project_06 공유 DuckDB의 `articles` 및 `transactions` 테이블을 읽고, `customers`는 조회하지 않습니다. `R2_DB_KEY`가 있으면 이 DuckDB source를 우선 선택하며, legacy CSV bundle과 로컬 처리 파일도 명시 경로로 계속 지원합니다. 설정 계약은 [`docs/design/r2-data-sources.md`](docs/design/r2-data-sources.md)를 참고하세요.
 
-핵심 설정 환경변수는 `VOGUE_HM_PROCESSED_DIR`(처리 데이터 경로)와 `VOGUE_HM_MAPPING_VERSION`(분류 매핑 버전)입니다. 기존 `VOGUE_HM_ANALYSIS_PATH`는 historical prototype 경로 설정입니다. 이 패키지는 `.env`를 자동 로드하지 않으며, 필요한 값을 셸 또는 실행환경에서 설정해야 합니다. `.env`는 Git 제외 상태를 유지하십시오.
+핵심 설정 환경변수는 `PROJECT07_SYNTHETIC_R2_MANIFEST_KEY`(또는 release prefix), `PROJECT07_HM_R2_DB_KEY`(또는 공유 `R2_DB_KEY`), legacy bundle용 `PROJECT07_HM_R2_PREFIX` / `PROJECT07_HM_R2_MANIFEST_KEY`, `VOGUE_HM_CATEGORY_MAP`, `VOGUE_HM_MAPPING_VERSION`, `VOGUE_HM_USAGE_AUTHORIZED`입니다. R2 연동은 read-only `HeadObject` / `GetObject`만 사용합니다. 이 패키지는 `.env`를 자동 로드하지 않으며 필요한 값을 셸 또는 실행환경에서 설정합니다. `.env`는 Git 제외 상태로 유지합니다.
 
 ## 합성 RAG 평가 자료
 
@@ -132,6 +132,8 @@ curl -sS -X POST http://127.0.0.1:8766/v1/agents/sales-market-agent/runs \
 ```
 
 opt-in **합성 시뮬레이션 모드**는 기본 서비스 UI(`/`) 및 기존 stable handoff `POST /v1/agents/sales-market-agent/runs`를 통해 합성 분석 findings를 반환합니다. 같은 모드에서 `/v1/agents/sales-market-agent/simulation-runs`는 observation/Evidence 상세 결과를 별도 proposal 계약으로 제공합니다. 기본 서버에서는 비활성화되어 있습니다.
+
+`--enable-synthetic-simulation`은 R2를 기본으로 사용합니다. 오프라인 로컬 fixture가 필요한 개발 테스트에서만 `--synthetic-source local`을 함께 지정하세요. Live R2 read 검증은 회전된 자격 증명으로 별도 수행해야 합니다.
 
 ```bash
 PYTHONPATH=src python3 -m market_research_agent.http_server \

@@ -10,6 +10,7 @@ import csv
 import json
 import re
 import calendar
+from contextlib import contextmanager
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Mapping
@@ -18,6 +19,10 @@ from ....domain.models import EvidenceRecord, MarketResearchContext, PermissionS
 from ....domain.sales import MissingData, SalesDataResult, SalesObservation
 
 DEFAULT_PROCESSED_DIR = Path("data/processed/hm-personalized-fashion-recommendations")
+
+
+class HmSourceReadError(ValueError):
+    """A safe H&M source read or validation error."""
 
 
 class HmHistoricalSalesSource:
@@ -112,6 +117,16 @@ class HmHistoricalSalesSource:
                     missing_data=(MissingData("sales_data", "mapping_failed", message, "hm-kaggle-personalized-fashion-recommendations"),),
                 ),
             )
+        if not any(target.casefold() == category.strip().casefold() for target in self.category_map.values()):
+            message = "No reviewed H&M source category mapping targets the requested category."
+            return SourceReport(
+                status=ResultStatus.NO_RESULTS,
+                limitations=(message,),
+                sales_data=SalesDataResult(
+                    "no_results", limitations=(message,),
+                    missing_data=(MissingData("sales_data", "mapping_failed", message, "hm-kaggle-personalized-fashion-recommendations"),),
+                ),
+            )
         if not self.usage_authorized:
             message = "Kaggle data usage authorization is not confirmed; observations were withheld without reading local sales files."
             return SourceReport(
@@ -124,18 +139,19 @@ class HmHistoricalSalesSource:
                 ),
             )
         try:
-            sales = load_hm_sales_analysis(
-                request_id=context.request_id,
-                schema_version="1.1-proposal",
-                requested_category=category,
-                source_category_map=self.category_map,
-                category_mapping_version=self.mapping_version,
-                processed_dir=self.processed_dir,
-                requested_period=context.requested_period,
+            sales, manifest = self._load_sales_analysis(context, category)
+        except HmSourceReadError as exc:
+            message = str(exc)
+            return SourceReport(
+                status=ResultStatus.ERROR,
+                limitations=(message,),
+                sales_data=SalesDataResult(
+                    "error", errors=(message,),
+                    missing_data=(MissingData("sales_data", "source_error", message, "hm-kaggle-personalized-fashion-recommendations", retryable=True),),
+                ),
             )
-            manifest = json.loads((self.processed_dir.expanduser().resolve() / "manifest.json").read_text(encoding="utf-8"))
         except FileNotFoundError:
-            message = f"H&M historical data is not available at {self.processed_dir}; provide processed manifest.json, article_catalog.csv, and weekly_sales_by_article_channel.csv."
+            message = "H&M historical source files are not available; provide the processed manifest.json, article_catalog.csv, and weekly_sales_by_article_channel.csv."
             return SourceReport(
                 status=ResultStatus.NO_RESULTS,
                 limitations=(message,),
@@ -163,7 +179,7 @@ class HmHistoricalSalesSource:
                     source_id="hm-kaggle-personalized-fashion-recommendations",
                     source_type=source_type,
                     source_name=source_name,
-                    locator="https://www.kaggle.com/competitions/h-and-m-personalized-fashion-recommendations/data",
+                    locator=self._evidence_locator(source_type),
                     period_start=item.period_start if source_type == "historical_sales" else None,
                     period_end=item.period_end if source_type == "historical_sales" else None,
                     geography=None,
@@ -175,7 +191,7 @@ class HmHistoricalSalesSource:
                     permission_status=permission,
                 ))
             observations.append(item)
-        limitations = (*sales.limitations, "Historical Kaggle data is not live/current H&M sales. Its observed period is retained from the local manifest.")
+        limitations = (*sales.limitations, "H&M 과거 데이터이며 현재 H&M 판매나 시장 수요를 뜻하지 않습니다. 관측 기간은 source manifest에서 보존합니다.")
         unsupported_metrics = requested_metrics - {"purchase_rows"}
         if unsupported_metrics:
             limitations = (*limitations, "H&M returned purchase_rows only; other requested metrics are unavailable from this source.")
@@ -185,6 +201,28 @@ class HmHistoricalSalesSource:
             limitations=limitations,
             sales_data=sales,
         )
+
+    @contextmanager
+    def _open_processed_directory(self):
+        """Yield the local source after request scope and permission gates pass."""
+        yield self.processed_dir
+
+    def _load_sales_analysis(self, context: MarketResearchContext, category: str):
+        with self._open_processed_directory() as processed_dir:
+            sales = load_hm_sales_analysis(
+                request_id=context.request_id,
+                schema_version="1.1-proposal",
+                requested_category=category,
+                source_category_map=self.category_map,
+                category_mapping_version=self.mapping_version,
+                processed_dir=processed_dir,
+                requested_period=context.requested_period,
+            )
+            manifest = json.loads((processed_dir.expanduser().resolve() / "manifest.json").read_text(encoding="utf-8"))
+        return sales, manifest
+
+    def _evidence_locator(self, source_type: str) -> str:
+        return "https://www.kaggle.com/competitions/h-and-m-personalized-fashion-recommendations/data"
 
 
 def load_hm_sales_analysis(

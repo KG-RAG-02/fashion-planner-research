@@ -6,7 +6,7 @@ import json
 import re
 from collections import defaultdict
 from pathlib import Path
-from typing import Any
+from typing import Any, Callable
 
 from ...domain.models import FindingKind, MarketResearchContext, ResearchFinding, ResultStatus, SourceReport
 from ...domain.sales import MarketDataResult, SalesDataResult
@@ -119,14 +119,17 @@ def _extract_scope(context: MarketResearchContext) -> dict[str, Any]:
 class SyntheticQueryCoverageSource:
     """Demo-only deterministic filter; never represents a real source."""
 
-    def __init__(self, fixture_dir: Path = DEFAULT_FIXTURE_DIR) -> None:
+    def __init__(self, fixture_dir: Path = DEFAULT_FIXTURE_DIR,
+                 bundle_loader: Callable[[], dict[str, Any]] | None = None) -> None:
         self.fixture_dir = fixture_dir
+        self.bundle_loader = bundle_loader
 
     def research(self, context: MarketResearchContext) -> SourceReport:
         try:
             from ...synthetic_rag import load_fixture_bundle
 
-            fixture = load_fixture_bundle(query_coverage_root=self.fixture_dir)
+            fixture = (self.bundle_loader() if self.bundle_loader is not None
+                       else load_fixture_bundle(query_coverage_root=self.fixture_dir))
             market_rows = fixture["observations"]["market_like"]
             sales_rows = fixture["observations"]["sales_like"]
         except (OSError, ValueError):

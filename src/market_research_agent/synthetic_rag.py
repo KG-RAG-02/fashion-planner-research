@@ -92,12 +92,17 @@ def _markers(value: Mapping[str, Any], label: str) -> None:
         raise SyntheticFixtureError(f"synthetic safety marker mismatch: {label}")
 
 
-def _safe_root(root: Path) -> Path:
+def _safe_root(root: Path, trusted_external_roots: tuple[Path, ...] = ()) -> Path:
     try:
         resolved = root.resolve(strict=True)
     except OSError as exc:
         raise SyntheticFixtureError("fixture root does not exist or cannot be resolved") from exc
     allowed = {path.resolve(strict=True) for path in ALLOWED_FIXTURE_ROOTS if path.exists()}
+    for trusted in trusted_external_roots:
+        try:
+            allowed.add(Path(trusted).resolve(strict=True))
+        except OSError:
+            continue
     if resolved not in allowed or not resolved.is_dir():
         raise SyntheticFixtureError("fixture root is not an allowlisted local synthetic corpus")
     return resolved
@@ -106,10 +111,12 @@ def _safe_root(root: Path) -> Path:
 def load_fixture_bundle(
     query_coverage_root: Path = QUERY_COVERAGE_ROOT,
     scenario_root: Path = SCENARIO_ROOT,
+    *,
+    trusted_external_roots: tuple[Path, ...] = (),
 ) -> dict[str, Any]:
     """Read and validate both allowlisted corpora without converting permissions."""
-    coverage_root = _safe_root(Path(query_coverage_root))
-    docs_root = _safe_root(Path(scenario_root))
+    coverage_root = _safe_root(Path(query_coverage_root), trusted_external_roots)
+    docs_root = _safe_root(Path(scenario_root), trusted_external_roots)
     manifest = _json(coverage_root / "manifest.json")
     if manifest.get("schema_version") != "synthetic-query-coverage-manifest/1.1":
         raise SyntheticFixtureError("unsupported query coverage manifest version")
@@ -650,6 +657,7 @@ def _base_result(canonical: Mapping[str, Any], status: str, reason: str | None, 
         "source_manifests": {
             "observations": {key: manifest.get(key) for key in ("schema_version", "generator_version", "seed", "request_id")},
             "explanatory_documents": ({key: bundle["scenario_manifest"].get(key) for key in ("manifest_id", "generator", "seed", "request_id")} if bundle else None),
+            "r2_release": bundle.get("_r2_release") if bundle else None,
         },
         "market_like": {"status": "not_queried", "unit": None, "observations": [], "evidence_ids": []},
         "sales_like": {"status": "not_queried", "unit": None, "observations": [], "evidence_ids": []},

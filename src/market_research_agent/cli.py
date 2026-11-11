@@ -12,6 +12,8 @@ from typing import Any
 from .domain.models import MarketResearchContext
 from .sources.shared.composite import CompositeMarketResearchSource
 from .sources.sales.hm_kaggle.hm_sales_adapter import HmHistoricalSalesSource
+from .sources.sales.hm_kaggle.hm_r2_sales_source import R2HmHistoricalSalesSource
+from .sources.sales.hm_kaggle.hm_r2_duckdb_source import R2DuckDBHmHistoricalSalesSource
 from .sources.shared.noop import NoConfiguredSources
 from .workflows.market_research import MarketResearchAgent
 from .query_interpretation import interpret_query, scope_conflicts, unresolved_ambiguities
@@ -46,7 +48,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--metrics", default="", help="Optional comma-separated research metrics")
     parser.add_argument("--geography", default="", help="Optional requested market geography; omitted means unspecified")
     parser.add_argument("--channel", default="", help="Optional requested market channel; omitted means unspecified")
-    parser.add_argument("--hm-processed-dir", default=os.getenv("VOGUE_HM_PROCESSED_DIR", "data/processed/hm-personalized-fashion-recommendations"))
+    parser.add_argument("--hm-processed-dir", default=os.getenv("VOGUE_HM_PROCESSED_DIR", ""), help="Explicit local/offline H&M processed-data directory.")
+    parser.add_argument("--hm-r2-db-key", default=os.getenv("PROJECT07_HM_R2_DB_KEY", ""), help="R2 DuckDB object key; takes priority over the legacy processed CSV bundle.")
+    parser.add_argument("--hm-source", choices=("auto", "r2-duckdb", "r2-bundle", "local"), default="auto", help="Select H&M source; auto prefers the shared R2 DuckDB, then the legacy R2 CSV bundle, then an explicitly configured local directory.")
+    parser.add_argument("--hm-r2-prefix", default=os.getenv("PROJECT07_HM_R2_PREFIX", ""), help="Explicit R2 prefix for the H&M processed bundle.")
+    parser.add_argument("--hm-r2-manifest-key", default=os.getenv("PROJECT07_HM_R2_MANIFEST_KEY", ""), help="Explicit R2 H&M bundle manifest object key.")
     parser.add_argument("--hm-category-map", action="append", default=[], help="Explicit source-to-request category mapping, e.g. 'Garment Upper body=Outerwear'")
     parser.add_argument("--hm-mapping-version", default=os.getenv("VOGUE_HM_MAPPING_VERSION", ""))
     parser.add_argument("--hm-usage-authorized", action="store_true", help="Declare externally confirmed authorization for this source")
@@ -116,10 +122,33 @@ def main(argv: list[str] | None = None) -> int:
                 if not separator or not source.strip() or not target.strip():
                     raise ValueError("Each --hm-category-map must use source=target format.")
                 category_map[source.strip()] = target.strip()
-            sources.append(HmHistoricalSalesSource(
-                Path(args.hm_processed_dir), category_map, args.hm_mapping_version,
-                usage_authorized=args.hm_usage_authorized,
-            ))
+            hm_usage_authorized = args.hm_usage_authorized or os.getenv("VOGUE_HM_USAGE_AUTHORIZED", "").casefold() == "true"
+            r2_db_key = args.hm_r2_db_key.strip() or os.getenv("R2_DB_KEY", "").strip()
+            source_mode = args.hm_source
+            if source_mode == "auto":
+                source_mode = ("r2-duckdb" if r2_db_key else
+                               "r2-bundle" if args.hm_r2_prefix or args.hm_r2_manifest_key else
+                               "local" if args.hm_processed_dir else "")
+            if source_mode == "r2-duckdb" and r2_db_key:
+                sources.append(R2DuckDBHmHistoricalSalesSource(
+                    category_map, args.hm_mapping_version,
+                    usage_authorized=hm_usage_authorized,
+                    object_key=r2_db_key,
+                ))
+            elif source_mode == "r2-bundle" and (args.hm_r2_prefix or args.hm_r2_manifest_key):
+                sources.append(R2HmHistoricalSalesSource(
+                    category_map, args.hm_mapping_version,
+                    usage_authorized=hm_usage_authorized,
+                    allowed_prefix=args.hm_r2_prefix,
+                    manifest_key=args.hm_r2_manifest_key,
+                ))
+            elif source_mode == "local" and args.hm_processed_dir:
+                sources.append(HmHistoricalSalesSource(
+                    Path(args.hm_processed_dir), category_map, args.hm_mapping_version,
+                    usage_authorized=hm_usage_authorized,
+                ))
+            else:
+                raise ValueError("The selected H&M source is not configured; verify its object key or processed directory.")
         source = CompositeMarketResearchSource(sources) if sources else NoConfiguredSources()
         result = MarketResearchAgent(source).run(context)
         if sum((args.proposal_v1_1, args.proposal_v1_2, args.proposal_v1_3)) > 1:
