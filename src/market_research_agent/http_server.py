@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hmac
 import json
+import mimetypes
 import os
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -23,6 +24,13 @@ from .sources.shared.noop import NoConfiguredSources
 from .workflows.market_research import MarketResearchAgent
 from .query_interpretation import interpret_query, scope_conflicts, unresolved_ambiguities
 from .orchestration_request import CanonicalRequestError, context_from_canonical_request
+from .synthetic_rag import (
+    LIMITATION as SYNTHETIC_LIMITATION,
+    SCHEMA_VERSION as SYNTHETIC_SCHEMA_VERSION,
+    SYNTHETIC_MARKERS,
+    SyntheticFixtureError,
+    analyze_synthetic_request,
+)
 
 
 CONTRACT_VERSION = "vogue-handoff/0.1"
@@ -34,6 +42,13 @@ SUPPORTED_UPSTREAM_SCHEMA_VERSIONS = {
     "inventory_product_result": {"1.0"},
 }
 MAX_BODY_BYTES = 1_048_576
+SYNTHETIC_SIMULATION_PATH = "/v1/simulations/synthetic-rag/runs"
+SYNTHETIC_SIMULATION_UI_PATH = "/synthetic-simulation"
+_WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
+_SYNTHETIC_UI_FILES = {
+    "/synthetic-simulation.js": _WEB_ROOT / "synthetic_simulation.js",
+    "/synthetic-simulation.css": _WEB_ROOT / "synthetic_simulation.css",
+}
 
 _STRING_FIELDS = (
     "requested_category", "requested_geography", "requested_channel",
@@ -225,8 +240,12 @@ def context_from_handoff_request(value: Any) -> MarketResearchContext:
     )
 
 
-def make_handler(agent_factory: Callable[[], MarketResearchAgent] | None = None) -> type[BaseHTTPRequestHandler]:
-    """Create a handler; factory injection enables explicit local source wiring."""
+def make_handler(
+    agent_factory: Callable[[], MarketResearchAgent] | None = None,
+    *,
+    synthetic_simulation_enabled: bool = False,
+) -> type[BaseHTTPRequestHandler]:
+    """Create a handler; simulation routes are isolated behind an explicit flag."""
     build_agent = agent_factory or MarketResearchAgent
 
     class Project07Handler(BaseHTTPRequestHandler):
@@ -248,10 +267,96 @@ def make_handler(agent_factory: Callable[[], MarketResearchAgent] | None = None)
             self.end_headers()
             self.wfile.write(encoded)
 
+        def _send_static(self, path: Path, content_type: str) -> None:
+            try:
+                content = path.read_bytes()
+            except OSError:
+                self._send_json(503, _error_payload("UI_UNAVAILABLE", "Simulation UI is unavailable."))
+                return
+            self.send_response(200)
+            self.send_header("Content-Type", content_type)
+            self.send_header("Content-Length", str(len(content)))
+            self.send_header("Cache-Control", "no-store")
+            self.send_header("X-Content-Type-Options", "nosniff")
+            self.send_header("X-Frame-Options", "DENY")
+            self.send_header("Referrer-Policy", "no-referrer")
+            self.send_header("Content-Security-Policy", "default-src 'none'; script-src 'self'; style-src 'self'; connect-src 'self'; img-src 'self' data:; form-action 'self'; base-uri 'none'; frame-ancestors 'none'")
+            self.end_headers()
+            self.wfile.write(content)
+
+        def _send_simulation_error(self, status: int, reason_code: str, message: str, request_id: str | None = None) -> None:
+            self._send_json(status, {
+                "schema_version": SYNTHETIC_SCHEMA_VERSION,
+                "request_id": request_id,
+                "status": "error",
+                "reason": reason_code,
+                "message": message,
+                "execution_mode": "synthetic_test",
+                "simulation_mode": "synthetic_simulation",
+                **SYNTHETIC_MARKERS,
+                "limitations": [SYNTHETIC_LIMITATION],
+            })
+
+        def _handle_synthetic_simulation(self) -> None:
+            if not synthetic_simulation_enabled:
+                self._send_json(404, _error_payload("NOT_FOUND", "Route not found."))
+                return
+            if not self._authorized():
+                self._send_simulation_error(401, "unauthorized", "Bearer authentication required.")
+                return
+            if self.headers.get_content_type() != "application/json":
+                self._send_simulation_error(415, "unsupported_media_type", "Content-Type must be application/json.")
+                return
+            if self.headers.get("Transfer-Encoding"):
+                self._send_simulation_error(400, "unsupported_transfer_encoding", "Transfer-Encoding is unsupported.")
+                return
+            try:
+                raw_length = self.headers.get("Content-Length")
+                try:
+                    length = int(raw_length) if raw_length is not None else 0
+                except ValueError:
+                    raise RequestValidationError("INVALID_CONTENT_LENGTH", "Content-Length is invalid.", 400) from None
+                if length <= 0:
+                    raise RequestValidationError("EMPTY_BODY", "A JSON request body is required.", 400)
+                if length > MAX_BODY_BYTES:
+                    raise RequestValidationError("REQUEST_TOO_LARGE", "Request body exceeds the local limit.", 413)
+                raw_body = self.rfile.read(length)
+                if len(raw_body) != length:
+                    raise RequestValidationError("INCOMPLETE_BODY", "Request body was incomplete.", 400)
+                request = json.loads(raw_body, parse_constant=_reject_json_constant)
+                if not isinstance(request, dict):
+                    raise RequestValidationError("INVALID_INPUT", "Canonical request must be a JSON object.", 422)
+            except RequestValidationError as exc:
+                self._send_simulation_error(exc.http_status, exc.code.casefold(), str(exc))
+                return
+            except (ValueError, json.JSONDecodeError, RecursionError):
+                self._send_simulation_error(400, "invalid_json", "Request body must be valid JSON.")
+                return
+
+            request_id = _safe_error_request_id(request.get("request_id"))
+            try:
+                result = analyze_synthetic_request(request, mode="synthetic_test")
+            except CanonicalRequestError:
+                self._send_simulation_error(422, "invalid_canonical_request", "Canonical structured request is invalid.", request_id)
+                return
+            except SyntheticFixtureError:
+                self._send_simulation_error(503, "fixture_unavailable_or_invalid", "Synthetic simulation fixture could not be validated.", request_id)
+                return
+            except Exception:
+                self._send_simulation_error(500, "simulation_failed", "Synthetic simulation could not be completed.", request_id)
+                return
+            result["simulation_mode"] = "synthetic_simulation"
+            self._send_json(200, result)
+
         def do_GET(self) -> None:
             path = urlsplit(self.path).path
             if path == "/api/health":
                 self._send_json(200, {"status": "ok", "mode": "local-development"})
+            elif synthetic_simulation_enabled and path == SYNTHETIC_SIMULATION_UI_PATH:
+                self._send_static(_WEB_ROOT / "synthetic_simulation.html", "text/html; charset=utf-8")
+            elif synthetic_simulation_enabled and path in _SYNTHETIC_UI_FILES:
+                content_type = mimetypes.guess_type(str(_SYNTHETIC_UI_FILES[path]))[0] or "application/octet-stream"
+                self._send_static(_SYNTHETIC_UI_FILES[path], f"{content_type}; charset=utf-8")
             else:
                 self._send_json(404, _error_payload("NOT_FOUND", "Route not found."))
 
@@ -263,6 +368,9 @@ def make_handler(agent_factory: Callable[[], MarketResearchAgent] | None = None)
 
         def do_POST(self) -> None:
             path = unquote(urlsplit(self.path).path)
+            if path == SYNTHETIC_SIMULATION_PATH:
+                self._handle_synthetic_simulation()
+                return
             prefix = "/v1/agents/"
             suffix = "/structured-runs" if path.endswith("/structured-runs") else "/runs"
             if not (path.startswith(prefix) and path.endswith(suffix)):
@@ -360,15 +468,27 @@ def configured_agent() -> MarketResearchAgent:
     return MarketResearchAgent(CompositeMarketResearchSource(sources) if sources else NoConfiguredSources())
 
 
-def serve(host: str = "127.0.0.1", port: int = 8766, *, synthetic_demo: bool = False) -> None:
+def serve(
+    host: str = "127.0.0.1",
+    port: int = 8766,
+    *,
+    synthetic_demo: bool = False,
+    enable_synthetic_simulation: bool = False,
+) -> None:
     """Start the local proposal server on loopback; run routes require the shared bearer token."""
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("The local proposal server may only bind to loopback.")
     agent_factory = (lambda: MarketResearchAgent(SyntheticQueryCoverageSource())) if synthetic_demo else configured_agent
-    server = ThreadingHTTPServer((host, port), make_handler(agent_factory))
+    if synthetic_demo and enable_synthetic_simulation:
+        raise ValueError("Choose either legacy --synthetic-demo or --enable-synthetic-simulation, not both.")
+    server = ThreadingHTTPServer((host, port), make_handler(
+        agent_factory, synthetic_simulation_enabled=enable_synthetic_simulation,
+    ))
     print(f"Project_07 local HTTP API (vogue-handoff/0.1): http://{host}:{port}")
     if synthetic_demo:
         print("Synthetic demonstration mode is enabled; every result is labeled synthetic and is not business evidence.")
+    if enable_synthetic_simulation:
+        print(f"Synthetic simulation API/UI enabled: {SYNTHETIC_SIMULATION_PATH} and {SYNTHETIC_SIMULATION_UI_PATH}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -382,8 +502,10 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--synthetic-demo", action="store_true", help="Use only the local test-only synthetic query coverage fixture.")
+    parser.add_argument("--enable-synthetic-simulation", action="store_true", help="Expose an isolated, authenticated simulation API and UI; does not affect normal HTTP routes.")
     args = parser.parse_args(argv)
-    serve(args.host, args.port, synthetic_demo=args.synthetic_demo)
+    serve(args.host, args.port, synthetic_demo=args.synthetic_demo,
+          enable_synthetic_simulation=args.enable_synthetic_simulation)
     return 0
 
 

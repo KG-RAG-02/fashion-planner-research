@@ -131,6 +131,17 @@ curl -sS -X POST http://127.0.0.1:8766/v1/agents/sales-market-agent/runs \
   --data-binary @examples/fixtures/http_json_handoff/project-07-synthetic-demo.request.json
 ```
 
+별도의 opt-in **합성 시뮬레이션 API와 UI**는 full structured observation/Evidence 결과를 proposal 계약으로 제공합니다. 기본 서버는 이 경로를 비활성화해 두며, 운영 `/runs` 경로에는 연결되지 않습니다.
+
+```bash
+PYTHONPATH=src python3 -m market_research_agent.http_server \
+  --host 127.0.0.1 --port 8766 --enable-synthetic-simulation
+```
+
+브라우저에서 `http://127.0.0.1:8766/synthetic-simulation`을 열고, 기존 `VOGUE_AGENT_SERVICE_BEARER_TOKEN`과 같은 토큰을 입력하면 됩니다. 토큰은 브라우저 저장소에 남기지 않으며 요청 후 입력값을 비웁니다. API는 `POST /v1/simulations/synthetic-rag/runs`이고 canonical structured request를 받습니다. schema는 [`synthetic-rag-analysis-0.1-proposal.schema.json`](contracts/schemas/proposals/synthetic-rag-analysis-0.1-proposal.schema.json) proposal입니다. 응답과 UI는 합성 데이터 고지, 별도 판매·시장 유사 블록, source/manifest/Evidence/locator/hash를 보여 줍니다.
+
+현재 HTTP 서버는 loopback 개발용이며 TLS, 외부 서비스 배포, rate limit, 운영 모니터링은 제공하지 않습니다. 이 API/UI를 외부 네트워크나 실제 운영 서비스에 노출하지 마세요. 일반 HTTP route의 기본 source와 v0.1 계약은 이 기능으로 바뀌지 않습니다. 구현 범위와 제약은 [합성 시뮬레이션 서비스 문서](docs/design/synthetic-simulation-service.md)를 참고하세요.
+
 실제 자료원 기반 판매·시장 분석 에이전트로 발전시키기 위한 현재 갭, 자료원 후보, 권한·데이터 계약, 처리 구조와 단계별 acceptance criteria는 [운영 분석 에이전트 설계 제안](docs/design/operational-market-analysis-agent-design.md)에 정리되어 있습니다. 실제 자료 연결이나 권한 승인은 포함하지 않습니다.
 
 기본 seed `20261109`는 문서 120개, chunk 359개, 검색 query 22개를 만듭니다. 생성량은 20–1000개 문서 범위에서 조절합니다. 생성 파일은 `tests/fixtures/synthetic_market_rag/` 아래에만 둘 수 있습니다.
@@ -225,4 +236,4 @@ repository-root/
 └── tests/                          # 자동화 테스트
 ```
 
-구조는 `domain` / `sources` / `workflows` 책임을 따릅니다. 운영 자료원이 정해지지 않아 사내 DB/API connector, 로컬 UI, 서비스 서버는 추가하지 않았습니다. H&M 관측치와 시장 자료는 서로 다른 adapter 경로에서 유지합니다. 새상품 기획에 해당하는 합성 상품기획 데모는 Project_06 인계 폴더에 있습니다.
+구조는 `domain` / `sources` / `workflows` 책임을 따릅니다. 실제 운영 자료원은 연결되어 있지 않습니다. 별도 opt-in 합성 시뮬레이션 route/UI는 loopback 개발 서버에서만 제공되며, 일반 `/runs` 경로와 분리됩니다. H&M 관측치와 시장 자료는 서로 다른 adapter 경로에서 유지합니다. 새상품 기획에 해당하는 합성 상품기획 데모는 Project_06 인계 폴더에 있습니다.

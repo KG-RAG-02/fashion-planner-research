@@ -11,9 +11,12 @@ import unittest
 import tempfile
 from unittest.mock import patch
 
+import market_research_agent.http_server as http_server
 from market_research_agent.http_server import (
     MAX_BODY_BYTES,
     RequestValidationError,
+    SYNTHETIC_SIMULATION_PATH,
+    SYNTHETIC_SIMULATION_UI_PATH,
     context_from_handoff_request,
     make_handler,
     configured_agent,
@@ -108,8 +111,8 @@ class Project07HttpServerTests(unittest.TestCase):
             self.assertEqual(result.sales_data.status, "no_results")
             self.assertEqual(result.sales_data.missing_data[0].reason, "permission_not_confirmed")
 
-    def post(self, request_body: dict | bytes, *, path="/v1/agents/sales-market-agent/runs", content_type="application/json", agent_factory=None, token="test-agent-token"):
-        handler_type = make_handler(agent_factory)
+    def post(self, request_body: dict | bytes, *, path="/v1/agents/sales-market-agent/runs", content_type="application/json", agent_factory=None, token="test-agent-token", synthetic_simulation_enabled=False):
+        handler_type = make_handler(agent_factory, synthetic_simulation_enabled=synthetic_simulation_enabled)
         handler = object.__new__(handler_type)
         data = request_body if isinstance(request_body, bytes) else json.dumps(request_body).encode()
         handler.path = path
@@ -128,6 +131,20 @@ class Project07HttpServerTests(unittest.TestCase):
         with patch.dict(os.environ, {"VOGUE_AGENT_SERVICE_BEARER_TOKEN": "test-agent-token"}):
             handler_type.do_POST(handler)
         return handler.response_status, json.loads(handler.wfile.getvalue()), handler.response_headers
+
+    def get(self, *, path, synthetic_simulation_enabled=False):
+        handler_type = make_handler(synthetic_simulation_enabled=synthetic_simulation_enabled)
+        handler = object.__new__(handler_type)
+        handler.path = path
+        handler.headers = Message()
+        handler.wfile = io.BytesIO()
+        handler.response_status = None
+        handler.response_headers = {}
+        handler.send_response = lambda status, *args: setattr(handler, "response_status", status)
+        handler.send_header = lambda name, value: handler.response_headers.__setitem__(name, value)
+        handler.end_headers = lambda: None
+        handler_type.do_GET(handler)
+        return handler.response_status, handler.wfile.getvalue(), handler.response_headers
 
     def test_canonical_routes_require_matching_shared_bearer_token(self):
         for token in (None, "wrong-token"):
@@ -247,6 +264,97 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertEqual(response["result"]["status"], "partial")
         self.assertGreater(len(response["result"]["findings"]), 0)
         self.assertTrue(all("[SYNTHETIC TEST DATA]" in item["statement"] for item in response["result"]["findings"]))
+
+    def test_synthetic_simulation_api_is_separate_opt_in_and_keeps_safety_lineage(self):
+        request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
+        status, disabled, _ = self.post(request, path=SYNTHETIC_SIMULATION_PATH)
+        self.assertEqual(status, 404)
+        self.assertEqual(disabled["error"]["code"], "NOT_FOUND")
+
+        status, response, headers = self.post(
+            request, path=SYNTHETIC_SIMULATION_PATH, synthetic_simulation_enabled=True,
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(response["schema_version"], "synthetic-rag-analysis/0.1-proposal")
+        self.assertEqual(response["simulation_mode"], "synthetic_simulation")
+        self.assertTrue(response["synthetic"])
+        self.assertEqual(response["data_nature"], "synthetic_test")
+        self.assertEqual(response["permission_status"], "authorized_for_synthetic_testing_only")
+        self.assertFalse(response["operational_eligible"])
+        self.assertEqual(response["requested_scope"]["raw_query"], request["raw_query"])
+        self.assertEqual(len(response["market_like"]["observations"]), 6)
+        self.assertEqual(response["sales_like"]["status"], "not_queried")
+        for observation in response["market_like"]["observations"]:
+            self.assertTrue(observation["observation_id"])
+            self.assertTrue(observation["synthetic"])
+            self.assertTrue(observation["evidence_ids"])
+            self.assertTrue(all(item["locator"] and item["content_hash"] for item in observation["evidence"]))
+        self.assertEqual(headers["Cache-Control"], "no-store")
+
+        # Enabling the simulation route never changes the stable operating route.
+        status, regular, _ = self.post(valid_request(), synthetic_simulation_enabled=True)
+        self.assertEqual(status, 200)
+        self.assertEqual(regular["contract_version"], "vogue-handoff/0.1")
+        self.assertEqual(regular["status"], "no_results")
+
+    def test_synthetic_simulation_route_requires_existing_bearer_auth_and_valid_canonical_input(self):
+        request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
+        for token in (None, "wrong-token"):
+            status, response, _ = self.post(
+                request, path=SYNTHETIC_SIMULATION_PATH, token=token,
+                synthetic_simulation_enabled=True,
+            )
+            self.assertEqual(status, 401)
+            self.assertEqual(response["reason"], "unauthorized")
+            self.assertTrue(response["synthetic"])
+        invalid = dict(request)
+        invalid["trend_result"] = {"status": "ok"}
+        status, response, _ = self.post(
+            invalid, path=SYNTHETIC_SIMULATION_PATH, synthetic_simulation_enabled=True,
+        )
+        self.assertEqual(status, 422)
+        self.assertEqual(response["reason"], "invalid_canonical_request")
+        self.assertFalse(response["operational_eligible"])
+
+    def test_synthetic_simulation_fixture_failure_is_safe_source_error(self):
+        from market_research_agent import http_server
+        request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
+        with patch.object(http_server, "analyze_synthetic_request", side_effect=http_server.SyntheticFixtureError("sensitive-path-marker")):
+            status, response, _ = self.post(
+                request, path=SYNTHETIC_SIMULATION_PATH, synthetic_simulation_enabled=True,
+            )
+        self.assertEqual(status, 503)
+        self.assertEqual(response["reason"], "fixture_unavailable_or_invalid")
+        self.assertNotIn("sensitive-path-marker", json.dumps(response))
+        self.assertTrue(response["synthetic"])
+
+    def test_synthetic_simulation_ui_is_opt_in_and_has_strong_disclosure(self):
+        status, _, _ = self.get(path=SYNTHETIC_SIMULATION_UI_PATH)
+        self.assertEqual(status, 404)
+        status, page, headers = self.get(path=SYNTHETIC_SIMULATION_UI_PATH, synthetic_simulation_enabled=True)
+        self.assertEqual(status, 200)
+        self.assertIn("합성 데이터 시뮬레이션".encode(), page)
+        self.assertIn("실제 시장 관측".encode(), page)
+        self.assertIn(b"/synthetic-simulation.js", page)
+        self.assertIn("default-src 'none'" , headers["Content-Security-Policy"])
+        self.assertNotIn("unsafe-inline", headers["Content-Security-Policy"])
+        status, script, _ = self.get(path="/synthetic-simulation.js", synthetic_simulation_enabled=True)
+        self.assertEqual(status, 200)
+        self.assertIn(b"textContent", script)
+        self.assertNotIn(b"localStorage", script)
+        self.assertIn(b"monthly_aggregates", script)
+
+    def test_simulation_cli_flag_is_opt_in_and_cannot_mix_with_legacy_demo(self):
+        with patch.object(http_server, "serve") as serve:
+            self.assertEqual(http_server.main([]), 0)
+            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=False)
+            serve.reset_mock()
+            self.assertEqual(http_server.main(["--enable-synthetic-simulation"]), 0)
+            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=True)
+        with self.assertRaises(ValueError):
+            http_server.serve(synthetic_demo=True, enable_synthetic_simulation=True)
+        with self.assertRaises(ValueError):
+            http_server.serve(host="0.0.0.0", enable_synthetic_simulation=True)
 
     def test_project08_route_alias_is_supported_for_local_proposal_client(self):
         status, response, headers = self.post(
