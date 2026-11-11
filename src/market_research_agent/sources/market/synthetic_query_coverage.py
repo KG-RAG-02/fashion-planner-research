@@ -117,8 +117,8 @@ def _extract_scope(context: MarketResearchContext) -> dict[str, Any]:
         "season_year": season_year if isinstance(season_year, int) else None,
         "period_start": period_start,
         "period_end": period_end,
-        "geography": context.requested_geography or "KR",
-        "channel": context.requested_channel or "online",
+        "geography": context.requested_geography,
+        "channel": context.requested_channel,
         "colors_exclude": sorted(normalized_excludes),
         "query": query,
     }
@@ -142,17 +142,6 @@ class SyntheticQueryCoverageSource:
                 market_data=MarketDataResult("error", errors=("Synthetic demo fixture is missing or invalid.",)),
             )
         scope = _extract_scope(context)
-        required = ("category", "gender", "period_start", "period_end")
-        missing = [field for field in required if not scope.get(field)]
-        if missing:
-            message = "Cannot safely resolve demo scope fields: " + ", ".join(missing) + ". Provide a supported category, gender, and period/season."
-            return SourceReport(
-                status=ResultStatus.NO_RESULTS,
-                limitations=(message, LIMITATION),
-                sales_data=SalesDataResult("no_results", limitations=(message, LIMITATION)),
-                market_data=MarketDataResult("no_results", limitations=(message, LIMITATION)),
-            )
-
         matching_market = self._filter(market_rows, scope)
         matching_sales = self._filter(sales_rows, scope)
         if not matching_market and not matching_sales:
@@ -203,16 +192,16 @@ class SyntheticQueryCoverageSource:
         matches = []
         excluded = set(scope["colors_exclude"])
         for row in rows:
-            if row.get("category", "").casefold() != scope["category"].casefold():
+            if scope["category"] and row.get("category", "").casefold() != scope["category"].casefold():
                 continue
-            if row.get("gender", "").casefold() != scope["gender"].casefold():
+            if scope["gender"] and row.get("gender", "").casefold() != scope["gender"].casefold():
                 continue
-            if row.get("geography", "").casefold() != scope["geography"].casefold():
+            if scope["geography"] and row.get("geography", "").casefold() != scope["geography"].casefold():
                 continue
-            if row.get("channel", "").casefold() != scope["channel"].casefold():
+            if scope["channel"] and row.get("channel", "").casefold() != scope["channel"].casefold():
                 continue
             period = row.get("period_start", "")[:7]
-            if not scope["period_start"] <= period <= scope["period_end"]:
+            if scope["period_start"] and scope["period_end"] and not scope["period_start"] <= period <= scope["period_end"]:
                 continue
             if scope["season"] and row.get("season") and row["season"].casefold() != scope["season"].casefold():
                 continue

@@ -14,7 +14,7 @@ from pathlib import Path
 from typing import Any
 
 
-GENERATOR_VERSION = "1.0"
+GENERATOR_VERSION = "1.1"
 DEFAULT_SEED = 20261109
 DEFAULT_DOCUMENT_COUNT = 120
 MAX_DOCUMENT_COUNT = 1000
@@ -238,6 +238,7 @@ def generate_corpus(*, seed: int = DEFAULT_SEED, document_count: int = DEFAULT_D
                 "evidence_id": evidence_id, "document_id": doc_id, "source_id": source_id,
                 "source_type": "synthetic_test_market_document", "source_name": source_name,
                 "text": text, "locator": locator, "page_or_section": f"section-{chunk_index}",
+                "retrieval_role": "metric_definition" if chunk_index == 1 else "observation" if chunk_index == 2 else "supplementary_context",
                 "document_version": "v0" if scope["scenario"] == "stale_revision" else "v2" if scope["scenario"] == "revised_current" else "v1",
                 "content_hash": _hash(text), "published_at": "2026-11-01T00:00:00Z",
                 "observed_at": f"{period_end}T00:00:00Z", "fetched_at": "2026-11-08T00:00:00Z",

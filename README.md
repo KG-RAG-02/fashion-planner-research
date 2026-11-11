@@ -22,6 +22,7 @@ Project_06의 책임 정리 과정에서 H&M 과거자료 처리·품질·집계
 - provider 결과가 부분적이어도 유효한 finding과 Evidence를 보존하고 `partial` 상태를 반환합니다.
 - 공통 입력의 상태·제한사항·미확보 필드는 가능한 한 결과의 제한사항에 기록하며, 입력 원문 객체는 source adapter에 그대로 전달합니다.
 - 입력 envelope에 `request_id`가 있으면 실행 요청 ID와 일치하는지 확인하고, 불일치 입력은 결합하지 않습니다.
+- `vogue-orchestration-request/0.1-proposal` 입력 어댑터는 통합 오케스트레이터가 해석한 구조화 요청을 검증합니다. 이 경로는 raw query를 다시 파싱하지 않고, Trend/Inventory 결과 payload가 섞여 들어오면 거부합니다. 새 입력 계약은 아직 공통 합의 전이며 stable result 1.0은 변경하지 않습니다.
 - `PlanningRequest`, `TrendResult`, `InventoryProductResult`를 받아 조사하되, Project_06 상품 기획 결과는 입력으로 받지 않습니다. VOGUE 상위 흐름은 Project_07 결과가 Project_06보다 먼저 전달되는 순차 처리입니다.
 - `CompositeMarketResearchSource`는 호출자가 제공한 source adapter들의 결과를 결합하고, 일부 source 실패 시 가용 결과와 오류를 함께 보존합니다. 현재 승인된 source adapter는 연결되어 있지 않습니다.
 - H&M historical adapter는 카테고리 매핑 후 `purchase_rows`를 주 단위 관측으로 보존합니다. 이 값은 역사적 거래 행 수이며 현재 판매나 수요를 뜻하지 않습니다.
@@ -51,21 +52,21 @@ PYTHONPATH=src python3 examples/synthetic_demo.py
 
 ## 시장성 조사 결과 생성
 
-CLI는 `PlanningRequest`, `TrendResult`, `InventoryProductResult` 입력 JSON을 검증하고 판매·시장 조사 결과만 반환합니다. Project_07은 새상품 콘셉트나 기획안을 생성하지 않습니다. 시장 자료원은 현재 미연결 상태이므로 기본 실행은 시장값을 만들지 않고 `no_results`를 반환합니다.
+CLI는 `PlanningRequest`, `TrendResult`, `InventoryProductResult` 입력 JSON을 검증합니다. 현재 허용한 운영 자료는 권한이 확인된 H&M Kaggle 과거 판매 adapter뿐이며 합성 fixture는 demo/test 전용입니다. 외부 시장 자료원은 이 작업 경로에 연결하지 않습니다.
 
 ```bash
 PYTHONPATH=src python3 -m market_research_agent.cli \\
   --inputs-json examples/fixtures/market-research-input.example.json \\
-  --metrics "category_sales,market_size,price_band" \\
+  --metrics "purchase_rows" \\
   --hm-processed-dir data/processed/hm-personalized-fashion-recommendations \\
   --hm-category-map "Garment Upper body=Outerwear" \\
   --hm-mapping-version "vogue-taxonomy-2026-11-01" \\
   --proposal-v1-2
 ```
 
-입력 예시 파일은 이 저장소의 `examples/fixtures/market-research-input.example.json`을 참고하세요. 모든 상위 결과의 `request_id`가 일치해야 합니다. `--proposal-v1-2`/`--proposal-v1-3`에서만 upstream 입력 snapshot이 포함됩니다. H&M 어댑터는 승인 여부가 별도 확인되지 않으면 파일을 읽지 않고 수치 관측을 내보내지 않습니다. 실제 데이터 사용 승인을 받은 뒤에만 `--hm-usage-authorized`를 지정하십시오. 이 플래그는 승인 절차가 아니며, 호출자가 외부에서 확인한 승인을 선언합니다. 기본 1.0 직렬화는 기존 결과 스키마를 유지합니다. `--proposal-v1-1`, `--proposal-v1-2`, `--proposal-v1-3`은 각각 명시적인 미합의 계약 제안을 출력하며 공통 wire contract를 뜻하지 않습니다. v1.3은 계산·비교 가능성·검색 결과를 추가합니다.
+입력 예시 파일은 이 저장소의 `examples/fixtures/market-research-input.example.json`을 참고하세요. 모든 상위 결과의 `request_id`가 일치해야 합니다. H&M 어댑터는 권한 확인, 명시적 category mapping, mapping version이 없으면 데이터를 읽지 않습니다. `--hm-usage-authorized`는 승인 절차가 아니며 외부에서 확인한 사용 권한을 호출자가 선언하는 플래그입니다. CLI 기본 요청에 source가 연결되지 않으면 `no_results`를 반환합니다. `--proposal-v1-1`, `--proposal-v1-2`, `--proposal-v1-3`은 명시적인 미합의 계약 제안입니다.
 
-승인된 시장자료 파일은 `--market-observations-csv`와 `--market-manifest`로 함께 전달할 수 있습니다. manifest의 `permission_status`가 `authorized`가 아니면 관측을 내보내지 않습니다. 입력의 원문 `planning_request.query`는 source adapter에 전달되고 proposal의 `requested_scope.query`에도 보존됩니다. CSV `search_text`는 literal 필터이며 RAG가 아닙니다. 이 로컬 CSV 어댑터는 외부 API를 호출하지 않으며, KOSIS/Euromonitor/WGSN에 자동 연결되지 않습니다. CSV 열 정의, manifest 예시, H&M 처리 파일 준비와 두 어댑터를 한 번에 실행하는 방법은 [`docs/design/local-market-data-connection.md`](docs/design/local-market-data-connection.md)를 참고하세요. API 자격 증명은 CLI 인수나 데이터 manifest에 넣지 마세요.
+현재 작업 범위는 로컬 H&M Kaggle 과거 판매자료와 저장소의 합성 fixture로 제한됩니다. 일반 CLI/HTTP 실행은 승인 확인 및 명시적 category mapping이 있는 H&M historical adapter만 선택할 수 있으며, 합성 fixture는 별도의 demo/test 경로에서만 사용합니다. 시장 CSV adapter 코드는 남아 있지만 이 작업 범위의 CLI/HTTP source로 연결하지 않습니다. H&M 필수 설정과 합성 데이터 경계는 [`docs/design/sales-search-quality-hm-synthetic.md`](docs/design/sales-search-quality-hm-synthetic.md)를 참고하세요.
 
 핵심 설정 환경변수는 `VOGUE_HM_PROCESSED_DIR`(처리 데이터 경로)와 `VOGUE_HM_MAPPING_VERSION`(분류 매핑 버전)입니다. 기존 `VOGUE_HM_ANALYSIS_PATH`는 historical prototype 경로 설정입니다. 이 패키지는 `.env`를 자동 로드하지 않으며, 필요한 값을 셸 또는 실행환경에서 설정해야 합니다. `.env`는 Git 제외 상태를 유지하십시오.
 
@@ -90,6 +91,8 @@ PYTHONPATH=src python3 -m market_research_agent.http_server --host 127.0.0.1 --p
 ```
 
 Canonical endpoint는 `POST http://127.0.0.1:8766/v1/agents/sales-market-agent/runs`입니다. 이전 `/v1/agents/market-research-agent/runs` 경로는 deprecated alias로 유지됩니다. 기본 서버는 loopback에만 바인딩하고 `/runs`에서 `VOGUE_AGENT_SERVICE_BEARER_TOKEN`을 검증합니다. 외부 공개·운영 배포에는 HTTPS/TLS가 추가로 필요합니다. 정상 응답은 공통 envelope v0.1과 안정된 producer payload 1.0을 사용합니다. 차트 artifact는 별도 후속 계약입니다.
+
+구조화된 요청만 전달하는 입력 경로는 `POST /v1/agents/sales-market-agent/structured-runs`입니다. 이 경로는 proposal schema [`vogue-orchestration-request-0.1-proposal.schema.json`](contracts/schemas/proposals/vogue-orchestration-request-0.1-proposal.schema.json)을 검증하고 기존 응답 envelope/result 1.0을 반환합니다. 입력 proposal은 타 저장소와 합의되지 않았으므로 통합 오케스트레이터 연결 전에 계약 owner 검토가 필요합니다. 안정된 `/runs` 경로의 입력 계약은 바뀌지 않았습니다.
 
 다른 터미널에서 합성 입력 fixture를 보낼 수 있습니다.
 

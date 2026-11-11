@@ -12,9 +12,10 @@ from typing import Any
 from .domain.models import MarketResearchContext
 from .sources.shared.composite import CompositeMarketResearchSource
 from .sources.sales.hm_kaggle.hm_sales_adapter import HmHistoricalSalesSource
-from .sources.market.local_market_csv import LocalMarketCsvSource
 from .sources.shared.noop import NoConfiguredSources
 from .workflows.market_research import MarketResearchAgent
+from .query_interpretation import interpret_query, scope_conflicts, unresolved_ambiguities
+from .orchestration_request import context_from_canonical_request
 
 
 def _read_inputs(path: str) -> tuple[dict[str, Any], dict[str, Any] | None, dict[str, Any] | None]:
@@ -39,51 +40,73 @@ def _read_inputs(path: str) -> tuple[dict[str, Any], dict[str, Any] | None, dict
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--inputs-json", required=True, help="JSON object with planning_request, trend_result, inventory_product_result")
+    input_group = parser.add_mutually_exclusive_group(required=True)
+    input_group.add_argument("--inputs-json", help="Compatibility JSON with planning_request and optional upstream results")
+    input_group.add_argument("--canonical-request-json", help="Canonical structured orchestration request proposal; no Trend/Inventory results accepted")
     parser.add_argument("--metrics", default="", help="Optional comma-separated research metrics")
-    parser.add_argument("--geography", default="KR", help="Requested market geography (default: KR)")
-    parser.add_argument("--channel", default="online", help="Requested market channel (default: online)")
+    parser.add_argument("--geography", default="", help="Optional requested market geography; omitted means unspecified")
+    parser.add_argument("--channel", default="", help="Optional requested market channel; omitted means unspecified")
     parser.add_argument("--hm-processed-dir", default=os.getenv("VOGUE_HM_PROCESSED_DIR", "data/processed/hm-personalized-fashion-recommendations"))
     parser.add_argument("--hm-category-map", action="append", default=[], help="Explicit source-to-request category mapping, e.g. 'Garment Upper body=Outerwear'")
     parser.add_argument("--hm-mapping-version", default=os.getenv("VOGUE_HM_MAPPING_VERSION", ""))
     parser.add_argument("--hm-usage-authorized", action="store_true", help="Declare externally confirmed authorization for this source")
-    parser.add_argument("--market-observations-csv", default="", help="Explicit local CSV path for authorized market observations")
-    parser.add_argument("--market-manifest", default="", help="Explicit source/permission manifest path for the market CSV")
     parser.add_argument("--proposal-v1-1", action="store_true", help="Emit the explicitly unratified sales-data extension")
     parser.add_argument("--proposal-v1-2", action="store_true", help="Emit the explicitly unratified separated sales, market, and unit-economics proposal")
     parser.add_argument("--proposal-v1-3", action="store_true", help="Emit the explicitly unratified calculations, comparability, and retrieval proposal")
     args = parser.parse_args(argv)
 
     try:
-        request, trend, inventory = _read_inputs(args.inputs_json)
-        context_data = request.get("context") if isinstance(request.get("context"), dict) else {}
-        query = request.get("query") or request.get("original_query") or context_data.get("query")
-        if query is not None and not isinstance(query, str):
-            raise ValueError("planning_request.query must be a string when supplied.")
-        category = context_data.get("category")
-        if isinstance(category, dict):
-            category = category.get("value")
-        category = category if isinstance(category, str) else None
-        context = MarketResearchContext(
-            request_id=request["request_id"], planning_request=request,
-            trend_result=trend, inventory_product_result=inventory,
-            requested_category=category,
-            requested_metrics=tuple(x.strip() for x in args.metrics.split(",") if x.strip()),
-            requested_geography=args.geography.strip() or None,
-            requested_channel=args.channel.strip() or None,
-            requested_query=query.strip() if isinstance(query, str) and query.strip() else None,
-            requested_period=(
-                context_data.get("period") if isinstance(context_data.get("period"), str)
-                else request.get("period") if isinstance(request.get("period"), str) else None
-            ),
-        )
+        if args.canonical_request_json:
+            if args.metrics or args.geography.strip() or args.channel.strip():
+                raise ValueError("Canonical request scope cannot be overridden by --metrics, --geography, or --channel.")
+            canonical_request = json.loads(Path(args.canonical_request_json).read_text(encoding="utf-8"))
+            context = context_from_canonical_request(canonical_request)
+        else:
+            request, trend, inventory = _read_inputs(args.inputs_json)
+            context_data = request.get("context") if isinstance(request.get("context"), dict) else {}
+            query = request.get("query") or request.get("original_query") or context_data.get("query")
+            if query is not None and not isinstance(query, str):
+                raise ValueError("planning_request.query must be a string when supplied.")
+            interpreted = interpret_query(query if isinstance(query, str) else None)
+            category = context_data.get("category")
+            if isinstance(category, dict):
+                category = category.get("value")
+            category = category if isinstance(category, str) else interpreted["category"]
+            explicit_metrics = tuple(x.strip() for x in args.metrics.split(",") if x.strip())
+            explicit_scope = {}
+            if isinstance(category, str) and isinstance(context_data.get("category"), (str, dict)):
+                explicit_scope["category"] = category
+            if explicit_metrics:
+                explicit_scope["metrics"] = explicit_metrics
+            if args.geography.strip():
+                explicit_scope["geography"] = args.geography.strip()
+            if args.channel.strip():
+                explicit_scope["channel"] = args.channel.strip()
+            explicit_period = context_data.get("period") if isinstance(context_data.get("period"), str) else request.get("period")
+            if isinstance(explicit_period, str):
+                explicit_scope["period"] = explicit_period
+            gender = context_data.get("gender")
+            if isinstance(gender, str):
+                explicit_scope["gender"] = gender
+            context = MarketResearchContext(
+                request_id=request["request_id"], planning_request=request,
+                trend_result=trend, inventory_product_result=inventory,
+                requested_category=category,
+                requested_metrics=explicit_metrics or interpreted["metrics"],
+                requested_geography=args.geography.strip() or interpreted["geography"],
+                requested_channel=args.channel.strip() or interpreted["channel"],
+                requested_query=query.strip() if isinstance(query, str) and query.strip() else None,
+                requested_period=(
+                    context_data.get("period") if isinstance(context_data.get("period"), str)
+                    else request.get("period") if isinstance(request.get("period"), str) else interpreted["period"]
+                ),
+                inferred_scope={key: value for key, value in interpreted.items() if value not in (None, ())},
+                explicit_scope=explicit_scope,
+                query_intent=str(interpreted["intent"]),
+                query_ambiguities=unresolved_ambiguities(interpreted, explicit_scope) + scope_conflicts(interpreted, explicit_scope),
+                parser_version=str(interpreted["parser_version"]),
+            )
         sources = []
-        if bool(args.market_observations_csv) != bool(args.market_manifest):
-            raise ValueError("--market-observations-csv and --market-manifest must be supplied together.")
-        if args.market_observations_csv:
-            sources.append(LocalMarketCsvSource(
-                Path(args.market_observations_csv), Path(args.market_manifest)
-            ))
         if args.hm_category_map:
             if not args.hm_mapping_version:
                 raise ValueError("--hm-mapping-version is required with --hm-category-map.")

@@ -7,3 +7,5 @@ Project_07 owns the schemas and examples for its local result and the shared HTT
 - `schemas/vogue-handoff-0.1-error.schema.json`
 - `schemas/market-research-result.schema.json` (producer result 1.0)
 - `schemas/proposals/` (non-normative proposals)
+
+`schemas/proposals/vogue-orchestration-request-0.1-proposal.schema.json` describes the additive structured-input route at `/v1/agents/sales-market-agent/structured-runs`. It is not part of the agreed request schema for `/runs`, and requires cross-agent contract review before an orchestrator depends on it.

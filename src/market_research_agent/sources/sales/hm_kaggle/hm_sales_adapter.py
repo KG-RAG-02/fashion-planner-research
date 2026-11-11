@@ -8,6 +8,8 @@ from __future__ import annotations
 
 import csv
 import json
+import re
+import calendar
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Mapping
@@ -29,11 +31,66 @@ class HmHistoricalSalesSource:
         self.usage_authorized = usage_authorized
 
     def research(self, context: MarketResearchContext) -> SourceReport:
+        if context.query_intent in {"synthetic_test", "mapping_lookup", "definition_lookup", "unsupported"}:
+            message = f"The H&M structured sales adapter does not serve {context.query_intent} requests."
+            return SourceReport(
+                status=ResultStatus.NO_RESULTS,
+                limitations=(message,),
+                sales_data=SalesDataResult("no_results", limitations=(message,), missing_data=(
+                    MissingData("sales_data", "not_available_from_source", message, "hm-kaggle-personalized-fashion-recommendations"),
+                )),
+            )
+        if (
+            "unsupported_period_grain" in context.query_ambiguities
+            or (context.requested_period and _period_bounds(context.requested_period) is None)
+        ):
+            message = "H&M historical search supports year, month, or date ranges; the requested period grain is ambiguous or unsupported."
+            return SourceReport(
+                status=ResultStatus.NO_RESULTS,
+                limitations=(message,),
+                sales_data=SalesDataResult("no_results", limitations=(message,), missing_data=(
+                    MissingData("sales_data", "not_available_from_source", message, "hm-kaggle-personalized-fashion-recommendations"),
+                )),
+            )
         category = context.requested_category
         if not category:
+            message = "H&M historical search requires one explicitly selected or unambiguously inferred category mapping."
             return SourceReport(
-                status=ResultStatus.ERROR,
-                limitations=("H&M historical sales were not queried: requested_category is required.",),
+                status=ResultStatus.NO_RESULTS,
+                limitations=(message,),
+                sales_data=SalesDataResult("no_results", limitations=(message,), missing_data=(
+                    MissingData("sales_data", "mapping_failed", message, "hm-kaggle-personalized-fashion-recommendations"),
+                )),
+            )
+        requested_metrics = {item.casefold().replace(" ", "_") for item in context.requested_metrics}
+        if requested_metrics and "purchase_rows" not in requested_metrics:
+            message = "H&M historical source only provides purchase_rows; requested metric is not available from this source."
+            return SourceReport(
+                status=ResultStatus.NO_RESULTS,
+                limitations=(message, "H&M 과거 데이터이며 매출·시장 규모·수요를 나타내지 않습니다."),
+                sales_data=SalesDataResult("no_results", limitations=(message,), missing_data=(
+                    MissingData("sales_data", "not_available_from_source", message, "hm-kaggle-personalized-fashion-recommendations"),
+                )),
+            )
+        requested_gender = (context.explicit_scope or {}).get("gender") or (context.inferred_scope or {}).get("gender")
+        if context.requested_geography or context.requested_channel or requested_gender:
+            unsupported_dimensions = [
+                name for name, requested in (
+                    ("geography", context.requested_geography),
+                    ("channel", context.requested_channel),
+                    ("gender", requested_gender),
+                ) if requested
+            ]
+            message = "H&M historical source does not provide verified mapping for: " + ", ".join(unsupported_dimensions) + "."
+            return SourceReport(
+                status=ResultStatus.NO_RESULTS,
+                limitations=(message, *(
+                    ("H&M 과거 데이터의 원천 channel code는 온라인/오프라인으로 해석하지 않습니다.",)
+                    if context.requested_channel else ()
+                )),
+                sales_data=SalesDataResult("no_results", limitations=(message,), missing_data=(
+                    MissingData("sales_data", "not_available_from_source", message, "hm-kaggle-personalized-fashion-recommendations"),
+                )),
             )
         if not self.mapping_version.strip():
             return SourceReport(
@@ -74,6 +131,7 @@ class HmHistoricalSalesSource:
                 source_category_map=self.category_map,
                 category_mapping_version=self.mapping_version,
                 processed_dir=self.processed_dir,
+                requested_period=context.requested_period,
             )
             manifest = json.loads((self.processed_dir.expanduser().resolve() / "manifest.json").read_text(encoding="utf-8"))
         except FileNotFoundError:
@@ -118,8 +176,11 @@ class HmHistoricalSalesSource:
                 ))
             observations.append(item)
         limitations = (*sales.limitations, "Historical Kaggle data is not live/current H&M sales. Its observed period is retained from the local manifest.")
+        unsupported_metrics = requested_metrics - {"purchase_rows"}
+        if unsupported_metrics:
+            limitations = (*limitations, "H&M returned purchase_rows only; other requested metrics are unavailable from this source.")
         return SourceReport(
-            status=ResultStatus.PARTIAL if sales.status == "partial" else ResultStatus.OK if observations else ResultStatus.NO_RESULTS,
+            status=ResultStatus.PARTIAL if sales.status == "partial" or unsupported_metrics else ResultStatus.OK if observations else ResultStatus.NO_RESULTS,
             evidence=tuple(evidence),
             limitations=limitations,
             sales_data=sales,
@@ -135,6 +196,7 @@ def load_hm_sales_analysis(
     category_mapping_version: str,
     processed_dir: Path = DEFAULT_PROCESSED_DIR,
     observation_limit: int | None = None,
+    requested_period: str | None = None,
 ) -> SalesDataResult:
     """Load exact article-classified aggregates as a local historical example.
 
@@ -186,6 +248,7 @@ def load_hm_sales_analysis(
     manifest_end = date.fromisoformat(period_end)
     if manifest_start > manifest_end:
         raise ValueError("manifest.json observation period is reversed.")
+    period_bounds = _period_bounds(requested_period)
     # Preserve each source week as an observation. Grouping across time would
     # hide seasonality and make period comparisons impossible to reproduce.
     aggregates: dict[tuple[str, str, str, str, str], int] = {}
@@ -236,6 +299,11 @@ def load_hm_sales_analysis(
                 continue
             if parsed_week_start > manifest_end or parsed_week_start + timedelta(days=6) < manifest_start:
                 invalid_rows += 1
+                continue
+            if period_bounds is not None and (
+                parsed_week_start + timedelta(days=6) < period_bounds[0]
+                or parsed_week_start > period_bounds[1]
+            ):
                 continue
             channel_code = (row.get("sales_channel_id") or "").strip() or None
             key = (mapped_category, group_name, type_name, week_start, channel_code or "(unknown)")
@@ -313,3 +381,37 @@ def _validated_category_map(source_category_map: Mapping[str, str]) -> dict[str,
             raise ValueError("Category mapping contains conflicting case-insensitive source labels.")
         normalized[key] = value
     return normalized
+
+
+def _period_bounds(value: str | None) -> tuple[date, date] | None:
+    """Parse the deliberately small period syntax supported by H&M search."""
+    if not value:
+        return None
+    text = value.strip()
+    match = re.fullmatch(r"(20\d{2}-\d{2}-\d{2})\.\.(20\d{2}-\d{2}-\d{2})", text)
+    if match:
+        try:
+            start = date.fromisoformat(match.group(1))
+            end = date.fromisoformat(match.group(2))
+        except ValueError:
+            return None
+        return (start, end) if start <= end else None
+    match = re.fullmatch(r"(20\d{2})\s*[-–~]\s*(20\d{2})", text)
+    if match:
+        return date(int(match.group(1)), 1, 1), date(int(match.group(2)), 12, 31)
+    match = re.fullmatch(r"(20\d{2})-(\d{2})", text)
+    if match:
+        year, month = int(match.group(1)), int(match.group(2))
+        if 1 <= month <= 12:
+            return date(year, month, 1), date(year, month, calendar.monthrange(year, month)[1])
+        return None
+    if re.fullmatch(r"20\d{2}", text):
+        year = int(text)
+        return date(year, 1, 1), date(year, 12, 31)
+    if re.fullmatch(r"20\d{2}-\d{2}-\d{2}", text):
+        try:
+            day = date.fromisoformat(text)
+        except ValueError:
+            return None
+        return day, day
+    return None

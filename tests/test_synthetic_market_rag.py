@@ -3,7 +3,8 @@ import tempfile
 import unittest
 from pathlib import Path
 
-from scripts.synthetic_market_rag.evaluate import evaluate_corpus, lexical_retrieve, load_bundle
+from scripts.synthetic_market_rag.evaluate import compare_reports, evaluate_corpus, lexical_retrieve, load_bundle
+from scripts.synthetic_market_rag.evaluate_query_parser import evaluate as evaluate_query_parser
 from scripts.synthetic_market_rag.retriever import SyntheticMarketEvidenceRetriever, retrieval_query_from_fixture
 from scripts.synthetic_market_rag.generate import (
     DEFAULT_DOCUMENT_COUNT, DEFAULT_SEED, MAX_DOCUMENT_COUNT, TEST_PERMISSION,
@@ -30,6 +31,7 @@ class SyntheticMarketRagTests(unittest.TestCase):
                 self.assertEqual(record["permission_status"], TEST_PERMISSION)
                 self.assertIn(SYNTHETIC_WARNING, json.dumps(record, ensure_ascii=False))
         for chunk in bundle["chunks"]:
+            self.assertIn(chunk["retrieval_role"], {"metric_definition", "observation", "supplementary_context"})
             self.assertTrue(chunk["synthetic_observation"]["synthetic"])
             self.assertEqual(chunk["synthetic_observation"]["permission_status"], TEST_PERMISSION)
             self.assertEqual(chunk["synthetic_observation"]["evidence_id"], chunk["evidence_id"])
@@ -69,6 +71,34 @@ class SyntheticMarketRagTests(unittest.TestCase):
         unknown_scope = {**fixtures["Q-CURRENCY"], "scope": {**fixtures["Q-CURRENCY"]["scope"], "population": "unrecorded-population"}}
         self.assertEqual(lexical_retrieve(bundle, unknown_scope)["status"], "no_results")
 
+    def test_retrieval_ranks_complementary_primary_chunks_without_context_flooding(self):
+        bundle = generate_corpus()
+        fixture = next(item for item in bundle["queries"] if item["query_id"] == "Q-EXACT-MARKET-SIZE")
+        result = lexical_retrieve(bundle, fixture, limit=5)
+        self.assertEqual(result["query_trace"]["raw_query"], fixture["raw_query"])
+        self.assertEqual(result["query_trace"]["requested_scope"], fixture["scope"])
+        self.assertGreater(result["query_trace"]["excluded_counts"]["supplementary_context"], 0)
+        self.assertTrue(all(hit["retrieval_role"] != "supplementary_context" for hit in result["hits"]))
+        per_document = {}
+        for hit in result["hits"]:
+            per_document[hit["source_id"]] = per_document.get(hit["source_id"], 0) + 1
+        self.assertLessEqual(max(per_document.values()), 2)
+
+    def test_document_facet_ranking_reaches_fixed_label_ceiling_without_safety_regressions(self):
+        report = evaluate_corpus(generate_corpus(), k=5)
+        self.assertEqual(report["metrics"]["precision_at_k"], report["precision_at_k_label_ceiling"])
+        self.assertEqual(report["metrics"]["recall_at_k"], 1)
+        self.assertEqual(report["status_accuracy"], 1)
+        self.assertEqual(report["hard_negative_retrieval_count"], 0)
+        self.assertEqual(report["scope_mismatch_hit_count"], 0)
+        self.assertEqual(report["permission_violation_count"], 0)
+        self.assertEqual(report["synthetic_promotion_count"], 0)
+        self.assertEqual(report["evidence_lineage_coverage"], 1)
+        comparison = compare_reports(report, report, previous_name="same-report.json")
+        self.assertEqual(comparison["rank_changed_query_count"], 0)
+        with self.assertRaises(ValueError):
+            compare_reports(report, {**report, "k": 8}, previous_name="different-k.json")
+
     def test_synthetic_index_rejects_operational_or_unmarked_records(self):
         bundle = generate_corpus()
         fixture = next(item for item in bundle["queries"] if item["query_id"] == "Q-EXACT-MARKET-SIZE")
@@ -98,6 +128,17 @@ class SyntheticMarketRagTests(unittest.TestCase):
         self.assertEqual(report["permission_violation_count"], 0)
         self.assertEqual(report["query_forwarding_rate"], 1)
         self.assertEqual(report["synthetic_promotion_count"], 0)
+        self.assertEqual(report["hard_negative_retrieval_count"], 0)
+        self.assertEqual(report["scope_mismatch_hit_count"], 0)
+        self.assertEqual(report["evidence_lineage_coverage"], 1)
+        self.assertEqual(report["unsupported_factual_claim_rate"], "not_measured_by_retrieval_only_fixture")
+
+    def test_query_parser_labeled_fixture_meets_clear_and_ambiguity_targets(self):
+        report = evaluate_query_parser()
+        self.assertEqual(report["case_count"], 27)
+        self.assertEqual(report["clear_intent_metric_accuracy"], 1)
+        self.assertEqual(report["scope_ambiguity_accuracy"], 1)
+        self.assertEqual(report["failed_case_ids"], [])
 
     def test_synthetic_adapter_uses_query_contract_but_never_promotes_hits(self):
         from market_research_agent import MarketResearchAgent, MarketResearchContext

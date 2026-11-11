@@ -1,8 +1,7 @@
-"""Loopback development HTTP adapter for the VOGUE handoff v0.1 contract.
+"""Loopback development HTTP adapter for VOGUE handoff v0.1.
 
-This module is a local integration adapter, not a production deployment. It
-requires the shared Bearer token on run routes and has no source configuration,
-retry, or deploy policy. Callers may inject an explicitly configured agent in Python.
+It supports explicit local source configuration from process environment. It
+remains a development adapter, not a production deployment or retry policy.
 """
 
 from __future__ import annotations
@@ -11,13 +10,19 @@ import argparse
 import hmac
 import json
 import os
+from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
 from .domain.models import MarketResearchContext
 from .sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
+from .sources.sales.hm_kaggle.hm_sales_adapter import HmHistoricalSalesSource
+from .sources.shared.composite import CompositeMarketResearchSource
+from .sources.shared.noop import NoConfiguredSources
 from .workflows.market_research import MarketResearchAgent
+from .query_interpretation import interpret_query, scope_conflicts, unresolved_ambiguities
+from .orchestration_request import CanonicalRequestError, context_from_canonical_request
 
 
 CONTRACT_VERSION = "vogue-handoff/0.1"
@@ -172,6 +177,9 @@ def context_from_handoff_request(value: Any) -> MarketResearchContext:
         scope_values[field] = item
 
     category = scope_values["requested_category"]
+    query = scope_values["requested_query"] or planning_request.get("query") or planning_request.get("original_query")
+    interpreted = interpret_query(query if isinstance(query, str) else None)
+    context_category = None
     if category is None:
         request_context = planning_request.get("context")
         if isinstance(request_context, dict):
@@ -180,6 +188,25 @@ def context_from_handoff_request(value: Any) -> MarketResearchContext:
                 context_category = context_category.get("value")
             if isinstance(context_category, str):
                 category = context_category
+    category = category or interpreted["category"]
+    scope_values["requested_geography"] = scope_values["requested_geography"] or interpreted["geography"]
+    scope_values["requested_channel"] = scope_values["requested_channel"] or interpreted["channel"]
+    scope_values["requested_period"] = scope_values["requested_period"] or interpreted["period"]
+    if not metrics:
+        metrics = list(interpreted["metrics"])
+
+    explicit_scope = {
+        key: value for key, value in {
+            "category": scope_values["requested_category"] or (context_category if isinstance(context_category, str) else None),
+            "metrics": tuple(payload.get("requested_metrics", ())) or None,
+            "geography": payload.get("requested_geography"),
+            "channel": payload.get("requested_channel"),
+            "period": payload.get("requested_period"),
+        }.items() if value not in (None, (), "")
+    }
+    request_context = planning_request.get("context")
+    if isinstance(request_context, dict) and isinstance(request_context.get("gender"), str):
+        explicit_scope["gender"] = request_context["gender"]
 
     return MarketResearchContext(
         request_id=request_id,
@@ -188,7 +215,13 @@ def context_from_handoff_request(value: Any) -> MarketResearchContext:
         inventory_product_result=inventory_result,
         requested_category=category,
         requested_metrics=tuple(metrics),
-        **{key: val for key, val in scope_values.items() if key != "requested_category"},
+        requested_query=query if isinstance(query, str) else None,
+        inferred_scope={key: val for key, val in interpreted.items() if val not in (None, ())},
+        explicit_scope=explicit_scope,
+        query_intent=str(interpreted["intent"]),
+        query_ambiguities=unresolved_ambiguities(interpreted, explicit_scope) + scope_conflicts(interpreted, explicit_scope),
+        parser_version=str(interpreted["parser_version"]),
+        **{key: val for key, val in scope_values.items() if key not in {"requested_category", "requested_query"}},
     )
 
 
@@ -231,13 +264,16 @@ def make_handler(agent_factory: Callable[[], MarketResearchAgent] | None = None)
         def do_POST(self) -> None:
             path = unquote(urlsplit(self.path).path)
             prefix = "/v1/agents/"
-            suffix = "/runs"
+            suffix = "/structured-runs" if path.endswith("/structured-runs") else "/runs"
             if not (path.startswith(prefix) and path.endswith(suffix)):
                 self._send_json(404, _error_payload("NOT_FOUND", "Route not found."))
                 return
             route_agent = path[len(prefix):-len(suffix)]
             if route_agent not in {CANONICAL_ROUTE_ID, *DEPRECATED_ROUTE_IDS} or "/" in route_agent:
                 self._send_json(404, _error_payload("AGENT_NOT_FOUND", "Agent route not found."))
+                return
+            if suffix == "/structured-runs" and route_agent != CANONICAL_ROUTE_ID:
+                self._send_json(404, _error_payload("AGENT_NOT_FOUND", "Structured request route is not available for this agent."))
                 return
             if not self._authorized():
                 self._send_json(401, _error_payload("UNAUTHORIZED", "Bearer authentication required."))
@@ -262,7 +298,13 @@ def make_handler(agent_factory: Callable[[], MarketResearchAgent] | None = None)
                 if len(raw_body) != length:
                     raise RequestValidationError("INCOMPLETE_BODY", "Request body was incomplete.", 400)
                 body = json.loads(raw_body, parse_constant=_reject_json_constant)
-                context = context_from_handoff_request(body)
+                if suffix == "/structured-runs":
+                    try:
+                        context = context_from_canonical_request(body)
+                    except CanonicalRequestError as exc:
+                        raise RequestValidationError("INVALID_CANONICAL_REQUEST", str(exc), 422) from None
+                else:
+                    context = context_from_handoff_request(body)
             except RequestValidationError as exc:
                 request_id = _safe_error_request_id(body.get("request_id")) if "body" in locals() and isinstance(body, dict) else None
                 self._send_json(exc.http_status, _error_payload(exc.code, str(exc), request_id))
@@ -298,14 +340,31 @@ def make_handler(agent_factory: Callable[[], MarketResearchAgent] | None = None)
     return Project07Handler
 
 
+def configured_agent() -> MarketResearchAgent:
+    """Build local sources only from explicit process settings and source gates."""
+    sources = []
+    hm_map_raw = os.getenv("VOGUE_HM_CATEGORY_MAP", "").strip()
+    if hm_map_raw:
+        category_map = {}
+        for pair in hm_map_raw.split(","):
+            source, separator, target = pair.partition("=")
+            if not separator or not source.strip() or not target.strip():
+                raise ValueError("VOGUE_HM_CATEGORY_MAP must contain comma-separated source=target pairs.")
+            category_map[source.strip()] = target.strip()
+        sources.append(HmHistoricalSalesSource(
+            Path(os.getenv("VOGUE_HM_PROCESSED_DIR", "data/processed/hm-personalized-fashion-recommendations")),
+            category_map,
+            os.getenv("VOGUE_HM_MAPPING_VERSION", ""),
+            usage_authorized=os.getenv("VOGUE_HM_USAGE_AUTHORIZED", "").casefold() == "true",
+        ))
+    return MarketResearchAgent(CompositeMarketResearchSource(sources) if sources else NoConfiguredSources())
+
+
 def serve(host: str = "127.0.0.1", port: int = 8766, *, synthetic_demo: bool = False) -> None:
     """Start the local proposal server on loopback; run routes require the shared bearer token."""
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("The local proposal server may only bind to loopback.")
-    agent_factory = (
-        (lambda: MarketResearchAgent(SyntheticQueryCoverageSource()))
-        if synthetic_demo else None
-    )
+    agent_factory = (lambda: MarketResearchAgent(SyntheticQueryCoverageSource())) if synthetic_demo else configured_agent
     server = ThreadingHTTPServer((host, port), make_handler(agent_factory))
     print(f"Project_07 local HTTP API (vogue-handoff/0.1): http://{host}:{port}")
     if synthetic_demo:

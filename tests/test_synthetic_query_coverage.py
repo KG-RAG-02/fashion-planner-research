@@ -35,6 +35,9 @@ class SyntheticQueryCoverageTests(unittest.TestCase):
             self.assertEqual(item["data_nature"], "synthetic_test")
             self.assertEqual(item["permission_status"], "authorized_for_synthetic_testing_only")
             self.assertIs(item["operational_eligible"], False)
+        self.assertEqual(self.manifest["query_scenario_count"], 6)
+        self.assertEqual(self.manifest["quality_case_count"], 9)
+        self.assertEqual(self.manifest["generator_version"], "1.1")
 
     def test_2028_winter_mens_knitwear_matches_declared_period(self) -> None:
         result = match_request(self.scenarios[0], self.market, self.manifest)
@@ -43,15 +46,41 @@ class SyntheticQueryCoverageTests(unittest.TestCase):
         self.assertEqual({item["gender"] for item in result["observations"]}, {"men"})
         self.assertEqual({item["category"] for item in result["observations"]}, {"knitwear"})
 
+    def test_2028_winter_womens_knitwear_is_explicitly_scoped(self) -> None:
+        scenario = next(item for item in self.scenarios if item["scenario_id"] == "2028-winter-women-knitwear")
+        result = match_request(scenario, self.market, self.manifest)
+        self.assertEqual(result["status"], "ok")
+        self.assertEqual({item["period_start"][:7] for item in result["observations"]}, {"2028-12", "2029-01", "2029-02"})
+        self.assertEqual({item["gender"] for item in result["observations"]}, {"women"})
+        self.assertEqual({item["category"] for item in result["observations"]}, {"knitwear"})
+        self.assertEqual({item["geography"] for item in result["observations"]}, {"KR"})
+        self.assertEqual({item["channel"] for item in result["observations"]}, {"online"})
+
+    def test_omitted_geography_and_channel_are_not_filled_with_defaults(self) -> None:
+        scenario = next(item for item in self.scenarios if item["scenario_id"] == "2028-winter-women-knitwear-no-geo-channel")
+        result = match_request(scenario, self.market, self.manifest)
+        self.assertEqual(result["status"], "ok")
+        self.assertIsNone(result["applied_scope"].get("geography"))
+        self.assertIsNone(result["applied_scope"].get("channel"))
+        self.assertEqual({item["geography"] for item in result["observations"]}, set(self.manifest["coverage"]["geographies"]))
+        self.assertEqual({item["channel"] for item in result["observations"]}, set(self.manifest["coverage"]["channels"]))
+        self.assertEqual(len({item["period_start"][:7] for item in result["observations"]}), 3)
+        example = next(item for item in json.loads((DEFAULT_OUTPUT / "sample_analysis_outputs.json").read_text(encoding="utf-8"))["market_analysis_examples"] if item["scenario_id"] == scenario["scenario_id"])
+        self.assertIsNone(example["chart"])
+        self.assertTrue(any("must not be merged" in limitation for limitation in example["limitations"]))
+
     def test_2027_spring_womens_footwear_excludes_black(self) -> None:
-        result = match_request(self.scenarios[1], self.market, self.manifest)
+        scenario = next(item for item in self.scenarios if item["scenario_id"] == "2027-spring-women-footwear-excluding-black")
+        result = match_request(scenario, self.market, self.manifest)
         self.assertEqual(result["status"], "ok")
         self.assertEqual({item["period_start"][:7] for item in result["observations"]}, {"2027-03", "2027-04", "2027-05"})
         self.assertNotIn("black", {item["attributes"]["color"] for item in result["observations"]})
         self.assertTrue(all(item["gender"] == "women" and item["category"] == "footwear" for item in result["observations"]))
 
     def test_unsupported_category_and_out_of_coverage_period_are_not_inferred(self) -> None:
-        for scenario in self.scenarios[2:]:
+        for scenario in self.scenarios:
+            if scenario["scenario_id"] not in {"unsupported-bag-category", "outside-coverage-period"}:
+                continue
             result = match_request(scenario, self.market, self.manifest)
             self.assertEqual(result["status"], "no_results")
             self.assertEqual(result["reason"], scenario["expected"]["reason"])

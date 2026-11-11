@@ -81,6 +81,35 @@ class HmSalesAdapterTests(unittest.TestCase):
         self.assertEqual([item.period_start for item in result.observations], ["2018-01-01", "2018-01-08"])
         self.assertEqual([item.value for item in result.observations], [3, 4])
 
+    def test_requested_period_uses_week_overlap_without_zero_filling(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._fixture(root)
+            with (root / "weekly_sales_by_article_channel.csv").open("a", encoding="utf-8", newline="") as stream:
+                stream.write("A1,4,2018-01-08,1\n")
+            result = load_hm_sales_analysis(
+                request_id="r1", schema_version="1.0", requested_category="shorts",
+                source_category_map={"Shorts": "shorts"}, category_mapping_version="test-map",
+                processed_dir=root, requested_period="2018-01-08",
+            )
+        self.assertEqual([(item.period_start, item.value) for item in result.observations], [("2018-01-08", 4)])
+
+    def test_requested_date_range_uses_week_overlap(self):
+        with tempfile.TemporaryDirectory() as temp:
+            root = Path(temp)
+            self._fixture(root)
+            with (root / "weekly_sales_by_article_channel.csv").open("a", encoding="utf-8", newline="") as stream:
+                stream.write("A1,4,2018-01-08,1\n")
+            result = load_hm_sales_analysis(
+                request_id="r1", schema_version="1.0", requested_category="shorts",
+                source_category_map={"Shorts": "shorts"}, category_mapping_version="test-map",
+                processed_dir=root, requested_period="2018-01-02..2018-01-12",
+            )
+        self.assertEqual(
+            [(item.period_start, item.value) for item in result.observations],
+            [("2018-01-01", 3), ("2018-01-08", 4)],
+        )
+
 
 if __name__ == "__main__":
     unittest.main()

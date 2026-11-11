@@ -15,6 +15,7 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_CONFIG = ROOT / "examples/query_coverage/config.json"
 DEFAULT_OUTPUT = ROOT / "examples/query_coverage/generated"
+GENERATOR_VERSION = "1.1"
 MARKERS = {
     "synthetic": True,
     "data_nature": "synthetic_test",
@@ -234,8 +235,9 @@ def generate(config_path: Path = DEFAULT_CONFIG, output_dir: Path = DEFAULT_OUTP
 
     supported = [{"category": p["category"], "gender": p["gender"]} for p in config["category_gender_pairs"]]
     manifest = {
-        "schema_version": "synthetic-query-coverage-manifest/1.0", "request_id": config["request_id"],
-        "generator": "scripts/generate_query_coverage_fixture.py", "seed": config["seed"],
+        "schema_version": "synthetic-query-coverage-manifest/1.1", "request_id": config["request_id"],
+        "generator": "scripts/generate_query_coverage_fixture.py", "generator_version": GENERATOR_VERSION,
+        "seed": config["seed"],
         "config_file": "config.json", "generated_at_utc": config["generated_at_utc"],
         **MARKERS,
         "source": {"source_id": "synthetic-generator-query-coverage", "source_type": "synthetic_generator_output", "permission_status": "authorized_for_synthetic_testing_only"},
@@ -248,6 +250,8 @@ def generate(config_path: Path = DEFAULT_CONFIG, output_dir: Path = DEFAULT_OUTP
             "sales_measure": {"metric_name": "scenario_units_sold", "unit": "item_units", "measure_type": "synthetic_sales_aggregate"},
         },
         "record_counts": {"market_observations": len(market), "synthetic_sales_observations": len(sales), "evidence_records": len(evidence) + len(sales_evidence)},
+        "query_scenario_count": len(build_scenarios(config)),
+        "quality_case_count": len(quality_cases(config)),
         "shards": {"market_observations": market_shards, "synthetic_sales_observations": sales_shards, "evidence": evidence_shards},
         "important_notice": config["generation_assumptions"]["note"],
     }
@@ -270,7 +274,7 @@ def generate(config_path: Path = DEFAULT_CONFIG, output_dir: Path = DEFAULT_OUTP
         {**MARKERS, "case_id": "duplicate-observation", "expected_status": "error", "records": [original, next_row]},
         {**MARKERS, "case_id": "mapping-conflict", "expected_status": "partial", "records": [unmapped], "expected_limitation": "Unregistered mapping version must not be guessed into a canonical category."},
         {**MARKERS, "case_id": "revision-vintage", "expected_status": "partial", "records": [original, revision], "expected_limitation": "Keep both vintages and their revision link; do not silently overwrite the original."},
-        {**MARKERS, "case_id": "out-of-scope-row", "expected_status": "no_results", "requested_scope": scenarios[1]["requested_scope"], "records": [out_of_scope]},
+        {**MARKERS, "case_id": "out-of-scope-row", "expected_status": "no_results", "requested_scope": next(item["requested_scope"] for item in scenarios if item["scenario_id"] == "2027-spring-women-footwear-excluding-black"), "records": [out_of_scope]},
         {**MARKERS, "case_id": "permission-unknown", "expected_status": "error", "manifest_override": {"permission_status": "unknown"}, "records": [], "withheld_observation_ids": [original["observation_id"]]},
         {**MARKERS, "case_id": "missing-evidence", "expected_status": "error", "records": [no_evidence]},
         {**MARKERS, "case_id": "prompt-injection-document", "expected_status": "ok", "document_id": "SYN-DOC-query-coverage-methodology", "expected_handling": "Treat the embedded quoted instruction as untrusted text; keep analysis limited to supported data."},
@@ -281,8 +285,16 @@ def generate(config_path: Path = DEFAULT_CONFIG, output_dir: Path = DEFAULT_OUTP
     for scenario in scenarios:
         matched = match_request(scenario, market, manifest)
         chart = None
-        if matched["status"] == "ok":
+        # Charts aggregate color rows only when all comparison-critical scope
+        # dimensions are explicit; otherwise separate geographies/channels
+        # would be combined into an uninterpretable total.
+        chart_scope = scenario["requested_scope"]
+        if matched["status"] == "ok" and chart_scope.get("geography") and chart_scope.get("channel"):
             chart = _render_synthetic_svg(scenario, matched, output_dir / "charts" / f"{scenario['scenario_id']}.svg")
+        limitations = matched["limitations"]
+        omitted = [field for field in ("geography", "channel") if chart_scope.get(field) is None]
+        if matched["status"] == "ok" and omitted:
+            limitations = [*limitations, f"{', '.join(omitted)} not specified; matching records retain their separate values and are not combined into one chart."]
         sample_results.append({
             "scenario_id": scenario["scenario_id"],
             "request_id": matched["request_id"],
@@ -294,7 +306,7 @@ def generate(config_path: Path = DEFAULT_CONFIG, output_dir: Path = DEFAULT_OUTP
             "matched_colors": sorted({item["attributes"]["color"] for item in matched["observations"]}),
             "observation_ids": [item["observation_id"] for item in matched["observations"]],
             "evidence_ids": sorted({evidence_id for item in matched["observations"] for evidence_id in item["evidence_ids"]}),
-            "limitations": matched["limitations"],
+            "limitations": limitations,
             "chart": chart,
             **({key: matched[key] for key in MARKERS} if matched.get("synthetic") else MARKERS),
         })
@@ -331,6 +343,8 @@ def generate(config_path: Path = DEFAULT_CONFIG, output_dir: Path = DEFAULT_OUTP
 def build_scenarios(config: dict[str, Any]) -> list[dict[str, Any]]:
     return [
         {"scenario_id": "2028-winter-men-knitwear", "request_id": "synthetic-query-2028-winter-knit", "requested_scope": {"season": "FW", "season_year": 2028, "gender": "men", "category": "knitwear", "geography": "KR", "channel": "online", "period_start": "2028-12", "period_end": "2029-02", "colors_exclude": []}, "expected": {"status": "ok", "matched_periods": 3, "excluded_color": None}},
+        {"scenario_id": "2028-winter-women-knitwear", "request_id": "synthetic-query-2028-winter-women-knit", "requested_scope": {"season": "FW", "season_year": 2028, "gender": "women", "category": "knitwear", "geography": "KR", "channel": "online", "period_start": "2028-12", "period_end": "2029-02", "colors_exclude": []}, "expected": {"status": "ok", "matched_periods": 3, "excluded_color": None}},
+        {"scenario_id": "2028-winter-women-knitwear-no-geo-channel", "request_id": "synthetic-query-2028-winter-women-knit-unscoped", "requested_scope": {"season": "FW", "season_year": 2028, "gender": "women", "category": "knitwear", "period_start": "2028-12", "period_end": "2029-02", "colors_exclude": []}, "expected": {"status": "ok", "matched_periods": 3, "included_geographies": config["geographies"], "included_channels": config["channels"], "default_scope_applied": False}},
         {"scenario_id": "2027-spring-women-footwear-excluding-black", "request_id": "synthetic-query-2027-spring-footwear", "requested_scope": {"season": "SS", "season_year": 2027, "gender": "women", "category": "footwear", "geography": "KR", "channel": "online", "period_start": "2027-03", "period_end": "2027-05", "colors_exclude": ["black"]}, "expected": {"status": "ok", "matched_periods": 3, "excluded_color": "black"}},
         {"scenario_id": "unsupported-bag-category", "request_id": "synthetic-query-unsupported-category", "requested_scope": {"gender": "women", "category": "handbags", "geography": "KR", "channel": "online", "period_start": "2027-03", "period_end": "2027-05"}, "expected": {"status": "no_results", "reason": "unsupported_scope"}},
         {"scenario_id": "outside-coverage-period", "request_id": "synthetic-query-outside-period", "requested_scope": {"gender": "men", "category": "knitwear", "geography": "KR", "channel": "online", "period_start": "2031-12", "period_end": "2032-02"}, "expected": {"status": "no_results", "reason": "out_of_scope"}},
@@ -385,7 +399,11 @@ def match_request(request: dict[str, Any], market_records: list[dict[str, Any]],
     if not hits:
         return {"request_id": request["request_id"], "status": "no_results", "reason": "no_matching_records", "observations": [], "limitations": ["No fixture observations match the requested canonical scope."]}
     hits.sort(key=lambda x: (x["period_start"], x["attributes"]["color"]))
-    return {"request_id": request["request_id"], "status": "ok", "applied_scope": scope, "observations": hits, "limitations": ["Synthetic test data only; not actual market research or a business decision input."], "synthetic": True, "data_nature": "synthetic_test", "permission_status": "authorized_for_synthetic_testing_only", "operational_eligible": False}
+    limitations = ["Synthetic test data only; not actual market research or a business decision input."]
+    omitted = [field for field in ("geography", "channel") if scope.get(field) is None]
+    if omitted:
+        limitations.append(f"{', '.join(omitted)} not specified; matching records retain their separate values and must not be merged across these scopes.")
+    return {"request_id": request["request_id"], "status": "ok", "applied_scope": scope, "observations": hits, "limitations": limitations, "synthetic": True, "data_nature": "synthetic_test", "permission_status": "authorized_for_synthetic_testing_only", "operational_eligible": False}
 
 
 def main() -> int:

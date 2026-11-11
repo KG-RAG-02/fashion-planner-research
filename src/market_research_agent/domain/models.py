@@ -44,8 +44,8 @@ class MarketResearchContext:
     inventory_product_result: dict[str, Any] | None = None
     requested_category: str | None = None
     requested_metrics: tuple[str, ...] = ()
-    requested_geography: str | None = "KR"
-    requested_channel: str | None = "online"
+    requested_geography: str | None = None
+    requested_channel: str | None = None
     requested_query: str | None = None
     requested_period: str | None = None
     # Optional local retrieval scope. These fields are not part of an approved
@@ -58,6 +58,15 @@ class MarketResearchContext:
     requested_mapping_version: str | None = None
     requested_period_grain: str | None = None
     requested_document_version: str | None = None
+    inferred_scope: dict[str, Any] | None = None
+    explicit_scope: dict[str, Any] | None = None
+    query_intent: str = "unresolved"
+    query_ambiguities: tuple[str, ...] = ()
+    parser_version: str | None = None
+    # The canonical orchestration request is an input-side proposal. It lets
+    # the orchestrator own query interpretation without requiring Project_07
+    # to re-parse the raw query or consume other agents' result payloads.
+    canonical_request: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)

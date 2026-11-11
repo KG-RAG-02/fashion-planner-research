@@ -72,6 +72,21 @@ class MarketResearchAgent:
                 limitations=context_limitations,
             )
         upstream_context = self._snapshot_upstream_context(context)
+        requested_scope = self._requested_scope(context)
+        if context.canonical_request is not None and context.query_ambiguities:
+            ambiguity_report = SourceReport(
+                status=ResultStatus.NO_RESULTS,
+                limitations=(
+                    "Canonical request contains unresolved ambiguity; no sales or market source was queried.",
+                ),
+            )
+            return self._assemble(
+                context.request_id, ambiguity_report,
+                context_limitations=context_limitations,
+                incomplete_context=True,
+                requested_scope=requested_scope,
+                upstream_context=upstream_context,
+            )
 
         try:
             report = self._source.research(context)
@@ -214,22 +229,7 @@ class MarketResearchAgent:
             report,
             context_limitations=context_limitations,
             incomplete_context=incomplete_context,
-            requested_scope={
-                "category": context.requested_category,
-                "metrics": list(context.requested_metrics),
-                "geography": context.requested_geography,
-                "channel": context.requested_channel,
-                "query": context.requested_query,
-                "period": context.requested_period,
-                "population": context.requested_population,
-                "unit": context.requested_unit,
-                "currency": context.requested_currency,
-                "measure_type": context.requested_measure_type,
-                "mapping_id": context.requested_mapping_id,
-                "mapping_version": context.requested_mapping_version,
-                "period_grain": context.requested_period_grain,
-                "document_version": context.requested_document_version,
-            },
+            requested_scope=requested_scope,
             sales_retrieval=retrieval_results.get("sales"),
             market_retrieval=retrieval_results.get("market"),
             upstream_context=upstream_context,
@@ -587,7 +587,7 @@ class MarketResearchAgent:
         for name in ("planning_request", "trend_result", "inventory_product_result"):
             payload = getattr(context, name)
             if payload is None:
-                if name != "planning_request":
+                if name != "planning_request" and context.canonical_request is None:
                     notes.append(f"Optional upstream input '{name}' was not supplied.")
                     incomplete = True
                 continue
@@ -628,6 +628,36 @@ class MarketResearchAgent:
                         incomplete = True
 
         return tuple(dict.fromkeys(notes)), incomplete
+
+    @staticmethod
+    def _requested_scope(context: MarketResearchContext) -> dict:
+        gender = (context.explicit_scope or {}).get("gender")
+        if gender is None and context.inferred_scope:
+            inferred_gender = context.inferred_scope.get("gender")
+            gender = inferred_gender.get("value") if isinstance(inferred_gender, dict) else inferred_gender
+        return {
+            "category": context.requested_category,
+            "gender": gender,
+            "metrics": list(context.requested_metrics),
+            "geography": context.requested_geography,
+            "channel": context.requested_channel,
+            "query": context.requested_query,
+            "period": context.requested_period,
+            "population": context.requested_population,
+            "unit": context.requested_unit,
+            "currency": context.requested_currency,
+            "measure_type": context.requested_measure_type,
+            "mapping_id": context.requested_mapping_id,
+            "mapping_version": context.requested_mapping_version,
+            "period_grain": context.requested_period_grain,
+            "document_version": context.requested_document_version,
+            "inferred_scope": context.inferred_scope or {},
+            "explicit_scope": context.explicit_scope or {},
+            "intent": context.query_intent,
+            "ambiguities": list(context.query_ambiguities),
+            "parser_version": context.parser_version,
+            "canonical_request": context.canonical_request,
+        }
 
     @staticmethod
     def _validate_upstream_context(context: MarketResearchContext) -> tuple[str, str] | None:
