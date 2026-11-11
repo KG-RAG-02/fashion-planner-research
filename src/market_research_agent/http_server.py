@@ -43,6 +43,7 @@ SUPPORTED_UPSTREAM_SCHEMA_VERSIONS = {
 }
 MAX_BODY_BYTES = 1_048_576
 SYNTHETIC_SIMULATION_PATH = "/v1/simulations/synthetic-rag/runs"
+AGENT_SIMULATION_PATH = f"/v1/agents/{CANONICAL_ROUTE_ID}/simulation-runs"
 SYNTHETIC_SIMULATION_UI_PATH = "/synthetic-simulation"
 _WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
 _SYNTHETIC_UI_FILES = {
@@ -352,7 +353,7 @@ def make_handler(
             path = urlsplit(self.path).path
             if path == "/api/health":
                 self._send_json(200, {"status": "ok", "mode": "local-development"})
-            elif synthetic_simulation_enabled and path == SYNTHETIC_SIMULATION_UI_PATH:
+            elif synthetic_simulation_enabled and path in {"/", SYNTHETIC_SIMULATION_UI_PATH}:
                 self._send_static(_WEB_ROOT / "synthetic_simulation.html", "text/html; charset=utf-8")
             elif synthetic_simulation_enabled and path in _SYNTHETIC_UI_FILES:
                 content_type = mimetypes.guess_type(str(_SYNTHETIC_UI_FILES[path]))[0] or "application/octet-stream"
@@ -368,7 +369,7 @@ def make_handler(
 
         def do_POST(self) -> None:
             path = unquote(urlsplit(self.path).path)
-            if path == SYNTHETIC_SIMULATION_PATH:
+            if path in {SYNTHETIC_SIMULATION_PATH, AGENT_SIMULATION_PATH}:
                 self._handle_synthetic_simulation()
                 return
             prefix = "/v1/agents/"
@@ -484,11 +485,11 @@ def serve(
     server = ThreadingHTTPServer((host, port), make_handler(
         agent_factory, synthetic_simulation_enabled=enable_synthetic_simulation,
     ))
-    print(f"Project_07 local HTTP API (vogue-handoff/0.1): http://{host}:{port}")
+    print(f"Project_07 local service (vogue-handoff/0.1): http://{host}:{port}")
     if synthetic_demo:
         print("Synthetic demonstration mode is enabled; every result is labeled synthetic and is not business evidence.")
     if enable_synthetic_simulation:
-        print(f"Synthetic simulation API/UI enabled: {SYNTHETIC_SIMULATION_PATH} and {SYNTHETIC_SIMULATION_UI_PATH}")
+        print(f"Synthetic simulation UI/API enabled: http://{host}:{port}/ and {AGENT_SIMULATION_PATH}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

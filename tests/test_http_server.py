@@ -17,6 +17,7 @@ from market_research_agent.http_server import (
     RequestValidationError,
     SYNTHETIC_SIMULATION_PATH,
     SYNTHETIC_SIMULATION_UI_PATH,
+    AGENT_SIMULATION_PATH,
     context_from_handoff_request,
     make_handler,
     configured_agent,
@@ -343,6 +344,20 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertIn(b"textContent", script)
         self.assertNotIn(b"localStorage", script)
         self.assertIn(b"monthly_aggregates", script)
+
+    def test_simulation_is_available_from_main_app_entry_and_agent_api_namespace(self):
+        request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
+        status, page, _ = self.get(path="/", synthetic_simulation_enabled=True)
+        self.assertEqual(status, 200)
+        self.assertIn("합성 데이터 시뮬레이션".encode(), page)
+        status, script, _ = self.get(path="/synthetic-simulation.js", synthetic_simulation_enabled=True)
+        self.assertEqual(status, 200)
+        self.assertIn(b"/v1/agents/sales-market-agent/simulation-runs", script)
+
+        status, payload, _ = self.post(request, path=AGENT_SIMULATION_PATH, synthetic_simulation_enabled=True)
+        self.assertEqual(status, 200)
+        self.assertEqual(payload["simulation_mode"], "synthetic_simulation")
+        self.assertTrue(payload["synthetic"])
 
     def test_simulation_cli_flag_is_opt_in_and_cannot_mix_with_legacy_demo(self):
         with patch.object(http_server, "serve") as serve:

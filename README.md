@@ -131,16 +131,16 @@ curl -sS -X POST http://127.0.0.1:8766/v1/agents/sales-market-agent/runs \
   --data-binary @examples/fixtures/http_json_handoff/project-07-synthetic-demo.request.json
 ```
 
-별도의 opt-in **합성 시뮬레이션 API와 UI**는 full structured observation/Evidence 결과를 proposal 계약으로 제공합니다. 기본 서버는 이 경로를 비활성화해 두며, 운영 `/runs` 경로에는 연결되지 않습니다.
+opt-in **합성 시뮬레이션 모드**는 기본 서비스 UI(`/`)와 sales-market-agent API namespace에서 full structured observation/Evidence 결과를 제공합니다. 기본 서버에서는 비활성화되어 있습니다. stable handoff `/runs`와는 permission/schema 계약을 분리합니다.
 
 ```bash
 PYTHONPATH=src python3 -m market_research_agent.http_server \
   --host 127.0.0.1 --port 8766 --enable-synthetic-simulation
 ```
 
-브라우저에서 `http://127.0.0.1:8766/synthetic-simulation`을 열고, 기존 `VOGUE_AGENT_SERVICE_BEARER_TOKEN`과 같은 토큰을 입력하면 됩니다. 토큰은 브라우저 저장소에 남기지 않으며 요청 후 입력값을 비웁니다. API는 `POST /v1/simulations/synthetic-rag/runs`이고 canonical structured request를 받습니다. schema는 [`synthetic-rag-analysis-0.1-proposal.schema.json`](contracts/schemas/proposals/synthetic-rag-analysis-0.1-proposal.schema.json) proposal입니다. 응답과 UI는 합성 데이터 고지, 별도 판매·시장 유사 블록, source/manifest/Evidence/locator/hash를 보여 줍니다.
+브라우저에서 기본 서비스 진입점 `http://127.0.0.1:8766/`을 열면 판매·시장 분석 시뮬레이션 UI를 사용할 수 있습니다. 기존 `VOGUE_AGENT_SERVICE_BEARER_TOKEN`과 같은 토큰을 입력합니다. 토큰은 브라우저 저장소에 남기지 않으며 요청 후 입력값을 비웁니다. UI는 agent API 경로 `POST /v1/agents/sales-market-agent/simulation-runs`를 호출합니다. 이전 경로 `POST /v1/simulations/synthetic-rag/runs`도 호환용으로 유지합니다. 두 경로는 canonical structured request와 [`synthetic-rag-analysis-0.1-proposal.schema.json`](contracts/schemas/proposals/synthetic-rag-analysis-0.1-proposal.schema.json) 응답을 사용합니다. 응답과 UI는 합성 데이터 고지, 별도 판매·시장 유사 블록, source/manifest/Evidence/locator/hash를 보여 줍니다.
 
-현재 HTTP 서버는 loopback 개발용이며 TLS, 외부 서비스 배포, rate limit, 운영 모니터링은 제공하지 않습니다. 이 API/UI를 외부 네트워크나 실제 운영 서비스에 노출하지 마세요. 일반 HTTP route의 기본 source와 v0.1 계약은 이 기능으로 바뀌지 않습니다. 구현 범위와 제약은 [합성 시뮬레이션 서비스 문서](docs/design/synthetic-simulation-service.md)를 참고하세요.
+이 기능은 주 서비스 UI 진입점과 agent API namespace 안에서 동작하는 합성 분석 모드이며, 실제 데이터 연결을 뜻하지 않습니다. 기존 handoff `/runs`는 안정 v0.1 응답·권한 계약을 유지하고 이 simulation 결과를 자동으로 받지 않습니다. 현재 HTTP 서버는 loopback 개발용이며 TLS, 외부 서비스 배포, rate limit, 운영 모니터링은 제공하지 않습니다. 외부 운영 배포에는 별도 보안·배포 작업이 필요합니다. 구현 범위와 제약은 [합성 시뮬레이션 서비스 문서](docs/design/synthetic-simulation-service.md)를 참고하세요.
 
 실제 자료원 기반 판매·시장 분석 에이전트로 발전시키기 위한 현재 갭, 자료원 후보, 권한·데이터 계약, 처리 구조와 단계별 acceptance criteria는 [운영 분석 에이전트 설계 제안](docs/design/operational-market-analysis-agent-design.md)에 정리되어 있습니다. 실제 자료 연결이나 권한 승인은 포함하지 않습니다.
 

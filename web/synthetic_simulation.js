@@ -8,7 +8,7 @@
   const requestState = document.getElementById("request-state");
   const resultPanel = document.getElementById("result");
   const resultContent = document.getElementById("result-content");
-  const apiPath = "/v1/simulations/synthetic-rag/runs";
+  const apiPath = "/v1/agents/sales-market-agent/simulation-runs";
 
   const metricOptions = {
     market_observation: [["scenario_market_value", "합성 시나리오 가치 (KRW_million)"]],
