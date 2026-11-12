@@ -22,6 +22,7 @@ from .sales import (
     UnitEconomicsResult,
     compare_sales_to_market,
 )
+from .sales_market_review import SalesMarketReview, build_sales_market_review
 
 __all__ = [
     "AgentError",
@@ -42,4 +43,6 @@ __all__ = [
     "MissingData",
     "UnitEconomicsCalculation",
     "UnitEconomicsResult",
+    "SalesMarketReview",
+    "build_sales_market_review",
 ]
