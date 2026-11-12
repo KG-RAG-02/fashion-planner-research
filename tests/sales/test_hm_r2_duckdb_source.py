@@ -105,8 +105,14 @@ class HmR2DuckDBTests(unittest.TestCase):
             payload = self.make_database(path)
             source, client = self.make_source(payload, Path(temporary), authorized=False)
             report = source.research(self.context())
-            self.assertNotEqual(report.sales_data.missing_data[0].reason, "permission_not_confirmed")
-            self.assertTrue(client.calls)
+            # The retired usage flag does not gate the read: R2 is read once and the
+            # week of 2020-09-21 yields Sweater rows per channel (1: 2 rows, 2: 1 row).
+            self.assertEqual(report.sales_data.status, "ok")
+            self.assertEqual([(o.value, o.channel) for o in report.sales_data.observations], [(2, "1"), (1, "2")])
+            self.assertNotIn("permission_not_confirmed", [item.reason for item in report.sales_data.missing_data])
+            self.assertEqual([call[0] for call in client.calls], ["head", "get"])
+            # The mapping gates below must not add any R2 request of their own.
+            client.calls.clear()
 
             source_no_category = R2DuckDBHmHistoricalSalesSource(
                 {}, "synthetic-mapping-v1", usage_authorized=True,
@@ -174,7 +180,12 @@ class HmR2DuckDBTests(unittest.TestCase):
             self.assertTrue(all(o.value > 0 for o in observations))
             self.assertTrue(all(o.unit == "purchase_rows" and o.period_grain == "week" for o in observations))
             self.assertTrue(all(o.period_start == "2020-09-21" and o.period_end == "2020-09-27" for o in observations))
-            self.assertEqual(len(report.evidence), 4)
+            # Two weekly sales records plus ONE catalog record: both observations share the
+            # same group/type taxonomy evidence, which the adapter emits once.
+            self.assertEqual(len(report.evidence), 3)
+            self.assertEqual({e.evidence_id for e in report.evidence},
+                             {evidence_id for o in observations for evidence_id in o.evidence_ids})
+            self.assertEqual(len({o.evidence_ids[1] for o in observations}), 1)
             self.assertTrue(all("r2://shared.duckdb#version=v1" in e.locator for e in report.evidence))
             self.assertTrue(all("transactions" in e.locator or "articles" in e.locator for e in report.evidence))
             self.assertNotIn("SYN-CUSTOMER-SECRET", repr(report))
@@ -206,9 +217,14 @@ class HmR2DuckDBTests(unittest.TestCase):
                 store=store, object_key="shared.duckdb", cache_dir=root / "cache",
             )
             report = source.research(self.context())
+            # Every "Garment Upper body" article is a "Sweater", so the exact type mapping
+            # wins for all of them and the broad "Tops" fallback never applies.
+            tops = source.research(self.context(category="Tops"))
         self.assertEqual(report.sales_data.status, "ok")
-        self.assertEqual([item.value for item in report.sales_data.observations], [2])
+        self.assertEqual([(item.value, item.channel) for item in report.sales_data.observations], [(2, "1"), (1, "2")])
         self.assertTrue(all(item.category == "Knitwear" for item in report.sales_data.observations))
+        self.assertEqual(tops.sales_data.status, "no_results")
+        self.assertEqual(tops.sales_data.observations, ())
 
     def test_r2_version_size_and_table_schema_errors_are_reported(self):
         with tempfile.TemporaryDirectory() as temporary:
