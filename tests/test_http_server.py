@@ -353,7 +353,7 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertEqual(response["result"]["margin_estimate"]["currency"], "KRW")
         self.assertEqual(
             {item["field"] for item in response["result"]["missing_data"]},
-            {"musinsa_prices", "fabric_costs", "customer_segments"},
+            {"historical_hm_transaction_prices", "fabric_costs", "customer_segments"},
         )
 
     def test_review_image_reference_and_explicit_style_flag_are_validated(self):
@@ -482,7 +482,7 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertEqual(response["result"]["margin_estimate"]["calculation"]["gross_margin_rate"], 0.414152)
         self.assertEqual(
             {item["field"] for item in response["result"]["missing_data"]},
-            {"musinsa_prices", "fabric_costs", "customer_segments"},
+            {"historical_hm_transaction_prices", "fabric_costs", "customer_segments"},
         )
 
     def test_opt_in_synthetic_demo_returns_labeled_analysis_without_changing_v01_envelope(self):

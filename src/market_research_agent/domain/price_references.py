@@ -49,14 +49,6 @@ def _price(row: dict[str, str], field: str) -> Decimal | None:
     return price if price.is_finite() and price > 0 else None
 
 
-def _authorized(row: dict[str, str]) -> bool:
-    return _text(row, "permission_status") == "authorized"
-
-
-def _same(value: str | None, expected: Any) -> bool:
-    return value is not None and isinstance(expected, str) and value.casefold() == expected.strip().casefold()
-
-
 def _stats(values: list[Decimal], currency: str) -> dict[str, Any] | None:
     if not values:
         return None
@@ -67,62 +59,6 @@ def _stats(values: list[Decimal], currency: str) -> dict[str, Any] | None:
         "maximum": float(max(values)),
         "currency": currency,
         "statistic": "unweighted_median_of_snapshot_rows",
-    }
-
-
-def analyze_musinsa_snapshot(product: dict[str, Any]) -> dict[str, Any] | None:
-    """Aggregate exact-mapped category comparables from a permitted CSV snapshot."""
-    rows = _read_rows("MUSINSA_PRICE_SNAPSHOT_PATH")
-    if not rows:
-        return None
-    category = product.get("category")
-    matched = [row for row in rows if _authorized(row) and _same(_text(row, "project_category"), category)]
-    if product.get("gender") and product["gender"] != "unknown":
-        matched = [r for r in matched if _same(_text(r, "gender"), product["gender"])]
-    if product.get("product_type"):
-        matched = [r for r in matched if _same(_text(r, "product_type"), product["product_type"])]
-    currencies = {_text(row, "currency") for row in matched}
-    if len(currencies) != 1 or None in currencies:
-        matched = []
-    currency = next(iter(currencies)) if currencies and None not in currencies else None
-    regular = [_price(row, "regular_price") for row in matched]
-    current = [_price(row, "current_price") for row in matched]
-    comparables = []
-    for row in matched:
-        if not (_text(row, "source_url") and _text(row, "collected_at") and _text(row, "product_name")):
-            continue
-        if _price(row, "regular_price") is None and _price(row, "current_price") is None:
-            continue
-        comparables.append({
-            "product_name": _text(row, "product_name"), "brand": _text(row, "brand"),
-            "product_id": _text(row, "product_id"), "source_url": _text(row, "source_url"),
-            "category": _text(row, "project_category"), "gender": _text(row, "gender"),
-            "product_type": _text(row, "product_type"),
-            "regular_price": float(_price(row, "regular_price")) if _price(row, "regular_price") else None,
-            "current_price": float(_price(row, "current_price")) if _price(row, "current_price") else None,
-            "currency": currency, "is_discounted": bool(
-                _price(row, "regular_price") and _price(row, "current_price")
-                and _price(row, "current_price") < _price(row, "regular_price")
-            ), "collected_at": _text(row, "collected_at"),
-            "source_grade": "public_product_price_snapshot",
-        })
-    # Exclude rows lacking traceable provenance from all aggregates.
-    usable = {c["source_url"] for c in comparables}
-    valid_rows = [r for r in matched if _text(r, "source_url") in usable]
-    regular_values = [x for r in valid_rows if (x := _price(r, "regular_price")) is not None]
-    current_values = [x for r in valid_rows if (x := _price(r, "current_price")) is not None]
-    dates = [c["collected_at"] for c in comparables]
-    return {
-        "mapping": {"project_category": category, "match": "case_insensitive_exact", "version": "snapshot-row-v1"},
-        "sample_count": len(comparables), "currency": currency,
-        "sample_quality": "insufficient" if len(comparables) < 3 else "usable_descriptive_sample",
-        "observed_at_range": {"earliest": min(dates) if dates else None, "latest": max(dates) if dates else None},
-        "regular_price_stats": _stats(regular_values, currency) if currency else None,
-        "current_price_stats": _stats(current_values, currency) if currency else None,
-        "comparables": comparables,
-        "source_grade": "public_product_price_snapshot",
-        "limitations": ["Public listed prices are not sales transactions or demand evidence.",
-                        "Rows require source permission_status=authorized and are not independently rights-audited."],
     }
 
 

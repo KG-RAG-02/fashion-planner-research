@@ -11,7 +11,7 @@ from typing import Any
 
 from .apparel_costing import calculate_apparel_margin
 from .models import MarketResearchResult
-from .price_references import SnapshotError, analyze_fabric_snapshot, analyze_musinsa_snapshot
+from .price_references import SnapshotError, analyze_fabric_snapshot
 
 
 REVIEW_SCHEMA_VERSION = "sales-market-review/0.1-internal"
@@ -124,6 +124,8 @@ def build_sales_market_review(
     result: MarketResearchResult,
     *,
     planning_draft: dict[str, Any],
+    historical_price_analysis: dict[str, Any] | None = None,
+    historical_price_error: str | None = None,
     customer_age_profile: dict[str, Any] | None = None,
     customer_age_error: str | None = None,
     image_style_analysis: dict[str, Any] | None = None,
@@ -133,7 +135,8 @@ def build_sales_market_review(
     """Adapt an existing result into an internal review shape.
 
     Product attributes are taken only from validated PlanningDraft fields.
-    Snapshot adapters are offline CSV readers and never fetch external pages.
+    Fabric snapshot adapters are offline CSV readers. Historical H&M prices are
+    supplied by the read-only R2 research source.
     """
     if not isinstance(planning_draft, dict):
         raise TypeError("planning_draft must be an object.")
@@ -148,16 +151,11 @@ def build_sales_market_review(
     ]
     if customer_age_error:
         errors.append({"code": "CUSTOMER_AGE_RESEARCH_FAILED", "message": customer_age_error})
+    if historical_price_error:
+        errors.append({"code": "HM_HISTORICAL_PRICE_RESEARCH_FAILED", "message": historical_price_error})
     if image_style_error:
         errors.append({"code": "IMAGE_STYLE_ANALYSIS_FAILED", "message": image_style_error})
     missing: list[dict[str, Any]] = []
-    musinsa_error = False
-    try:
-        musinsa = analyze_musinsa_snapshot(product)
-    except SnapshotError as exc:
-        musinsa = None
-        musinsa_error = True
-        errors.append({"code": "MUSINSA_SNAPSHOT_INVALID", "message": str(exc)})
     fabric_error = False
     try:
         fabrics = analyze_fabric_snapshot(product)
@@ -165,12 +163,10 @@ def build_sales_market_review(
         fabrics = []
         fabric_error = True
         errors.append({"code": "FABRIC_SNAPSHOT_INVALID", "message": str(exc)})
-    if musinsa is None:
-        missing.append({"field": "musinsa_prices", "reason": "source_error" if musinsa_error else "source_not_configured",
-                         "message": "Configured Musinsa snapshot could not be read." if musinsa_error else "Set MUSINSA_PRICE_SNAPSHOT_PATH to a permitted CSV snapshot."})
-    elif not musinsa["comparables"]:
-        missing.append({"field": "musinsa_prices", "reason": "no_matching_observations",
-                         "message": "No authorized snapshot rows exactly match the product category and supplied filters."})
+    if historical_price_analysis is None:
+        missing.append({"field": "historical_hm_transaction_prices",
+                        "reason": "source_error" if historical_price_error else "source_not_configured_or_disabled",
+                        "message": historical_price_error or "Enable non-commercial H&M research mode and configure its R2 source."})
     if not fabrics:
         reason = "source_error" if fabric_error else "material_not_specified" if not product.get("material") else "source_not_configured_or_no_match"
         missing.append({"field": "fabric_costs", "reason": reason,
@@ -216,8 +212,9 @@ def build_sales_market_review(
     )
     if fabrics:
         material_rows += tuple(fabrics)
-    if musinsa and musinsa["comparables"]:
+    if historical_price_analysis is not None:
         review_status = "partial"
+        limitations.append("H&M Kaggle transaction prices are historical non-commercial research references, not current market listing prices.")
     if fabrics:
         review_status = "partial"
     if customer_age_profile is not None:
@@ -241,7 +238,7 @@ def build_sales_market_review(
         producer_id=result.agent_id,
         status=review_status,
         draft_context=draft_context,
-        category_price_comparison=(musinsa,) if musinsa and musinsa["comparables"] else (),
+        category_price_comparison=(historical_price_analysis,) if historical_price_analysis else (),
         material_cost_analysis=material_rows,
         customer_segment_analysis=(
             (customer_age_profile,) if customer_age_profile is not None else ()

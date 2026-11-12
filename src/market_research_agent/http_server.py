@@ -33,6 +33,7 @@ from .sources.shared.composite import CompositeMarketResearchSource
 from .sources.shared.noop import NoConfiguredSources
 from .sources.shared.r2_object_store import R2ObjectError, R2ObjectStore
 from .sources.sales.hm_kaggle.hm_customer_age_source import CustomerAgeSourceError, HmCustomerAgeResearchSource
+from .sources.sales.hm_kaggle.hm_price_source import HmHistoricalPriceResearchSource, HmPriceSourceError
 from .workflows.market_research import MarketResearchAgent
 from .query_interpretation import interpret_query, scope_conflicts, unresolved_ambiguities
 from .orchestration_request import CanonicalRequestError, context_from_canonical_request
@@ -577,6 +578,8 @@ def make_handler(
                     product = planning_draft.get("product", {})
                     customer_profile = None
                     customer_error = None
+                    historical_price = None
+                    historical_price_error = None
                     if os.getenv("VOGUE_HM_RESEARCH_NONCOMMERCIAL", "").strip().casefold() in {"1", "true", "yes"}:
                         try:
                             customer_profile = HmCustomerAgeResearchSource().profile(
@@ -584,6 +587,12 @@ def make_handler(
                             )
                         except CustomerAgeSourceError as exc:
                             customer_error = str(exc)
+                        try:
+                            historical_price = HmHistoricalPriceResearchSource().analyze(
+                                product.get("category", ""), gender=product.get("gender"),
+                            )
+                        except HmPriceSourceError as exc:
+                            historical_price_error = str(exc)
                     image_style = None
                     image_style_error = None
                     if image_style_requested:
@@ -602,6 +611,8 @@ def make_handler(
                                 image_style_error = str(exc)
                     review = build_sales_market_review(
                         result, planning_draft=planning_draft,
+                        historical_price_analysis=historical_price,
+                        historical_price_error=historical_price_error,
                         customer_age_profile=customer_profile,
                         customer_age_error=customer_error,
                         image_style_analysis=image_style,
