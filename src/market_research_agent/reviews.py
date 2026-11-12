@@ -68,8 +68,47 @@ def parse_json(raw):
         raise ReviewError('INVALID_JSON', 'Valid UTF-8 JSON with unique keys and finite numbers is required.', 400) from None
 
 
-_SCHEMAS = {str(p.relative_to(resource_root('workflow_contract'))): json.loads(p.read_text())
-            for p in resource_root('workflow_contract').rglob('*.schema.json')}
+CONTRACT_PIN = 'snapshot.json'
+
+
+def load_pinned_schemas(root):
+    """Return the vendored schemas only if their exact bytes match the SHA-256 pin.
+
+    ``snapshot.json`` is a byte-identical copy of the coordinator's
+    contracts/workflow/snapshot.json. Any changed, missing or unpinned schema
+    file fails closed with SCHEMA_SNAPSHOT_CHANGED.
+    """
+    root = Path(root)
+    def changed(detail):
+        return ReviewError('SCHEMA_SNAPSHOT_CHANGED',
+                           'SCHEMA_SNAPSHOT_CHANGED: vendored workflow contract ' + detail + '.', 500)
+    try:
+        pin = parse_json((root / CONTRACT_PIN).read_bytes())
+    except (OSError, ReviewError):
+        raise changed('pin manifest is missing or invalid') from None
+    files = pin.get('files') if isinstance(pin, dict) else None
+    if (not isinstance(files, dict) or not files or pin.get('transport_version') != VERSION
+            or any(not isinstance(d, str) or len(d) != 64 or d.strip('0123456789abcdef') for d in files.values())):
+        raise changed('pin manifest has an unsupported shape')
+    present = {p.relative_to(root).as_posix() for p in root.rglob('*.schema.json')}
+    if present != set(files):
+        raise changed('schema files differ from the pinned set')
+    schemas = {}
+    for name, digest in sorted(files.items()):
+        try:
+            raw = (root / name).read_bytes()
+        except OSError:
+            raise changed(name + ' is unreadable') from None
+        if sha256(raw).hexdigest() != digest:
+            raise changed(name + ' bytes do not match the pin')
+        try:
+            schemas[name] = parse_json(raw)
+        except ReviewError:
+            raise changed(name + ' is not valid JSON') from None
+    return schemas
+
+
+_SCHEMAS = load_pinned_schemas(resource_root('workflow_contract'))
 _REGISTRY = Registry().with_resources((uri, Resource.from_contents(v))
     for name, v in _SCHEMAS.items()
     for uri in {v.get('$id', ''), 'https://contracts.vogue.invalid/workflow/0.1/' + name} if uri)

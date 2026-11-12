@@ -1,0 +1,15 @@
+{
+  "contract_version": "workflow-contract/0.1.1",
+  "transport_version": "vogue-workflow/0.1",
+  "source": "contracts/workflow",
+  "files": {
+    "common.schema.json": "801b975ba1032444af5e47f417e3f53e306eba76b77882af62693c2e64d17710",
+    "integrated-result.schema.json": "bb43e1dbe1b1819b341f922f85cb468c81d298b2dd409acb009e783085d3dbd3",
+    "planning-draft-request.schema.json": "a4c5b72f1de38203f582856ef7e216c480ab4f91afa5342697dec8414bfdf631",
+    "planning-draft-response.schema.json": "4a91b659b18c37e0b20b2b6f30a728c06408f63a8535825d8a2159ba4b2dd1b5",
+    "sales-market-review-request.schema.json": "881d6f584cf417a1fc873ec2d4b458123a69513e4d8f2b4b00d5e8b7aa1f9a5c",
+    "sales-market-review-response.schema.json": "a68127ac936772ada1fc7157297e7f9441b306ddf1afe11f28615863f27e6c2e",
+    "upstream/stock-result-1.0.schema.json": "f2b6984bb37cca4333559e4e05b88312ecf511f578803adee51885c344e6ce00",
+    "upstream/trend-result-1.1.schema.json": "7618fb459eb68f56bb12d2c5b171ff0a1fcd066a9ae987c2b4f9a3095d74dbef"
+  }
+}

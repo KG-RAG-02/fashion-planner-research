@@ -281,8 +281,16 @@ SQLite replay history persist in the `review-artifacts` volume.
 Install with `pip install .` (or `pip install '.[r2]'` for cloud sources).
 Configs, static UI and prompt assets are package data. After editing their
 source directories, run `python scripts/sync_package_resources.py` and check
-with `--check`. The workflow schema snapshot is owned by this package and must
-be reconciled against the coordinator's baseline explicitly.
+with `--check`. The vendored workflow schemas in
+`src/market_research_agent/resources/workflow_contract/` are byte-identical
+copies of `vogue-orchestrator/contracts/workflow/` and are never edited here.
+Their raw-byte SHA-256 values are pinned by `snapshot.json` in the same folder.
+That file is a byte-identical copy of the coordinator's `snapshot.json` for
+`workflow-contract/0.1.1` (sha256 `cc4cf995…94d4fe`, the value recorded as the
+baseline `snapshot_sha256`). Importing the review module fails closed with
+`SCHEMA_SNAPSHOT_CHANGED` when any schema file is changed, missing or unpinned.
+`scripts/sync_package_resources.py` (both modes) verifies the same pin and never
+rewrites the vendored files.
 
 Run `python scripts/run_tests.py` to restore missing deterministic synthetic
 fixtures and collect `tests`, `tests/sales`, and `tests/market` separately.
