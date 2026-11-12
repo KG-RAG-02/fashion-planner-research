@@ -11,7 +11,6 @@ from typing import Any
 
 from .apparel_costing import calculate_apparel_margin
 from .models import MarketResearchResult
-from .price_references import SnapshotError, analyze_fabric_snapshot
 
 
 REVIEW_SCHEMA_VERSION = "sales-market-review/0.1-internal"
@@ -124,6 +123,8 @@ def build_sales_market_review(
     result: MarketResearchResult,
     *,
     planning_draft: dict[str, Any],
+    fabric_price_analysis: tuple[dict[str, Any], ...] = (),
+    fabric_price_error: str | None = None,
     historical_price_analysis: dict[str, Any] | None = None,
     historical_price_error: str | None = None,
     customer_age_profile: dict[str, Any] | None = None,
@@ -135,8 +136,7 @@ def build_sales_market_review(
     """Adapt an existing result into an internal review shape.
 
     Product attributes are taken only from validated PlanningDraft fields.
-    Fabric snapshot adapters are offline CSV readers. Historical H&M prices are
-    supplied by the read-only R2 research source.
+    Fabric and historical H&M price analyses are supplied by read-only R2 sources.
     """
     if not isinstance(planning_draft, dict):
         raise TypeError("planning_draft must be an object.")
@@ -153,24 +153,20 @@ def build_sales_market_review(
         errors.append({"code": "CUSTOMER_AGE_RESEARCH_FAILED", "message": customer_age_error})
     if historical_price_error:
         errors.append({"code": "HM_HISTORICAL_PRICE_RESEARCH_FAILED", "message": historical_price_error})
+    if fabric_price_error:
+        errors.append({"code": "R2_FABRIC_PRICE_READ_FAILED", "message": fabric_price_error})
     if image_style_error:
         errors.append({"code": "IMAGE_STYLE_ANALYSIS_FAILED", "message": image_style_error})
     missing: list[dict[str, Any]] = []
-    fabric_error = False
-    try:
-        fabrics = analyze_fabric_snapshot(product)
-    except SnapshotError as exc:
-        fabrics = []
-        fabric_error = True
-        errors.append({"code": "FABRIC_SNAPSHOT_INVALID", "message": str(exc)})
+    fabrics = list(fabric_price_analysis)
     if historical_price_analysis is None:
         missing.append({"field": "historical_hm_transaction_prices",
                         "reason": "source_error" if historical_price_error else "source_not_configured_or_disabled",
                         "message": historical_price_error or "Enable non-commercial H&M research mode and configure its R2 source."})
     if not fabrics:
-        reason = "source_error" if fabric_error else "material_not_specified" if not product.get("material") else "source_not_configured_or_no_match"
+        reason = "source_error" if fabric_price_error else "material_not_specified" if not product.get("material") else "source_not_configured_or_no_match"
         missing.append({"field": "fabric_costs", "reason": reason,
-                        "message": "Set FABRIC_PRICE_SNAPSHOT_PATH and supply an exact material match; source prices remain references."})
+                        "message": fabric_price_error or "No R2 fabric listing prices matched the supplied material; per-meter cost requires a verified sales unit."})
     if customer_age_profile is None:
         missing.append({"field": "customer_segments",
                         "reason": "source_error" if customer_age_error else "source_not_configured_or_disabled",
@@ -217,6 +213,7 @@ def build_sales_market_review(
         limitations.append("H&M Kaggle transaction prices are historical non-commercial research references, not current market listing prices.")
     if fabrics:
         review_status = "partial"
+        limitations.append("R2 fabric listing prices are public snapshot references and are not confirmed per-meter production costs.")
     if customer_age_profile is not None:
         review_status = "partial"
         limitations.append("H&M age-band profiles are historical non-commercial research only; they are not current VOGUE customer behavior or demand.")

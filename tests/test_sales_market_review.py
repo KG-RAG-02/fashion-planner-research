@@ -1,9 +1,6 @@
 from __future__ import annotations
 
 import unittest
-import os
-from pathlib import Path
-import tempfile
 
 from market_research_agent import (
     MarketResearchAgent,
@@ -43,45 +40,39 @@ class SalesMarketReviewAdapterTests(unittest.TestCase):
         self.assertFalse(review["customer_segment_analysis"][0]["operational_eligible"])
 
     def test_review_includes_historical_hm_prices_and_public_fabric_snapshot(self):
-        with tempfile.TemporaryDirectory() as directory:
-            fabric_path = Path(directory) / "fabric.csv"
-            fabric_path.write_text(
-                "material,composition,construction,weight_gsm,width,color,source_grade,price,currency,unit,source_url,collected_at,permission_status\n"
-                "wool blend,70% wool,plain,280,150cm,navy,public_sale,9000,KRW,yd,https://example.test/cloth,2026-10-01T00:00:00Z,authorized\n",
-                encoding="utf-8",
-            )
-            old_fabric = os.environ.get("FABRIC_PRICE_SNAPSHOT_PATH")
-            os.environ["FABRIC_PRICE_SNAPSHOT_PATH"] = str(fabric_path)
-            try:
-                result = MarketResearchAgent().run(
-                    MarketResearchContext(request_id="review-snapshots", planning_request={})
-                )
-                historical_prices = {
-                    "source_id": "hm-kaggle-personalized-fashion-recommendations",
-                    "source_type": "historical_kaggle_transaction_price_aggregate",
-                    "permission_status": "non_commercial_research_only",
-                    "operational_eligible": False,
-                    "sample_count": 12,
-                    "price_statistics": {"median": 0.0254, "currency": None},
-                }
-                review = build_sales_market_review(
-                    result,
-                    planning_draft={"draft_id": "draft-snapshots", "product": {
-                        "category": "Outerwear", "product_type": "Jacket", "gender": "women",
-                        "material": "wool blend", "proposed_price": 100000, "currency": "KRW",
-                    }},
-                    historical_price_analysis=historical_prices,
-                ).to_dict()
-                self.assertEqual(review["category_price_comparison"][0]["price_statistics"]["median"], 0.0254)
-                self.assertIsNone(review["category_price_comparison"][0]["price_statistics"]["currency"])
-                self.assertEqual(review["material_cost_analysis"][0]["source_grade"], "public_sale")
-                self.assertEqual(review["status"], "partial")
-                self.assertEqual({item["field"] for item in review["missing_data"]}, {"customer_segments"})
-            finally:
-                if old_fabric is None:
-                    os.environ.pop("FABRIC_PRICE_SNAPSHOT_PATH", None)
-                else:
-                    os.environ["FABRIC_PRICE_SNAPSHOT_PATH"] = old_fabric
+        result = MarketResearchAgent().run(
+            MarketResearchContext(request_id="review-snapshots", planning_request={})
+        )
+        historical_prices = {
+            "source_id": "hm-kaggle-personalized-fashion-recommendations",
+            "source_type": "historical_kaggle_transaction_price_aggregate",
+            "permission_status": "non_commercial_research_only",
+            "operational_eligible": False,
+            "sample_count": 12,
+            "price_statistics": {"median": 0.0254, "currency": None},
+        }
+        fabric_prices = ({
+            "source_type": "owner_provided_public_fabric_listing_snapshot",
+            "source_grade": "public_sale",
+            "listed_price_statistics": {"median": 9000, "currency": "KRW"},
+            "price_per_meter_krw_statistics": None,
+            "cost_per_meter_calculable": False,
+        },)
+        review = build_sales_market_review(
+            result,
+            planning_draft={"draft_id": "draft-snapshots", "product": {
+                "category": "Outerwear", "product_type": "Jacket", "gender": "women",
+                "material": "linen", "proposed_price": 100000, "currency": "KRW",
+            }},
+            historical_price_analysis=historical_prices,
+            fabric_price_analysis=fabric_prices,
+        ).to_dict()
+        self.assertEqual(review["category_price_comparison"][0]["price_statistics"]["median"], 0.0254)
+        self.assertIsNone(review["category_price_comparison"][0]["price_statistics"]["currency"])
+        self.assertEqual(review["material_cost_analysis"][0]["source_grade"], "public_sale")
+        self.assertFalse(review["material_cost_analysis"][0]["cost_per_meter_calculable"])
+        self.assertEqual(review["status"], "partial")
+        self.assertEqual({item["field"] for item in review["missing_data"]}, {"customer_segments"})
 
     def test_internal_review_marks_unconnected_sources_and_does_not_echo_draft(self):
         result = MarketResearchAgent().run(

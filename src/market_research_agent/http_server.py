@@ -34,6 +34,7 @@ from .sources.shared.noop import NoConfiguredSources
 from .sources.shared.r2_object_store import R2ObjectError, R2ObjectStore
 from .sources.sales.hm_kaggle.hm_customer_age_source import CustomerAgeSourceError, HmCustomerAgeResearchSource
 from .sources.sales.hm_kaggle.hm_price_source import HmHistoricalPriceResearchSource, HmPriceSourceError
+from .sources.market.fabric_price_r2_source import FabricPriceSourceError, R2FabricPriceSource
 from .workflows.market_research import MarketResearchAgent
 from .query_interpretation import interpret_query, scope_conflicts, unresolved_ambiguities
 from .orchestration_request import CanonicalRequestError, context_from_canonical_request
@@ -576,6 +577,12 @@ def make_handler(
                         limitations=(),
                     )
                     product = planning_draft.get("product", {})
+                    fabric_prices = ()
+                    fabric_price_error = None
+                    try:
+                        fabric_prices = R2FabricPriceSource().analyze(product)
+                    except FabricPriceSourceError as exc:
+                        fabric_price_error = str(exc)
                     customer_profile = None
                     customer_error = None
                     historical_price = None
@@ -611,6 +618,8 @@ def make_handler(
                                 image_style_error = str(exc)
                     review = build_sales_market_review(
                         result, planning_draft=planning_draft,
+                        fabric_price_analysis=fabric_prices,
+                        fabric_price_error=fabric_price_error,
                         historical_price_analysis=historical_price,
                         historical_price_error=historical_price_error,
                         customer_age_profile=customer_profile,
@@ -739,6 +748,7 @@ def _load_project_r2_env() -> None:
                                  or key == "VOGUE_IMAGE_LLM_TRANSFER_AUTHORIZED"
                                  or key == "OPENAI_MODEL"
                                  or key == "VOGUE_DUCKDB_EXTENSION_DIRECTORY"
+                                 or key == "PROJECT07_FABRIC_PRICE_R2_KEY"
                                  or key.startswith("PROJECT07_SYNTHETIC_R2_")):
             continue
         value = value.strip()
