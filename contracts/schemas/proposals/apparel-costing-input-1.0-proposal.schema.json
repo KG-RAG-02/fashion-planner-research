@@ -1,0 +1,99 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vogue:apparel-costing-input:1.0:proposal",
+  "title": "Explicit apparel BOM/SAM costing inputs",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["schema_version", "currency", "price_basis", "materials", "labor", "factory_costs", "factory_markup_rate", "logistics_costs", "discount_rate", "return_rate", "target_gross_margin_rate", "rate_source_refs"],
+  "properties": {
+    "schema_version": {"const": "1.0"},
+    "currency": {"type": "string", "pattern": "^[A-Za-z]{3}$"},
+    "price_basis": {"const": "ex_tax"},
+    "materials": {
+      "type": "array", "minItems": 2,
+      "allOf": [
+        {"contains": {"properties": {"kind": {"const": "fabric"}}, "required": ["kind"]}, "minContains": 1},
+        {"contains": {"properties": {"kind": {"const": "trims"}}, "required": ["kind"]}, "minContains": 1}
+      ],
+      "items": {
+        "type": "object", "additionalProperties": false,
+        "required": ["kind", "name", "unit_cost", "consumption", "unit", "waste_rate", "source_ref"],
+        "properties": {
+          "kind": {"enum": ["fabric", "trims"]},
+          "name": {"type": "string", "minLength": 1, "maxLength": 120},
+          "unit_cost": {"type": "number", "minimum": 0},
+          "consumption": {"type": "number", "exclusiveMinimum": 0},
+          "unit": {"type": "string", "minLength": 1, "maxLength": 120},
+          "waste_rate": {"type": "number", "minimum": 0},
+          "source_ref": {"type": "string", "minLength": 1, "maxLength": 240}
+        }
+      }
+    },
+    "labor": {
+      "type": "object", "additionalProperties": false,
+      "required": ["sam_minutes", "working_minute_cost", "efficiency_rate", "source_ref"],
+      "properties": {
+        "sam_minutes": {"type": "number", "exclusiveMinimum": 0},
+        "working_minute_cost": {"type": "number", "minimum": 0},
+        "efficiency_rate": {"type": "number", "exclusiveMinimum": 0, "exclusiveMaximum": 1},
+        "source_ref": {"type": "string", "minLength": 1, "maxLength": 240}
+      }
+    },
+    "factory_costs": {"$ref": "#/$defs/cost_lines"},
+    "factory_markup_rate": {"type": "number", "minimum": 0},
+    "logistics_costs": {"$ref": "#/$defs/logistics_lines"},
+    "discount_rate": {"type": "number", "minimum": 0, "exclusiveMaximum": 1},
+    "return_rate": {"type": "number", "minimum": 0, "exclusiveMaximum": 1},
+    "target_gross_margin_rate": {"type": ["number", "null"], "minimum": 0, "exclusiveMaximum": 1},
+    "rate_source_refs": {
+      "type": "object", "additionalProperties": false,
+      "required": ["factory_markup_rate", "discount_rate", "return_rate", "target_gross_margin_rate"],
+      "properties": {
+        "factory_markup_rate": {"type": "string", "minLength": 1, "maxLength": 240},
+        "discount_rate": {"type": "string", "minLength": 1, "maxLength": 240},
+        "return_rate": {"type": "string", "minLength": 1, "maxLength": 240},
+        "target_gross_margin_rate": {"type": ["string", "null"], "maxLength": 240}
+      }
+    }
+  },
+  "allOf": [
+    {
+      "if": {"properties": {"target_gross_margin_rate": {"type": "null"}}, "required": ["target_gross_margin_rate"]},
+      "then": {"properties": {"rate_source_refs": {"properties": {"target_gross_margin_rate": {"type": "null"}}}}}
+    },
+    {
+      "if": {"properties": {"target_gross_margin_rate": {"type": "number"}}, "required": ["target_gross_margin_rate"]},
+      "then": {"properties": {"rate_source_refs": {"properties": {"target_gross_margin_rate": {"type": "string", "minLength": 1}}}}}
+    }
+  ],
+  "$defs": {
+    "cost_line": {
+      "type": "object", "additionalProperties": false,
+      "required": ["amount", "source_ref"],
+      "properties": {
+        "amount": {"type": "number", "minimum": 0},
+        "source_ref": {"type": "string", "minLength": 1, "maxLength": 240}
+      }
+    },
+    "cost_lines": {
+      "type": "object", "additionalProperties": false,
+      "required": ["processing", "finishing", "packaging", "inspection"],
+      "properties": {
+        "processing": {"$ref": "#/$defs/cost_line"},
+        "finishing": {"$ref": "#/$defs/cost_line"},
+        "packaging": {"$ref": "#/$defs/cost_line"},
+        "inspection": {"$ref": "#/$defs/cost_line"}
+      }
+    },
+    "logistics_lines": {
+      "type": "object", "additionalProperties": false,
+      "required": ["freight", "insurance", "duty", "inland_logistics"],
+      "properties": {
+        "freight": {"$ref": "#/$defs/cost_line"},
+        "insurance": {"$ref": "#/$defs/cost_line"},
+        "duty": {"$ref": "#/$defs/cost_line"},
+        "inland_logistics": {"$ref": "#/$defs/cost_line"}
+      }
+    }
+  }
+}

@@ -1,5 +1,6 @@
 """Contracts and pure domain records for market research."""
 
+from .apparel_costing import CostingInputError, calculate_apparel_margin, validate_apparel_costing
 from .models import (
     AgentError,
     EvidenceRecord,
@@ -45,4 +46,7 @@ __all__ = [
     "UnitEconomicsResult",
     "SalesMarketReview",
     "build_sales_market_review",
+    "CostingInputError",
+    "calculate_apparel_margin",
+    "validate_apparel_costing",
 ]

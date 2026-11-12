@@ -12,12 +12,14 @@ import json
 import math
 import mimetypes
 import os
+import re
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
 from .domain.models import MarketResearchContext, MarketResearchResult, ResultStatus, normalize_no_results_payload
+from .domain.apparel_costing import CostingInputError, validate_apparel_costing
 from .domain.sales_market_review import REVIEW_SCHEMA_VERSION, build_sales_market_review
 from .sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
 from .sources.market.synthetic_r2 import SyntheticR2FixtureBundleStore
@@ -123,7 +125,9 @@ def context_from_review_request(value: Any) -> tuple[str, dict[str, Any]]:
     if payload.get("request_id") != request_id:
         raise RequestValidationError("REQUEST_ID_MISMATCH", "Envelope and input request_id must match.")
     draft = payload.get("planning_draft")
-    if not isinstance(draft, dict) or set(draft) != {"schema_version", "draft_id", "product"}:
+    if not isinstance(draft, dict) or set(draft) - {"schema_version", "draft_id", "product", "costing"} or not {
+        "schema_version", "draft_id", "product"
+    }.issubset(draft):
         raise RequestValidationError("INVALID_PLANNING_DRAFT", "planning_draft fields do not match schema 1.0.")
     if draft.get("schema_version") != "1.0":
         raise RequestValidationError("UNSUPPORTED_PRODUCER_SCHEMA", "planning_draft schema_version must be 1.0.")
@@ -152,10 +156,15 @@ def context_from_review_request(value: Any) -> tuple[str, dict[str, Any]]:
         isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0
     ):
         raise RequestValidationError("INVALID_PLANNING_DRAFT", "proposed_price must be a positive finite number.")
-    if price is not None and (not isinstance(currency, str) or len(currency) != 3 or not currency.isalpha()):
+    if price is not None and (not isinstance(currency, str) or re.fullmatch(r"[A-Za-z]{3}", currency) is None):
         raise RequestValidationError("INVALID_PLANNING_DRAFT", "currency must be supplied as a three-letter code with proposed_price.")
-    if currency is not None and (not isinstance(currency, str) or len(currency) != 3 or not currency.isalpha()):
+    if currency is not None and (not isinstance(currency, str) or re.fullmatch(r"[A-Za-z]{3}", currency) is None):
         raise RequestValidationError("INVALID_PLANNING_DRAFT", "currency must be a three-letter code.")
+    if "costing" in draft:
+        try:
+            validate_apparel_costing(draft["costing"])
+        except CostingInputError as exc:
+            raise RequestValidationError("INVALID_COSTING_INPUT", str(exc)) from None
     _validate_json_tree(draft, "planning_draft")
     return request_id, draft
 

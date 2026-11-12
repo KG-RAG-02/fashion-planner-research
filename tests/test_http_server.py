@@ -395,6 +395,33 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertEqual(response["contract_version"], "vogue-sales-market-review/0.1-proposal")
         self.assertEqual(response["error"]["code"], "UNAUTHORIZED")
 
+    def test_review_endpoint_calculates_margin_from_complete_supplied_costing(self):
+        from tests.test_apparel_costing import costing_input
+
+        request = {
+            "contract_version": "vogue-sales-market-review/0.1-proposal",
+            "request_id": "review-http-costing",
+            "input": {
+                "request_id": "review-http-costing",
+                "planning_draft": {
+                    "schema_version": "1.0", "draft_id": "draft-http-costing",
+                    "product": {
+                        "category": "Outerwear", "proposed_price": 10000, "currency": "KRW",
+                    },
+                    "costing": costing_input(),
+                },
+            },
+        }
+        status, response, _ = self.post(request, path="/v1/agents/sales-market-agent/reviews")
+        self.assertEqual(status, 200)
+        self.assertEqual(response["status"], "partial")
+        self.assertEqual(response["result"]["margin_estimate"]["status"], "ok")
+        self.assertEqual(response["result"]["margin_estimate"]["calculation"]["gross_margin_rate"], 0.414152)
+        self.assertEqual(
+            {item["field"] for item in response["result"]["missing_data"]},
+            {"musinsa_prices", "fabric_costs", "customer_segments"},
+        )
+
     def test_opt_in_synthetic_demo_returns_labeled_analysis_without_changing_v01_envelope(self):
         request = valid_demo_request()
         status, response, _ = self.post(

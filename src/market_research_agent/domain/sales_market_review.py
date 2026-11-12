@@ -9,6 +9,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Any
 
+from .apparel_costing import calculate_apparel_margin
 from .models import MarketResearchResult
 
 
@@ -81,6 +82,8 @@ def _draft_context(draft: dict[str, Any]) -> dict[str, Any]:
         for key in allowed
         if isinstance(product.get(key), str) and product[key].strip()
     }
+    if isinstance(context.get("gender"), str):
+        context["gender"] = context["gender"].casefold()
     price = product.get("proposed_price")
     currency = product.get("currency")
     if isinstance(price, (int, float)) and not isinstance(price, bool):
@@ -112,37 +115,46 @@ def build_sales_market_review(
     ]
     unit = result.unit_economics
     draft_context = _draft_context(planning_draft)
-    margin = (
-        unit.to_dict()
-        if unit is not None
-        else {
-            "status": "no_results",
-            "basis_price": draft_context.get("proposed_price"),
-            "currency": draft_context.get("currency"),
-            "calculations": [],
-            "limitations": ["No approved margin formula and complete unit-cost inputs are available."],
-            "errors": [],
-            "missing_data": [{
-                "field": "margin_estimate",
-                "reason": "source_not_configured",
-                "message": "A complete, approved unit cost and margin formula are required.",
-            }],
-        }
-    )
+    costing = planning_draft.get("costing")
+    if costing is not None:
+        margin = calculate_apparel_margin(
+            proposed_price=draft_context.get("proposed_price"),
+            price_currency=draft_context.get("currency"),
+            costing=costing,
+        )
+    elif unit is not None:
+        margin = unit.to_dict()
+    else:
+        margin = calculate_apparel_margin(
+            proposed_price=draft_context.get("proposed_price"),
+            price_currency=draft_context.get("currency"),
+            costing=None,
+        )
     limitations = list(result.limitations)
     if result.status.value in {"ok", "partial"}:
         limitations.append(
             "This internal review adapter is not an approved shared SalesMarketReview contract."
         )
+    review_status = result.status.value
+    if review_status in {"no_results", "error"} and margin.get("status") == "ok":
+        review_status = "partial"
+    material_rows = tuple(
+        {
+            **item,
+            "source_type": "planning_draft_costing_input",
+            "source_verification": "caller_supplied_not_independently_verified",
+        }
+        for item in margin.get("materials", [])
+    )
     return SalesMarketReview(
         schema_version=REVIEW_SCHEMA_VERSION,
         request_id=result.request_id,
         draft_id=_draft_id(planning_draft),
         producer_id=result.agent_id,
-        status=result.status.value,
+        status=review_status,
         draft_context=draft_context,
         category_price_comparison=(),
-        material_cost_analysis=(),
+        material_cost_analysis=material_rows,
         customer_segment_analysis=(),
         margin_estimate=margin,
         evidence=tuple(

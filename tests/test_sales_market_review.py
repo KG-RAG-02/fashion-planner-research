@@ -7,6 +7,7 @@ from market_research_agent import (
     MarketResearchContext,
     build_sales_market_review,
 )
+from tests.test_apparel_costing import costing_input
 
 
 class SalesMarketReviewAdapterTests(unittest.TestCase):
@@ -42,6 +43,25 @@ class SalesMarketReviewAdapterTests(unittest.TestCase):
         )
         with self.assertRaises(TypeError):
             build_sales_market_review(result, planning_draft=[])  # type: ignore[arg-type]
+
+    def test_complete_cost_sheet_adds_a_partial_review_without_filling_other_sources(self):
+        result = MarketResearchAgent().run(
+            MarketResearchContext(request_id="review-003", planning_request={})
+        )
+        review = build_sales_market_review(
+            result,
+            planning_draft={
+                "draft_id": "draft-003",
+                "product": {"category": "Outerwear", "proposed_price": 10000, "currency": "KRW"},
+                "costing": costing_input(),
+            },
+        ).to_dict()
+        self.assertEqual(review["status"], "partial")
+        self.assertEqual(review["margin_estimate"]["status"], "ok")
+        self.assertEqual(review["margin_estimate"]["calculation"]["landed_cost"], 5009)
+        self.assertEqual(review["category_price_comparison"], [])
+        self.assertEqual(review["material_cost_analysis"][0]["source_type"], "planning_draft_costing_input")
+        self.assertEqual(review["material_cost_analysis"][0]["source_verification"], "caller_supplied_not_independently_verified")
 
 
 if __name__ == "__main__":
