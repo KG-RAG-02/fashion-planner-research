@@ -17,6 +17,7 @@ from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
 from .resource_paths import resource_root
+from .artifact_reader import artifact_reader_from_env
 from .reviews import (REVIEW_PATH, MAX_BODY_BYTES as REVIEW_MAX_BODY_BYTES, SalesMarketReviewService,
                       ReviewArtifactStore, ReviewError, parse_json, parser_for, problem)
 
@@ -415,12 +416,15 @@ def make_handler(
                     if request_id is not None and not request_id.isascii(): request_id = None
                 # Version dispatch precedes schema, artifact, store and source work.
                 parser_for(body)
+                # Retained raw bytes are always verified over HTTP: without
+                # VOGUE_UPSTREAM_ARTIFACT_ROOT the reader fails closed (503).
                 service = review_service or SalesMarketReviewService(build_agent, ReviewArtifactStore(
-                    os.getenv("VOGUE_P07_REVIEW_ARTIFACT_DIR", ".local/review-artifacts")))
+                    os.getenv("VOGUE_P07_REVIEW_ARTIFACT_DIR", ".local/review-artifacts")),
+                    artifact_reader_from_env())
                 code, response = service.review(body, raw)
                 send(code, response)
             except ReviewError as exc:
-                send(exc.http_status, problem(exc.code, str(exc), request_id))
+                send(exc.http_status, problem(exc.code, str(exc), request_id, exc.http_status in {503, 504}))
             except TimeoutError:
                 send(504, problem("TIMEOUT", "Review source timed out.", request_id, True))
             except (OSError, ConnectionError):

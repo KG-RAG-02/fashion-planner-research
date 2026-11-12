@@ -173,21 +173,40 @@ def check_refs(value, documents):
         for child in value: check_refs(child, documents)
 
 
+def retained_nodes(value):
+    """Yield every retained response (raw_response + raw_artifact) at any depth."""
+    if isinstance(value, dict):
+        if 'raw_response' in value and 'raw_artifact' in value:
+            yield value
+        for child in value.values(): yield from retained_nodes(child)
+    elif isinstance(value, list):
+        for child in value: yield from retained_nodes(child)
+
+
+def verify_raw_artifact(node, artifact_resolver):
+    """Exact retained bytes must match their reference and parse to raw_response."""
+    ref = node['raw_artifact']; raw = artifact_resolver(ref)
+    if not isinstance(raw, bytes) or len(raw) != ref['size_bytes']:
+        raise ReviewError('ARTIFACT_SIZE_MISMATCH', 'Retained raw artifact size does not match its reference.')
+    if sha256(raw).hexdigest() != ref['sha256']:
+        raise ReviewError('ARTIFACT_HASH_MISMATCH', 'Retained raw artifact SHA-256 does not match its reference.')
+    try:
+        parsed = parse_json(raw)
+    except ReviewError:
+        raise ReviewError('RAW_ARTIFACT_OBJECT_MISMATCH', 'Retained raw artifact is not the retained JSON response.') from None
+    require(canonical(parsed) == canonical(node['raw_response']), 'RAW_ARTIFACT_OBJECT_MISMATCH')
+
+
 def parse_review_request(value, artifact_resolver=None):
-    """Return a detached full snapshot, plus separately derived search provenance."""
+    """Return a detached full snapshot, plus separately derived search provenance.
+
+    With an ``artifact_resolver`` every retained response's exact raw bytes
+    are read and verified; without one, raw_artifact refs are only retained.
+    """
     validate_schema(value, 'sales-market-review-request.schema.json')
     value = deepcopy(value)
     if artifact_resolver is not None:
-        def verify(v):
-            if isinstance(v, dict):
-                if 'raw_response' in v and 'raw_artifact' in v:
-                    a = v['raw_artifact']; raw = artifact_resolver(a)
-                    require(len(raw) == a['size_bytes'] and sha256(raw).hexdigest() == a['sha256'], 'RAW_ARTIFACT_HASH_MISMATCH')
-                    require(canonical(parse_json(raw)) == canonical(v['raw_response']), 'RAW_ARTIFACT_OBJECT_MISMATCH')
-                for child in v.values(): verify(child)
-            elif isinstance(v, list):
-                for child in v: verify(child)
-        verify(value)
+        for node in retained_nodes(value): verify_raw_artifact(node, artifact_resolver)
     request_id = value['request_id']
     retained = value['input']['planning_draft']
     doc = validate_retained(retained, request_id)
@@ -342,13 +361,18 @@ class SalesMarketReviewService:
             cached = db.execute('SELECT code, response FROM responses WHERE key=?', (key,)).fetchone()
             if cached:
                 return cached[0], parse_review_response(parse_json(cached[1]), snapshot)
-            code, response = self._evaluate(snapshot, raw_body)
+            code, response = self._evaluate(snapshot, raw_body, artifacts_verified=self.artifact_resolver is not None)
             if code == 200:
                 db.execute('INSERT INTO responses VALUES (?,?,?)', (key, code, canonical(response)))
             return code, response
 
-    def _evaluate(self, request, raw_body=None):
+    def _evaluate(self, request, raw_body=None, artifacts_verified=False):
         snapshot, derived = parse_review_request(request)
+        retained_count = sum(1 for _ in retained_nodes(snapshot))
+        artifact_note = (f'Incoming raw_artifact bytes ({retained_count} retained responses) were read from the '
+                         'read-only upstream artifact mount and verified by size, SHA-256 and parsed JSON before review.'
+                         if artifacts_verified else
+                         'Incoming P08 raw_artifact refs are retained; their remote bytes were not fetched by P07.')
         now = datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
         retained = snapshot['input']['planning_draft']; doc = retained['raw_response']
         # Persist exact received request bytes AND a canonical parsed Draft snapshot.
@@ -370,7 +394,7 @@ class SalesMarketReviewService:
                             'source_pointer': '/evidence/' + str(index[eid])} for eid in ids if eid in index]
         limitations = list(details['limitations']) + list(doc['result']['limitations']) + [
             'Current company sales and current market source are not verified.',
-            'Incoming P08 raw_artifact refs are retained; their remote bytes were not fetched by P07.',
+            artifact_note,
             'Draft season is retained in search provenance; the legacy source adapter does not apply a season filter.',
             'Price, cost, quantity, purchase order and adoption require MD judgment.']
         metrics = []

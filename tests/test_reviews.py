@@ -1,6 +1,7 @@
 """Independent P07 parser/serializer and authenticated route regressions."""
 import copy
 from dataclasses import replace
+from hashlib import sha256
 from io import BytesIO
 import json
 import os
@@ -144,9 +145,30 @@ class ReviewTests(unittest.TestCase):
             self.service.review(changed)
 
     def test_raw_artifact_verification_rejects_wrong_bytes(self):
+        # Conventions section 8 codes: wrong length, then right length but wrong digest.
         with self.assertRaises(ReviewError) as error:
             parse_review_request(request(), artifact_resolver=lambda artifact: b'{}')
-        self.assertEqual(error.exception.code, 'RAW_ARTIFACT_HASH_MISMATCH')
+        self.assertEqual(error.exception.code, 'ARTIFACT_SIZE_MISMATCH')
+        with self.assertRaises(ReviewError) as error:
+            parse_review_request(request(), artifact_resolver=lambda artifact: b' ' * artifact['size_bytes'])
+        self.assertEqual(error.exception.code, 'ARTIFACT_HASH_MISMATCH')
+
+    def test_raw_artifact_bytes_are_verified_at_every_depth(self):
+        def original_bytes(artifact):
+            seen.append(artifact['uri'])
+            return raw[artifact['sha256']]
+        raw, seen = {}, []
+        for node in retained_nodes(request()):
+            data = (json.dumps(node['raw_response'], indent=2, sort_keys=True, ensure_ascii=False) + '\n').encode()
+            self.assertEqual(sha256(data).hexdigest(), node['raw_artifact']['sha256'])
+            raw[node['raw_artifact']['sha256']] = data
+        parse_review_request(request(), artifact_resolver=original_bytes)
+        self.assertEqual(len(seen), 3)
+        swapped = dict(raw)
+        draft_sha = request()['input']['planning_draft']['raw_artifact']['sha256']
+        swapped[draft_sha] = canonical(json.loads(raw[draft_sha]) | {'status': 'partial'})
+        with self.assertRaises(ReviewError):
+            parse_review_request(request(), artifact_resolver=lambda a: swapped[a['sha256']])
 
     def test_domain_error_cannot_become_no_results(self):
         source = Mock(); source.research.return_value = SourceReport(status=ResultStatus.ERROR,

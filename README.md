@@ -266,12 +266,29 @@ Draft ID/revision hashes are rejected. Current company sales stays null without
 an explicitly verified source. Historical H&M and synthetic data are labeled;
 missing configuration returns no_results, configured source failures return errors.
 
-`SalesMarketReviewService(..., artifact_resolver=...)` additionally verifies P08
-raw artifact bytes and their typed JSON equality. The standalone HTTP profile
-retains incoming references without fetching private P08 artifacts; cross-service
-artifact access and source-document evidence indexing must be agreed with P08
-before live integration. Category/season remain in a separate search view. The
-legacy adapters do not apply a season filter; Review states that limitation.
+Over HTTP, the exact raw bytes of every retained response (the Draft, plus the
+Trend and Stock responses inside it) are verified before any store or source
+work:
+
+- `VOGUE_UPSTREAM_ARTIFACT_ROOT` names a read-only directory. In compose this is
+  `/artifacts`, with the P08 blobs mounted at `/artifacts/p08/blobs`.
+  `artifact://<rel>` resolves to `<root>/<rel>`, so P08's
+  `artifact://p08/blobs/<sha256>` resolves to `/artifacts/p08/blobs/<sha256>`.
+- The reader refuses malformed URIs (422 `INVALID_ARTIFACT_URI`).
+- It refuses empty, `.` or `..` segments and symlinks at any depth (422
+  `INVALID_ARTIFACT_PATH`).
+- It checks `size_bytes` and the SHA-256 of the exact bytes (422
+  `ARTIFACT_SIZE_MISMATCH`, `ARTIFACT_HASH_MISMATCH`).
+- The bytes must parse to the retained `raw_response` (422
+  `RAW_ARTIFACT_OBJECT_MISMATCH`).
+- Unreadable bytes return 503 `ARTIFACT_UNAVAILABLE`. With the root unset, the
+  route fails closed with 503 `ARTIFACT_READER_REQUIRED`. Both are `retryable`.
+
+The Review limitations then report how many retained responses were verified.
+Library callers may still build `SalesMarketReviewService` without a resolver.
+That Review states that the raw bytes were not fetched. Category and season
+remain in a separate search view. The legacy adapters do not apply a season
+filter, and the Review states that limitation.
 
 Local API: `vogue-market-research-http --host 127.0.0.1 --port 8766`.
 Set `VOGUE_AGENT_SERVICE_BEARER_TOKEN` in process environment. Container API:
