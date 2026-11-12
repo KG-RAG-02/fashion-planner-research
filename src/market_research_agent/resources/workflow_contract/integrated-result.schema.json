@@ -1,0 +1,296 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.vogue.invalid/workflow/0.1/integrated-result.schema.json",
+  "title": "P08 integrated result; MD decision pending",
+  "$comment": "PROPOSED workflow-contract/0.1.1: structural validation plus versioned semantic rules are required; see decisions/contract-baseline.json. Not service compatibility.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "request_id",
+    "producer",
+    "status",
+    "result"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "vogue-workflow/0.1"
+    },
+    "request_id": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent_id",
+        "schema_version"
+      ],
+      "properties": {
+        "agent_id": {
+          "const": "vogue-orchestrator"
+        },
+        "schema_version": {
+          "const": "integrated-result/1.0"
+        }
+      }
+    },
+    "status": {
+      "$ref": "common.schema.json#/$defs/status"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "agent_id",
+        "request_id",
+        "status",
+        "user_input",
+        "planning_request",
+        "sources",
+        "stages",
+        "integration",
+        "final_image",
+        "limitations",
+        "errors",
+        "rejected_response_artifacts",
+        "md_review"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "integrated-result/1.0"
+        },
+        "agent_id": {
+          "const": "vogue-orchestrator"
+        },
+        "request_id": {
+          "$ref": "common.schema.json#/$defs/id"
+        },
+        "status": {
+          "$ref": "common.schema.json#/$defs/status"
+        },
+        "user_input": {
+          "$ref": "common.schema.json#/$defs/user_input"
+        },
+        "planning_request": {
+          "$ref": "common.schema.json#/$defs/planning_request"
+        },
+        "sources": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "trend",
+            "stock",
+            "planning_draft",
+            "sales_market_review"
+          ],
+          "properties": {
+            "trend": {
+              "anyOf": [
+                {
+                  "$ref": "common.schema.json#/$defs/retained_trend"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "stock": {
+              "anyOf": [
+                {
+                  "$ref": "common.schema.json#/$defs/retained_stock"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "planning_draft": {
+              "anyOf": [
+                {
+                  "$ref": "common.schema.json#/$defs/retained_draft"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "sales_market_review": {
+              "anyOf": [
+                {
+                  "$ref": "common.schema.json#/$defs/retained_review"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "stages": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/stage"
+          },
+          "minItems": 1
+        },
+        "integration": {
+          "anyOf": [
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "required": [
+                "claims",
+                "limitations"
+              ],
+              "properties": {
+                "claims": {
+                  "type": "array",
+                  "items": {
+                    "$ref": "common.schema.json#/$defs/claim"
+                  },
+                  "minItems": 1
+                },
+                "limitations": {
+                  "$ref": "common.schema.json#/$defs/strings"
+                }
+              }
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "final_image": {
+          "$ref": "common.schema.json#/$defs/final_image"
+        },
+        "limitations": {
+          "$ref": "common.schema.json#/$defs/strings"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/error"
+          },
+          "minItems": 0
+        },
+        "rejected_response_artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/artifact"
+          },
+          "minItems": 0
+        },
+        "md_review": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "status",
+            "choices",
+            "reserved_decisions"
+          ],
+          "properties": {
+            "status": {
+              "const": "pending"
+            },
+            "choices": {
+              "const": [
+                "adopt",
+                "revise",
+                "hold"
+              ]
+            },
+            "reserved_decisions": {
+              "const": [
+                "price",
+                "cost",
+                "quantity",
+                "purchase_order",
+                "adoption"
+              ]
+            }
+          }
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "error",
+                  "no_results"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "final_image": {
+                "properties": {
+                  "status": {
+                    "const": "skipped"
+                  }
+                }
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "errors": {
+                "type": "array",
+                "items": {
+                  "$ref": "common.schema.json#/$defs/error"
+                },
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "ok"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "final_image": {
+                "properties": {
+                  "status": {
+                    "const": "generated"
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

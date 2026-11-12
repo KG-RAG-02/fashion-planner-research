@@ -16,6 +16,10 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
+from .resource_paths import resource_root
+from .reviews import (REVIEW_PATH, MAX_BODY_BYTES as REVIEW_MAX_BODY_BYTES, SalesMarketReviewService,
+                      ReviewArtifactStore, ReviewError, parse_json, problem)
+
 from .domain.models import MarketResearchContext, normalize_no_results_payload
 from .sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
 from .sources.market.synthetic_r2 import SyntheticR2FixtureBundleStore
@@ -48,7 +52,7 @@ MAX_BODY_BYTES = 1_048_576
 SYNTHETIC_SIMULATION_PATH = "/v1/simulations/synthetic-rag/runs"
 AGENT_SIMULATION_PATH = f"/v1/agents/{CANONICAL_ROUTE_ID}/simulation-runs"
 SYNTHETIC_SIMULATION_UI_PATH = "/synthetic-simulation"
-_WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
+_WEB_ROOT = resource_root("web")
 _SYNTHETIC_UI_FILES = {
     "/synthetic-simulation.js": _WEB_ROOT / "synthetic_simulation.js",
     "/synthetic-simulation.css": _WEB_ROOT / "synthetic_simulation.css",
@@ -249,6 +253,7 @@ def make_handler(
     *,
     synthetic_simulation_enabled: bool = False,
     synthetic_bundle_provider: Callable[[], dict[str, Any]] | None = None,
+    review_service: SalesMarketReviewService | None = None,
 ) -> type[BaseHTTPRequestHandler]:
     """Create a handler; simulation routes are isolated behind an explicit flag."""
     build_agent = agent_factory or MarketResearchAgent
@@ -260,8 +265,8 @@ def make_handler(
             # Do not write request bodies or URL query data to the default log.
             return
 
-        def _send_json(self, status: int, body: dict[str, Any], *, headers: dict[str, str] | None = None) -> None:
-            encoded = json.dumps(normalize_no_results_payload(body), ensure_ascii=False, allow_nan=False).encode("utf-8")
+        def _send_json(self, status: int, body: dict[str, Any], *, headers: dict[str, str] | None = None, preserve: bool = False) -> None:
+            encoded = json.dumps(body if preserve else normalize_no_results_payload(body), ensure_ascii=False, allow_nan=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(encoded)))
@@ -379,10 +384,53 @@ def make_handler(
             expected = os.environ.get("VOGUE_AGENT_SERVICE_BEARER_TOKEN", "")
             authorization = self.headers.get("Authorization", "")
             supplied = authorization[7:].strip() if authorization.startswith("Bearer ") else ""
-            return bool(expected and supplied) and hmac.compare_digest(supplied, expected)
+            return bool(expected and supplied) and hmac.compare_digest(supplied.encode("utf-8"), expected.encode("utf-8"))
+
+        def _handle_review(self) -> None:
+            request_id = None
+            def send(status, body):
+                self._send_json(status, body, preserve=True)
+            if not self._authorized():
+                send(401, problem("UNAUTHORIZED", "Bearer authentication required."))
+                return
+            try:
+                if self.headers.get_content_type() != "application/json":
+                    raise ReviewError("UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json.", 415)
+                if self.headers.get("Transfer-Encoding"):
+                    raise ReviewError("UNSUPPORTED_TRANSFER_ENCODING", "Transfer-Encoding is unsupported.", 400)
+                try:
+                    length = int(self.headers.get("Content-Length", "0"))
+                except ValueError:
+                    raise ReviewError("INVALID_CONTENT_LENGTH", "Invalid Content-Length.", 400) from None
+                if length <= 0:
+                    raise ReviewError("EMPTY_BODY", "A JSON body is required.", 400)
+                if length > REVIEW_MAX_BODY_BYTES:
+                    raise ReviewError("REQUEST_TOO_LARGE", "Review body exceeds the limit.", 413)
+                raw = self.rfile.read(length)
+                if len(raw) != length:
+                    raise ReviewError("INCOMPLETE_BODY", "Incomplete body.", 400)
+                body = parse_json(raw)
+                if isinstance(body, dict):
+                    request_id = _safe_error_request_id(body.get("request_id"))
+                    if request_id is not None and not request_id.isascii(): request_id = None
+                service = review_service or SalesMarketReviewService(build_agent, ReviewArtifactStore(
+                    os.getenv("VOGUE_P07_REVIEW_ARTIFACT_DIR", ".local/review-artifacts")))
+                code, response = service.review(body, raw)
+                send(code, response)
+            except ReviewError as exc:
+                send(exc.http_status, problem(exc.code, str(exc), request_id))
+            except TimeoutError:
+                send(504, problem("TIMEOUT", "Review source timed out.", request_id, True))
+            except (OSError, ConnectionError):
+                send(503, problem("SOURCE_UNAVAILABLE", "Review source or artifact store unavailable.", request_id, True))
+            except Exception:
+                send(500, problem("REVIEW_FAILED", "Review could not be completed.", request_id))
 
         def do_POST(self) -> None:
             path = unquote(urlsplit(self.path).path)
+            if path == REVIEW_PATH:
+                self._handle_review()
+                return
             if path in {SYNTHETIC_SIMULATION_PATH, AGENT_SIMULATION_PATH}:
                 self._handle_synthetic_simulation()
                 return
@@ -472,7 +520,7 @@ def configured_agent() -> MarketResearchAgent:
     """Build the configured read-only cloud sales and synthetic market sources."""
     _load_project_r2_env()
     sources = []
-    hm_mapping_path = Path(__file__).resolve().parents[2] / "configs" / "hm-category-map.v1.json"
+    hm_mapping_path = resource_root("configs") / "hm-category-map.v1.json"
     mapping_data = json.loads(hm_mapping_path.read_text(encoding="utf-8"))
     hm_map_raw = os.getenv("VOGUE_HM_CATEGORY_MAP", "").strip()
     if hm_map_raw:
@@ -509,13 +557,8 @@ def configured_agent() -> MarketResearchAgent:
     ))
     if r2_configured:
         bundle_store = SyntheticR2FixtureBundleStore.from_env()
-        synthetic_loader = bundle_store.load_bundle
-    else:
-        def require_synthetic_r2():
-            raise ValueError("R2 synthetic source is not configured; local fixture fallback is disabled.")
-
-        synthetic_loader = require_synthetic_r2
-    sources.append(SyntheticQueryCoverageSource(bundle_loader=synthetic_loader))
+        sources.append(SyntheticQueryCoverageSource(bundle_loader=bundle_store.load_bundle))
+    # Missing configuration is no_results; a configured source that fails is an error.
     return MarketResearchAgent(CompositeMarketResearchSource(sources) if sources else NoConfiguredSources())
 
 
@@ -553,9 +596,12 @@ def serve(
     synthetic_demo: bool = False,
     enable_synthetic_simulation: bool = False,
     synthetic_source_backend: str = "r2",
+    service_mode: bool = False,
 ) -> None:
     """Start the local proposal server on loopback; run routes require the shared bearer token."""
-    if host not in {"127.0.0.1", "localhost"}:
+    if service_mode and not os.getenv("VOGUE_AGENT_SERVICE_BEARER_TOKEN", "").strip():
+        raise ValueError("Service mode requires VOGUE_AGENT_SERVICE_BEARER_TOKEN.")
+    if host not in {"127.0.0.1", "localhost"} and not service_mode:
         raise ValueError("The local proposal server may only bind to loopback.")
     if synthetic_demo and enable_synthetic_simulation:
         raise ValueError("Choose either legacy --synthetic-demo or --enable-synthetic-simulation, not both.")
@@ -587,6 +633,7 @@ def serve(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--service-mode", action="store_true", help="Allow container bind; requires bearer auth; deploy inside a private/TLS-terminated network.")
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
     parser.add_argument("--synthetic-demo", action="store_true", help="Use only the R2 test-only synthetic query coverage fixture.")
@@ -595,7 +642,7 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
     serve(args.host, args.port, synthetic_demo=args.synthetic_demo,
           enable_synthetic_simulation=args.enable_synthetic_simulation,
-          synthetic_source_backend=args.synthetic_source)
+          synthetic_source_backend=args.synthetic_source, service_mode=args.service_mode)
     return 0
 
 

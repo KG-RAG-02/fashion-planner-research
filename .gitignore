@@ -14,3 +14,19 @@ build/
 /data/interim/
 /data/processed/
 /data/local/
+
+# Deterministic test outputs: python scripts/restore_test_fixtures.py
+/examples/query_coverage/generated/
+/examples/synthetic_market_scenario/generated/
+/tests/fixtures/synthetic_market_rag/
+/.local/
+
+# iCloud Drive conflict copies (e.g. "server 2.py"); never commit them.
+* [0-9]
+* [0-9].*
+# restore_test_fixtures.py also writes these deterministic files; they are regenerated, not committed.
+/examples/query_coverage/config.json
+/examples/synthetic_market_scenario/scenario-config.json
+/examples/fixtures/http_json_handoff/
+/examples/synthetic_rag_analysis/
+/tests/fixtures/upstream-envelope.synthetic.json

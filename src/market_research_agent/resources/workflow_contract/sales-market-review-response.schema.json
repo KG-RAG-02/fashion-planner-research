@@ -1,0 +1,158 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.vogue.invalid/workflow/0.1/sales-market-review-response.schema.json",
+  "title": "P07 → P08 SalesMarketReview envelope",
+  "$comment": "PROPOSED workflow-contract/0.1.1: structural validation plus versioned semantic rules are required; see decisions/contract-baseline.json. Not service compatibility.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "request_id",
+    "producer",
+    "status",
+    "result"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "vogue-workflow/0.1"
+    },
+    "request_id": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "agent_id",
+        "schema_version"
+      ],
+      "properties": {
+        "agent_id": {
+          "const": "sales-market-agent"
+        },
+        "schema_version": {
+          "const": "sales-market-review/1.0"
+        }
+      }
+    },
+    "status": {
+      "$ref": "common.schema.json#/$defs/status"
+    },
+    "result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "schema_version",
+        "agent_id",
+        "request_id",
+        "status",
+        "review_identity",
+        "review",
+        "limitations",
+        "errors",
+        "artifacts"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "sales-market-review/1.0"
+        },
+        "agent_id": {
+          "const": "sales-market-agent"
+        },
+        "request_id": {
+          "$ref": "common.schema.json#/$defs/id"
+        },
+        "status": {
+          "$ref": "common.schema.json#/$defs/status"
+        },
+        "review_identity": {
+          "$ref": "common.schema.json#/$defs/review_identity"
+        },
+        "review": {
+          "$ref": "common.schema.json#/$defs/review"
+        },
+        "limitations": {
+          "$ref": "common.schema.json#/$defs/strings"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/error"
+          },
+          "minItems": 0
+        },
+        "artifacts": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/artifact"
+          },
+          "minItems": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "error"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "errors": {
+                "type": "array",
+                "items": {
+                  "$ref": "common.schema.json#/$defs/error"
+                },
+                "minItems": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "no_results"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "limitations": {
+                "minItems": 1
+              },
+              "review": {
+                "properties": {
+                  "findings": {
+                    "maxItems": 0
+                  },
+                  "metrics": {
+                    "items": {
+                      "properties": {
+                        "value": {
+                          "type": "null"
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    }
+  }
+}

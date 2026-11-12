@@ -69,7 +69,8 @@ class HmR2SourceTests(unittest.TestCase):
     def test_usage_flag_does_not_gate_r2_manifest_read(self):
         source, store = self.make_source(authorized=False)
         report = source.research(context())
-        self.assertNotEqual(report.sales_data.missing_data[0].reason, "permission_not_confirmed")
+        self.assertEqual(report.sales_data.status, "ok")
+        self.assertEqual(report.sales_data.missing_data, ())
         self.assertTrue(store.calls)
 
     def test_authorized_query_reads_only_manifest_allowlisted_processed_files(self):

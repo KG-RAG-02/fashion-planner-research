@@ -1,0 +1,1194 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.vogue.invalid/workflow/0.1/common.schema.json",
+  "title": "Shared definitions; equality/hash/order require semantic validator",
+  "$comment": "PROPOSED workflow-contract/0.1.1: structural validation plus versioned semantic rules are required; see decisions/contract-baseline.json. Not service compatibility.",
+  "$defs": {
+    "id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128,
+      "pattern": "^[A-Za-z0-9][A-Za-z0-9_.:-]*$"
+    },
+    "sha256": {
+      "type": "string",
+      "pattern": "^[a-f0-9]{64}$"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "partial",
+        "no_results",
+        "error"
+      ]
+    },
+    "timestamp": {
+      "type": "string",
+      "format": "date-time"
+    },
+    "strings": {
+      "type": "array",
+      "items": {
+        "type": "string",
+        "minLength": 1
+      },
+      "minItems": 0
+    },
+    "artifact": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "artifact_id",
+        "uri",
+        "sha256",
+        "media_type",
+        "size_bytes",
+        "immutable"
+      ],
+      "properties": {
+        "artifact_id": {
+          "$ref": "common.schema.json#/$defs/id"
+        },
+        "uri": {
+          "type": "string",
+          "pattern": "^artifact://[A-Za-z0-9_./-]+$"
+        },
+        "sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "media_type": {
+          "type": "string",
+          "minLength": 1
+        },
+        "size_bytes": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "immutable": {
+          "const": true
+        }
+      }
+    },
+    "json_artifact": {
+      "allOf": [
+        {
+          "$ref": "common.schema.json#/$defs/artifact"
+        },
+        {
+          "properties": {
+            "media_type": {
+              "const": "application/json"
+            }
+          }
+        }
+      ]
+    },
+    "image_artifact": {
+      "allOf": [
+        {
+          "$ref": "common.schema.json#/$defs/artifact"
+        },
+        {
+          "properties": {
+            "media_type": {
+              "enum": [
+                "image/png",
+                "image/jpeg",
+                "image/webp"
+              ]
+            },
+            "size_bytes": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10485760
+            }
+          }
+        }
+      ]
+    },
+    "observation": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "observed_at",
+        "as_of",
+        "synthetic",
+        "data_nature",
+        "source",
+        "limitations"
+      ],
+      "properties": {
+        "observed_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "as_of": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "synthetic": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "data_nature": {
+          "enum": [
+            "current_internal",
+            "historical_external",
+            "sample",
+            "synthetic_fixture",
+            "mixed",
+            "unknown",
+            "user_provided"
+          ]
+        },
+        "source": {
+          "type": "string",
+          "minLength": 1
+        },
+        "limitations": {
+          "$ref": "common.schema.json#/$defs/strings"
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message",
+        "stage",
+        "fatal",
+        "retryable"
+      ],
+      "properties": {
+        "code": {
+          "type": "string",
+          "minLength": 1
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "stage": {
+          "enum": [
+            "input",
+            "trend",
+            "stock",
+            "planning_draft",
+            "sales_market_review",
+            "integration",
+            "final_image"
+          ]
+        },
+        "fatal": {
+          "type": "boolean"
+        },
+        "retryable": {
+          "type": "boolean"
+        }
+      }
+    },
+    "problem": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "request_id",
+        "status",
+        "error"
+      ],
+      "properties": {
+        "contract_version": {
+          "const": "vogue-workflow/0.1"
+        },
+        "request_id": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/id"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "status": {
+          "const": "error"
+        },
+        "error": {
+          "$ref": "common.schema.json#/$defs/error"
+        }
+      }
+    },
+    "evidence_ref": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "evidence_id",
+        "source_response_sha256",
+        "source_pointer"
+      ],
+      "properties": {
+        "evidence_id": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_response_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "source_pointer": {
+          "type": "string",
+          "pattern": "^/"
+        }
+      }
+    },
+    "user_input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "text",
+        "images"
+      ],
+      "properties": {
+        "text": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000,
+          "pattern": "\\S"
+        },
+        "images": {
+          "type": "array",
+          "maxItems": 1,
+          "items": {
+            "$ref": "common.schema.json#/$defs/image_artifact"
+          }
+        }
+      }
+    },
+    "planning_request": {
+      "type": "object",
+      "additionalProperties": true,
+      "required": [
+        "schema_version",
+        "request_id",
+        "query"
+      ],
+      "properties": {
+        "schema_version": {
+          "const": "1.0"
+        },
+        "request_id": {
+          "$ref": "common.schema.json#/$defs/id"
+        },
+        "query": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 8000,
+          "pattern": "\\S"
+        }
+      }
+    },
+    "trend_response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "request_id",
+        "producer",
+        "status",
+        "result"
+      ],
+      "properties": {
+        "contract_version": {
+          "const": "vogue-handoff/0.1"
+        },
+        "request_id": {
+          "$ref": "common.schema.json#/$defs/id"
+        },
+        "producer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent_id",
+            "schema_version"
+          ],
+          "properties": {
+            "agent_id": {
+              "const": "trend-analysis-agent"
+            },
+            "schema_version": {
+              "const": "1.1"
+            }
+          }
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "no_results",
+            "error"
+          ]
+        },
+        "result": {
+          "allOf": [
+            {
+              "$ref": "upstream/trend-result-1.1.schema.json"
+            },
+            {
+              "required": [
+                "schema_version",
+                "applied_filters",
+                "trends",
+                "evidence",
+                "limitations"
+              ],
+              "properties": {
+                "schema_version": {
+                  "const": "1.1"
+                }
+              }
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "ok"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "result": {
+                "properties": {
+                  "trends": {
+                    "minItems": 1
+                  },
+                  "evidence": {
+                    "minItems": 1
+                  }
+                }
+              }
+            }
+          }
+        }
+      ]
+    },
+    "stock_response": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "contract_version",
+        "request_id",
+        "producer",
+        "status",
+        "result"
+      ],
+      "properties": {
+        "contract_version": {
+          "const": "vogue-handoff/0.1"
+        },
+        "request_id": {
+          "$ref": "common.schema.json#/$defs/id"
+        },
+        "producer": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "agent_id",
+            "schema_version"
+          ],
+          "properties": {
+            "agent_id": {
+              "const": "stock-agent"
+            },
+            "schema_version": {
+              "const": "1.0"
+            }
+          }
+        },
+        "status": {
+          "$ref": "common.schema.json#/$defs/status"
+        },
+        "result": {
+          "allOf": [
+            {
+              "$ref": "upstream/stock-result-1.0.schema.json"
+            },
+            {
+              "if": {
+                "properties": {
+                  "status": {
+                    "enum": [
+                      "ok",
+                      "partial",
+                      "no_results"
+                    ]
+                  }
+                }
+              },
+              "then": {
+                "required": [
+                  "input_provenance"
+                ]
+              }
+            }
+          ]
+        }
+      }
+    },
+    "retained_trend": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_response",
+        "content_sha256",
+        "hash_profile",
+        "raw_artifact",
+        "observation"
+      ],
+      "properties": {
+        "raw_response": {
+          "$ref": "common.schema.json#/$defs/trend_response"
+        },
+        "content_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "hash_profile": {
+          "const": "python-json-sort/1"
+        },
+        "raw_artifact": {
+          "$ref": "common.schema.json#/$defs/json_artifact"
+        },
+        "observation": {
+          "$ref": "common.schema.json#/$defs/observation"
+        }
+      }
+    },
+    "retained_stock": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_response",
+        "content_sha256",
+        "hash_profile",
+        "raw_artifact",
+        "observation"
+      ],
+      "properties": {
+        "raw_response": {
+          "$ref": "common.schema.json#/$defs/stock_response"
+        },
+        "content_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "hash_profile": {
+          "const": "python-json-sort/1"
+        },
+        "raw_artifact": {
+          "$ref": "common.schema.json#/$defs/json_artifact"
+        },
+        "observation": {
+          "$ref": "common.schema.json#/$defs/observation"
+        }
+      }
+    },
+    "draft_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "draft_id",
+        "revision",
+        "content_sha256"
+      ],
+      "properties": {
+        "draft_id": {
+          "$ref": "common.schema.json#/$defs/id"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "content_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      }
+    },
+    "review_identity": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "review_id",
+        "revision",
+        "content_sha256"
+      ],
+      "properties": {
+        "review_id": {
+          "$ref": "common.schema.json#/$defs/id"
+        },
+        "revision": {
+          "type": "integer",
+          "minimum": 1
+        },
+        "content_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      }
+    },
+    "claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "text",
+        "evidence_refs"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "fact",
+            "interpretation",
+            "proposal"
+          ]
+        },
+        "text": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/evidence_ref"
+          },
+          "minItems": 0
+        }
+      }
+    },
+    "draft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "title",
+        "category",
+        "season",
+        "claims",
+        "open_questions",
+        "md_decision_required",
+        "limitations"
+      ],
+      "properties": {
+        "title": {
+          "type": "string",
+          "minLength": 1
+        },
+        "category": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "season": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "claims": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/claim"
+          },
+          "minItems": 1
+        },
+        "open_questions": {
+          "$ref": "common.schema.json#/$defs/strings"
+        },
+        "md_decision_required": {
+          "const": [
+            "price",
+            "cost",
+            "quantity",
+            "purchase_order",
+            "adoption"
+          ]
+        },
+        "limitations": {
+          "$ref": "common.schema.json#/$defs/strings"
+        }
+      }
+    },
+    "stock_call_context": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "planning_request_sha256",
+        "trend_response_sha256",
+        "stock_input_sha256",
+        "stock_wire_request_sha256",
+        "stock_response_sha256"
+      ],
+      "properties": {
+        "planning_request_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "trend_response_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "stock_input_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "stock_wire_request_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "stock_response_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      }
+    },
+    "retained_draft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_response",
+        "content_sha256",
+        "hash_profile",
+        "raw_artifact",
+        "observation"
+      ],
+      "properties": {
+        "raw_response": {
+          "$ref": "planning-draft-response.schema.json"
+        },
+        "content_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "hash_profile": {
+          "const": "python-json-sort/1"
+        },
+        "raw_artifact": {
+          "$ref": "common.schema.json#/$defs/json_artifact"
+        },
+        "observation": {
+          "$ref": "common.schema.json#/$defs/observation"
+        }
+      }
+    },
+    "derived_view": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "purpose",
+        "adapter_version",
+        "source_response_sha256",
+        "source_pointers",
+        "product"
+      ],
+      "properties": {
+        "purpose": {
+          "const": "search_only"
+        },
+        "adapter_version": {
+          "type": "string",
+          "minLength": 1
+        },
+        "source_response_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "source_pointers": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "pattern": "^/"
+          },
+          "minItems": 1
+        },
+        "product": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "category",
+            "season"
+          ],
+          "properties": {
+            "category": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            },
+            "season": {
+              "anyOf": [
+                {
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        }
+      }
+    },
+    "metric": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value",
+        "missing_reason",
+        "unit",
+        "currency",
+        "period",
+        "comparability",
+        "observation",
+        "evidence_refs"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "anyOf": [
+            {
+              "type": "number"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "missing_reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "unit": {
+          "type": "string",
+          "minLength": 1
+        },
+        "currency": {
+          "anyOf": [
+            {
+              "type": "string",
+              "pattern": "^[A-Z]{3}$"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "period": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "comparability": {
+          "enum": [
+            "comparable",
+            "not_comparable",
+            "unknown"
+          ]
+        },
+        "observation": {
+          "$ref": "common.schema.json#/$defs/observation"
+        },
+        "evidence_refs": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/evidence_ref"
+          },
+          "minItems": 0
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "value": {
+                "type": "null"
+              }
+            }
+          },
+          "then": {
+            "properties": {
+              "missing_reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          },
+          "else": {
+            "properties": {
+              "missing_reason": {
+                "type": "null"
+              },
+              "evidence_refs": {
+                "minItems": 1
+              }
+            }
+          }
+        }
+      ]
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "reviewed_draft",
+        "draft_response_sha256",
+        "findings",
+        "evidence",
+        "metrics",
+        "limitations",
+        "observation"
+      ],
+      "properties": {
+        "reviewed_draft": {
+          "$ref": "common.schema.json#/$defs/draft_identity"
+        },
+        "draft_response_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "findings": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/claim"
+          },
+          "minItems": 0
+        },
+        "evidence": {
+          "type": "array",
+          "items": {
+            "type": "object"
+          },
+          "minItems": 0
+        },
+        "metrics": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/metric"
+          },
+          "minItems": 0
+        },
+        "limitations": {
+          "$ref": "common.schema.json#/$defs/strings"
+        },
+        "observation": {
+          "$ref": "common.schema.json#/$defs/observation"
+        }
+      }
+    },
+    "retained_review": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "raw_response",
+        "content_sha256",
+        "hash_profile",
+        "raw_artifact",
+        "observation"
+      ],
+      "properties": {
+        "raw_response": {
+          "$ref": "sales-market-review-response.schema.json"
+        },
+        "content_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "hash_profile": {
+          "const": "python-json-sort/1"
+        },
+        "raw_artifact": {
+          "$ref": "common.schema.json#/$defs/json_artifact"
+        },
+        "observation": {
+          "$ref": "common.schema.json#/$defs/observation"
+        }
+      }
+    },
+    "image_lineage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "draft_identity",
+        "draft_response_sha256",
+        "review_identity",
+        "review_response_sha256",
+        "integration_input_sha256"
+      ],
+      "properties": {
+        "draft_identity": {
+          "$ref": "common.schema.json#/$defs/draft_identity"
+        },
+        "draft_response_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "review_identity": {
+          "$ref": "common.schema.json#/$defs/review_identity"
+        },
+        "review_response_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "integration_input_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        }
+      }
+    },
+    "final_image": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "artifact",
+        "lineage",
+        "reason",
+        "provider_calls"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "generated",
+            "failed",
+            "skipped"
+          ]
+        },
+        "artifact": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/image_artifact"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "lineage": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/image_lineage"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider_calls": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "generated"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "artifact": {
+                "$ref": "common.schema.json#/$defs/image_artifact"
+              },
+              "lineage": {
+                "$ref": "common.schema.json#/$defs/image_lineage"
+              },
+              "reason": {
+                "type": "null"
+              },
+              "provider_calls": {
+                "const": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "failed"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "artifact": {
+                "type": "null"
+              },
+              "lineage": {
+                "$ref": "common.schema.json#/$defs/image_lineage"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "provider_calls": {
+                "const": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "skipped"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "artifact": {
+                "type": "null"
+              },
+              "lineage": {
+                "type": "null"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              },
+              "provider_calls": {
+                "const": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "stage": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "sequence",
+        "stage",
+        "request_id",
+        "status",
+        "input_sha256",
+        "response_sha256",
+        "started_at",
+        "completed_at",
+        "errors"
+      ],
+      "properties": {
+        "sequence": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 6
+        },
+        "stage": {
+          "enum": [
+            "trend",
+            "stock",
+            "planning_draft",
+            "sales_market_review",
+            "integration",
+            "final_image"
+          ]
+        },
+        "request_id": {
+          "$ref": "common.schema.json#/$defs/id"
+        },
+        "status": {
+          "$ref": "common.schema.json#/$defs/status"
+        },
+        "input_sha256": {
+          "$ref": "common.schema.json#/$defs/sha256"
+        },
+        "response_sha256": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/sha256"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "started_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "completed_at": {
+          "$ref": "common.schema.json#/$defs/timestamp"
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/error"
+          },
+          "minItems": 0
+        }
+      }
+    }
+  }
+}

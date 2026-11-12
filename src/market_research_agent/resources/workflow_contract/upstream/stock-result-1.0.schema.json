@@ -1,0 +1,531 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vogue:contracts:stock-agent:inventory-result:1.0",
+  "title": "stock-agent producer result payload schema 1.0",
+  "description": "Producer-owned Stock result payload version 1.0. It is distinct from the shared vogue-handoff/0.1 HTTP envelope. The /runs route wraps this complete object in result without moving or reconstructing producer fields. products[i] ↔ trend_results[i]; evidence is collected once and referenced by trend_results[i].evidence_ids.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema_version",
+    "request_id",
+    "agent_id",
+    "status",
+    "summary",
+    "products",
+    "trend_results",
+    "season_basis",
+    "evidence",
+    "errors"
+  ],
+  "properties": {
+    "schema_version": {
+      "const": "1.0"
+    },
+    "request_id": {
+      "type": [
+        "string",
+        "null"
+      ],
+      "description": "받은 request_id 그대로. 본문을 읽지 못한 400에서만 null"
+    },
+    "agent_id": {
+      "const": "stock-agent"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "partial",
+        "no_results",
+        "error"
+      ]
+    },
+    "summary": {
+      "type": "string"
+    },
+    "products": {
+      "type": "array",
+      "items": {
+        "anyOf": [
+          {
+            "$ref": "#/$defs/product"
+          },
+          {
+            "type": "null"
+          }
+        ]
+      }
+    },
+    "trend_results": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/trend_result"
+      }
+    },
+    "season_basis": {
+      "anyOf": [
+        {
+          "type": "object"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "evidence": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/evidence"
+      }
+    },
+    "errors": {
+      "type": "array",
+      "items": {
+        "$ref": "#/$defs/error"
+      }
+    },
+    "input_provenance": {
+      "$ref": "#/$defs/input_provenance"
+    }
+  },
+  "$defs": {
+    "input_provenance": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source_agent_id",
+        "source_schema_version",
+        "internal_schema_version",
+        "adapter_version",
+        "transformed",
+        "source_payload_sha256"
+      ],
+      "properties": {
+        "source_agent_id": {"const": "trend-analysis-agent"},
+        "source_schema_version": {"type": "string", "minLength": 1},
+        "internal_schema_version": {"type": ["string", "null"]},
+        "adapter_version": {"const": "stock-trend-input-adapter/1.0"},
+        "transformed": {"type": "boolean"},
+        "source_payload_sha256": {"type": "string", "pattern": "^[a-f0-9]{64}$"}
+      }
+    },
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "style_id",
+        "sku_ids",
+        "category",
+        "season",
+        "attributes",
+        "inventory",
+        "image"
+      ],
+      "properties": {
+        "style_id": {
+          "type": "string",
+          "description": "H&M article_id 앞 7자리"
+        },
+        "sku_ids": {
+          "type": "array",
+          "minItems": 1,
+          "items": {
+            "type": "string"
+          }
+        },
+        "category": {
+          "enum": [
+            "탑",
+            "블라우스",
+            "티셔츠",
+            "니트웨어",
+            "셔츠",
+            "브라탑",
+            "후드티",
+            "청바지",
+            "팬츠",
+            "스커트",
+            "레깅스",
+            "조거팬츠",
+            "코트",
+            "재킷",
+            "점퍼",
+            "패딩",
+            "베스트",
+            "가디건",
+            "짚업",
+            "드레스",
+            "점프수트"
+          ]
+        },
+        "season": {
+          "type": "string",
+          "examples": [
+            "2027SS"
+          ]
+        },
+        "attributes": {
+          "type": "object",
+          "required": [
+            "color",
+            "material",
+            "fit"
+          ],
+          "properties": {
+            "color": {
+              "enum": [
+                "블랙",
+                "화이트",
+                "그레이",
+                "레드",
+                "핑크",
+                "오렌지",
+                "베이지",
+                "브라운",
+                "옐로우",
+                "그린",
+                "카키",
+                "민트",
+                "블루",
+                "네이비",
+                "스카이블루",
+                "퍼플",
+                "라벤더",
+                "와인",
+                "네온",
+                "골드",
+                "실버"
+              ]
+            },
+            "material": {
+              "type": "array",
+              "items": {
+                "enum": [
+                  "면",
+                  "저지",
+                  "니트",
+                  "합성섬유",
+                  "스판덱스",
+                  "데님",
+                  "레이스",
+                  "가죽",
+                  "울/캐시미어",
+                  "메시",
+                  "시퀸/글리터",
+                  "스웨이드",
+                  "자카드",
+                  "린넨",
+                  "퍼",
+                  "플리스",
+                  "시폰",
+                  "벨벳",
+                  "실크",
+                  "코듀로이",
+                  "무스탕",
+                  "비닐/PVC",
+                  "네오프렌",
+                  "앙고라",
+                  "헤어니트",
+                  "트위드"
+                ]
+              }
+            },
+            "fit": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "오버사이즈",
+                    "루즈",
+                    "타이트",
+                    "노멀",
+                    "스키니",
+                    "벨보텀",
+                    "와이드"
+                  ]
+                },
+                {
+                  "type": "null"
+                }
+              ]
+            }
+          }
+        },
+        "inventory": {
+          "type": "object",
+          "required": [
+            "quantity",
+            "unit",
+            "as_of",
+            "definition",
+            "data_nature"
+          ],
+          "properties": {
+            "quantity": {
+              "type": "integer",
+              "minimum": 0
+            },
+            "unit": {
+              "const": "pieces"
+            },
+            "as_of": {
+              "type": "string"
+            },
+            "definition": {
+              "type": "string"
+            },
+            "data_nature": {
+              "const": "sample"
+            }
+          }
+        },
+        "image": {
+          "anyOf": [
+            {
+              "type": "null"
+            },
+            {
+              "type": "object",
+              "required": [
+                "media_type",
+                "encoding",
+                "data",
+                "size_bytes",
+                "source"
+              ],
+              "properties": {
+                "media_type": {
+                  "type": "string"
+                },
+                "encoding": {
+                  "const": "base64"
+                },
+                "data": {
+                  "type": "string"
+                },
+                "size_bytes": {
+                  "type": "integer"
+                },
+                "source": {
+                  "type": "string"
+                },
+                "data_nature": {
+                  "type": "string"
+                }
+              }
+            }
+          ]
+        }
+      }
+    },
+    "trend_result": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "style",
+        "status",
+        "product_index",
+        "rank",
+        "reason",
+        "summary",
+        "attribute_summary",
+        "search",
+        "limitations",
+        "errors",
+        "evidence_ids"
+      ],
+      "properties": {
+        "style": {
+          "type": "object",
+          "required": [
+            "id",
+            "name"
+          ],
+          "properties": {
+            "id": {
+              "type": [
+                "string",
+                "null"
+              ]
+            },
+            "name": {
+              "type": [
+                "string",
+                "null"
+              ]
+            }
+          }
+        },
+        "status": {
+          "enum": [
+            "ok",
+            "partial",
+            "no_results",
+            "error"
+          ]
+        },
+        "product_index": {
+          "type": "integer",
+          "minimum": 0
+        },
+        "rank": {
+          "type": [
+            "integer",
+            "null"
+          ]
+        },
+        "reason": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "description": "pairing, color, stock_value_krw, sell_through, recent_trend, season_share, season_name, score, data_nature, attributes, decided_by, llm_reason, llm_why_not_higher(1위가 아닐 때 더 높은 순위 대신 고른 이유, 1위면 null)"
+        },
+        "summary": {
+          "type": "string"
+        },
+        "attribute_summary": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "search": {
+          "type": "object",
+          "description": "찾은 조건 (segments, segment_basis, areas, colors, steps 등)"
+        },
+        "limitations": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
+        },
+        "errors": {
+          "type": "array",
+          "items": {
+            "$ref": "#/$defs/error"
+          }
+        },
+        "evidence_ids": {
+          "type": "array",
+          "uniqueItems": true,
+          "items": {
+            "type": "string"
+          }
+        }
+      }
+    },
+    "evidence": {
+      "type": "object",
+      "required": [
+        "evidence_id",
+        "style_id",
+        "source_id",
+        "source_type",
+        "source_name",
+        "locator",
+        "published_at",
+        "observed_at",
+        "fetched_at",
+        "permission_status",
+        "manifest_id",
+        "data_nature"
+      ],
+      "properties": {
+        "evidence_id": {
+          "type": "string",
+          "pattern": "^stock-agent:"
+        },
+        "style_id": {
+          "type": "string"
+        },
+        "source_id": {
+          "type": "string"
+        },
+        "source_type": {
+          "type": "string"
+        },
+        "source_name": {
+          "type": "string"
+        },
+        "locator": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "published_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "observed_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "fetched_at": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "permission_status": {
+          "type": "string"
+        },
+        "manifest_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "data_nature": {
+          "enum": [
+            "fact",
+            "sample"
+          ]
+        }
+      }
+    },
+    "error": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "code",
+        "message"
+      ],
+      "properties": {
+        "code": {
+          "enum": [
+            "INVALID_REQUEST",
+            "UNAUTHORIZED",
+            "FORBIDDEN",
+            "SOURCE_UNAVAILABLE",
+            "TIMEOUT",
+            "INTERNAL_ERROR"
+          ]
+        },
+        "message": {
+          "type": "string",
+          "minLength": 1
+        },
+        "reason": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "description": "03 안쪽 원인 (missing_fields, invalid_input, upstream_error, db_unavailable, no_llm, timeout, rule_violation, trend_failed ... / 여러 개면 mixed)"
+        },
+        "style_ids": {
+          "type": "array",
+          "items": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        }
+      }
+    }
+  }
+}

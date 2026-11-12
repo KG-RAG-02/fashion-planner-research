@@ -22,6 +22,7 @@ from market_research_agent.http_server import (
     make_handler,
     configured_agent,
 )
+from market_research_agent.domain.models import ResultStatus
 from market_research_agent.query_interpretation import interpret_query
 from market_research_agent.sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
 from market_research_agent.workflows.market_research import MarketResearchAgent
@@ -108,7 +109,7 @@ class Project07HttpServerTests(unittest.TestCase):
             request["input"]["requested_metrics"] = ["purchase_rows"]
             request["input"].pop("requested_geography", None)
             request["input"].pop("requested_channel", None)
-            with patch.dict(os.environ, settings):
+            with patch.dict(os.environ, settings, clear=True):
                 context = context_from_handoff_request(request)
                 result = configured_agent().run(context)
             self.assertEqual(result.sales_data.status, "no_results")
@@ -132,8 +133,9 @@ class Project07HttpServerTests(unittest.TestCase):
         request["input"].pop("requested_channel", None)
         with patch.dict(os.environ, settings, clear=True):
             result = configured_agent().run(context_from_handoff_request(request))
-        self.assertEqual(result.sales_data.status, "no_results")
-        self.assertEqual(result.sales_data.missing_data[0].reason, "source_error")
+        self.assertEqual(result.status, ResultStatus.ERROR)
+        self.assertIsNone(result.sales_data)
+        self.assertTrue(result.errors)
 
     def test_http_prefers_shared_duckdb_over_legacy_bundle_without_usage_flag(self):
         from market_research_agent.sources.sales.hm_kaggle.hm_r2_duckdb_source import R2DuckDBHmHistoricalSalesSource
@@ -161,11 +163,11 @@ class Project07HttpServerTests(unittest.TestCase):
              patch.object(R2ObjectStore, "from_env") as from_env:
             agent = configured_agent()
             result = agent.run(context_from_handoff_request(request))
-        self.assertEqual(result.sales_data.status, "no_results")
+        self.assertEqual(result.sales_data.status, "error")
         self.assertEqual(result.sales_data.missing_data[0].reason, "source_error")
         duckdb_source.from_env.assert_called_once()
         csv_source.assert_not_called()
-        from_env.assert_not_called()
+        from_env.assert_called_once()
 
     def test_http_shared_r2_duckdb_source_reads_without_usage_flag(self):
         from market_research_agent.sources.shared.r2_object_store import R2ObjectStore
@@ -185,7 +187,7 @@ class Project07HttpServerTests(unittest.TestCase):
         request["input"].pop("requested_channel", None)
         with patch.dict(os.environ, settings, clear=True), patch.object(R2ObjectStore, "from_env") as from_env:
             result = configured_agent().run(context_from_handoff_request(request))
-        self.assertEqual(result.sales_data.status, "no_results")
+        self.assertEqual(result.sales_data.status, "error")
         self.assertEqual(result.sales_data.missing_data[0].reason, "source_error")
         from_env.assert_called_once()
 
@@ -489,13 +491,14 @@ class Project07HttpServerTests(unittest.TestCase):
     def test_simulation_cli_flag_is_opt_in_and_cannot_mix_with_legacy_demo(self):
         with patch.object(http_server, "serve") as serve:
             self.assertEqual(http_server.main([]), 0)
-            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=False, synthetic_source_backend="r2")
+            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=False, synthetic_source_backend="r2", service_mode=False)
             serve.reset_mock()
             self.assertEqual(http_server.main(["--enable-synthetic-simulation"]), 0)
-            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=True, synthetic_source_backend="r2")
+            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=True, synthetic_source_backend="r2", service_mode=False)
             serve.reset_mock()
-            self.assertEqual(http_server.main(["--enable-synthetic-simulation", "--synthetic-source", "local"]), 0)
-            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=True, synthetic_source_backend="local")
+            with self.assertRaises(SystemExit):
+                http_server.main(["--enable-synthetic-simulation", "--synthetic-source", "local"])
+            serve.assert_not_called()
         with self.assertRaises(ValueError):
             http_server.serve(synthetic_demo=True, enable_synthetic_simulation=True)
         with self.assertRaises(ValueError):
@@ -562,9 +565,10 @@ class Project07HttpServerTests(unittest.TestCase):
                     valid_request(), agent_factory=FakeAgent,
                 )
                 self.assertEqual(status, 200)
-                self.assertEqual(response["status"], domain_status)
-                self.assertEqual(response["result"]["status"], domain_status)
-                self.assertEqual(response["result"], raw_result)
+                expected_status = "partial" if domain_status == "no_results" else domain_status
+                self.assertEqual(response["status"], expected_status)
+                self.assertEqual(response["result"]["status"], expected_status)
+                self.assertEqual(response["result"], http_server.normalize_no_results_payload(raw_result))
                 self.assertEqual(set(response), RESPONSE_FIELDS)
 
     def test_service_failures_use_safe_transport_error_envelope(self):

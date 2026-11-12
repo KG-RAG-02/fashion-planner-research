@@ -1,0 +1,1208 @@
+{
+  "$defs": {
+    "AppliedAttribute": {
+      "properties": {
+        "type": {
+          "enum": [
+            "color",
+            "material",
+            "pattern",
+            "detail",
+            "fit"
+          ],
+          "title": "Type",
+          "type": "string"
+        },
+        "value": {
+          "title": "Value",
+          "type": "string"
+        }
+      },
+      "required": [
+        "type",
+        "value"
+      ],
+      "title": "AppliedAttribute",
+      "type": "object"
+    },
+    "AppliedFilters": {
+      "properties": {
+        "season": {
+          "$ref": "#/$defs/SeasonRequest"
+        },
+        "categories": {
+          "$ref": "#/$defs/CategoryFilter"
+        },
+        "gender": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Gender"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "attributes": {
+          "items": {
+            "$ref": "#/$defs/AppliedAttribute"
+          },
+          "title": "Attributes",
+          "type": "array"
+        }
+      },
+      "required": [
+        "season"
+      ],
+      "title": "AppliedFilters",
+      "type": "object"
+    },
+    "AttributeScore": {
+      "properties": {
+        "weight": {
+          "title": "Weight",
+          "type": "number"
+        },
+        "base_weight": {
+          "title": "Base Weight",
+          "type": "number"
+        },
+        "level": {
+          "anyOf": [
+            {
+              "enum": [
+                "core",
+                "supporting"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Level"
+        },
+        "ratio": {
+          "title": "Ratio",
+          "type": "number"
+        }
+      },
+      "required": [
+        "weight",
+        "base_weight",
+        "ratio"
+      ],
+      "title": "AttributeScore",
+      "type": "object"
+    },
+    "BodyLength": {
+      "enum": [
+        "크롭",
+        "노멀",
+        "하프",
+        "롱",
+        "미니",
+        "니렝스",
+        "미디",
+        "발목",
+        "맥시"
+      ],
+      "title": "BodyLength",
+      "type": "string"
+    },
+    "CategoryFilter": {
+      "properties": {
+        "include": {
+          "items": {
+            "$ref": "#/$defs/CategoryRef"
+          },
+          "title": "Include",
+          "type": "array"
+        },
+        "exclude": {
+          "items": {
+            "$ref": "#/$defs/CategoryRef"
+          },
+          "title": "Exclude",
+          "type": "array"
+        }
+      },
+      "title": "CategoryFilter",
+      "type": "object"
+    },
+    "CategoryMajor": {
+      "enum": [
+        "상의",
+        "하의",
+        "아우터",
+        "원피스"
+      ],
+      "title": "CategoryMajor",
+      "type": "string"
+    },
+    "CategoryMinor": {
+      "enum": [
+        "탑",
+        "블라우스",
+        "티셔츠",
+        "니트웨어",
+        "셔츠",
+        "브라탑",
+        "후드티",
+        "청바지",
+        "팬츠",
+        "스커트",
+        "레깅스",
+        "조거팬츠",
+        "코트",
+        "재킷",
+        "점퍼",
+        "패딩",
+        "베스트",
+        "가디건",
+        "짚업",
+        "드레스",
+        "점프수트"
+      ],
+      "title": "CategoryMinor",
+      "type": "string"
+    },
+    "CategoryRef": {
+      "properties": {
+        "raw": {
+          "title": "Raw",
+          "type": "string"
+        },
+        "major": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CategoryMajor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "minor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CategoryMinor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        }
+      },
+      "required": [
+        "raw"
+      ],
+      "title": "CategoryRef",
+      "type": "object"
+    },
+    "Color": {
+      "enum": [
+        "블랙",
+        "화이트",
+        "그레이",
+        "레드",
+        "핑크",
+        "오렌지",
+        "베이지",
+        "브라운",
+        "옐로우",
+        "그린",
+        "카키",
+        "민트",
+        "블루",
+        "네이비",
+        "스카이블루",
+        "퍼플",
+        "라벤더",
+        "와인",
+        "네온",
+        "골드",
+        "실버"
+      ],
+      "title": "Color",
+      "type": "string"
+    },
+    "DescriptionOut": {
+      "properties": {
+        "text": {
+          "title": "Text",
+          "type": "string"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        }
+      },
+      "required": [
+        "text"
+      ],
+      "title": "DescriptionOut",
+      "type": "object"
+    },
+    "DetailOut": {
+      "properties": {
+        "type": {
+          "$ref": "#/$defs/DetailType"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "raw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw"
+        },
+        "motif": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Motif"
+        },
+        "placement": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Placement"
+        }
+      },
+      "required": [
+        "type",
+        "name"
+      ],
+      "title": "DetailOut",
+      "type": "object"
+    },
+    "DetailType": {
+      "enum": [
+        "detail",
+        "neckline",
+        "collar"
+      ],
+      "title": "DetailType",
+      "type": "string"
+    },
+    "EvidenceRecord": {
+      "properties": {
+        "evidence_id": {
+          "title": "Evidence Id",
+          "type": "string"
+        },
+        "article_id": {
+          "title": "Article Id",
+          "type": "string"
+        },
+        "title": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Title"
+        },
+        "url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Url"
+        },
+        "published_at": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Published At"
+        },
+        "block_idx": {
+          "title": "Block Idx",
+          "type": "integer"
+        },
+        "quote": {
+          "title": "Quote",
+          "type": "string"
+        }
+      },
+      "required": [
+        "evidence_id",
+        "article_id",
+        "block_idx",
+        "quote"
+      ],
+      "title": "EvidenceRecord",
+      "type": "object"
+    },
+    "Fit": {
+      "enum": [
+        "노멀",
+        "루즈",
+        "오버사이즈",
+        "타이트",
+        "스키니",
+        "와이드",
+        "벨보텀"
+      ],
+      "title": "Fit",
+      "type": "string"
+    },
+    "Gender": {
+      "enum": [
+        "남",
+        "여",
+        "공용"
+      ],
+      "title": "Gender",
+      "type": "string"
+    },
+    "MatchResult": {
+      "properties": {
+        "matched": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Matched",
+          "type": "array"
+        },
+        "mismatched": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Mismatched",
+          "type": "array"
+        },
+        "unknown": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Unknown",
+          "type": "array"
+        }
+      },
+      "title": "MatchResult",
+      "type": "object"
+    },
+    "ProductMatch": {
+      "properties": {
+        "category_major": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CategoryMajor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "category_minor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CategoryMinor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "colors": {
+          "items": {
+            "$ref": "#/$defs/Color"
+          },
+          "title": "Colors",
+          "type": "array"
+        },
+        "materials": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Materials",
+          "type": "array"
+        },
+        "patterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Patterns",
+          "type": "array"
+        },
+        "details": {
+          "items": {
+            "$ref": "#/$defs/DetailOut"
+          },
+          "title": "Details",
+          "type": "array"
+        },
+        "fit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Fit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "shape": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Shape"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "length_body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BodyLength"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "length_sleeve": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SleeveLength"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "length_body_raw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Length Body Raw"
+        },
+        "length_sleeve_raw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Length Sleeve Raw"
+        },
+        "approx": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Approx",
+          "type": "array"
+        },
+        "product_id": {
+          "title": "Product Id",
+          "type": "string"
+        },
+        "name": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Name"
+        },
+        "brand": {
+          "const": "Musinsa",
+          "default": "Musinsa",
+          "title": "Brand",
+          "type": "string"
+        },
+        "image_url": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Url"
+        },
+        "source": {
+          "enum": [
+            "otpensource",
+            "musinsa_snap"
+          ],
+          "title": "Source",
+          "type": "string"
+        },
+        "kind": {
+          "enum": [
+            "catalog_item",
+            "snap_garment"
+          ],
+          "title": "Kind",
+          "type": "string"
+        },
+        "sub_colors": {
+          "items": {
+            "$ref": "#/$defs/Color"
+          },
+          "title": "Sub Colors",
+          "type": "array"
+        },
+        "match": {
+          "$ref": "#/$defs/MatchResult"
+        },
+        "score": {
+          "default": 0.0,
+          "title": "Score",
+          "type": "number"
+        },
+        "score_breakdown": {
+          "$ref": "#/$defs/ScoreBreakdown"
+        },
+        "gender": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Gender"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "snap_id": {
+          "anyOf": [
+            {
+              "type": "integer"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Snap Id"
+        },
+        "image_ref": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Ref"
+        },
+        "image_scope": {
+          "anyOf": [
+            {
+              "enum": [
+                "catalog",
+                "full_snap",
+                "full_set"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Scope"
+        },
+        "image_status": {
+          "anyOf": [
+            {
+              "enum": [
+                "ok",
+                "broken",
+                "unchecked"
+              ],
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Image Status"
+        },
+        "parent_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Parent Id"
+        },
+        "multi_wearer_suspected": {
+          "anyOf": [
+            {
+              "type": "boolean"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Multi Wearer Suspected"
+        },
+        "has_image": {
+          "default": false,
+          "title": "Has Image",
+          "type": "boolean"
+        }
+      },
+      "required": [
+        "product_id",
+        "source",
+        "kind"
+      ],
+      "title": "ProductMatch",
+      "type": "object"
+    },
+    "ScoreBreakdown": {
+      "properties": {
+        "attributes": {
+          "additionalProperties": {
+            "$ref": "#/$defs/AttributeScore"
+          },
+          "title": "Attributes",
+          "type": "object"
+        },
+        "base_score": {
+          "default": 0.0,
+          "title": "Base Score",
+          "type": "number"
+        },
+        "bonus": {
+          "additionalProperties": {
+            "type": "number"
+          },
+          "title": "Bonus",
+          "type": "object"
+        },
+        "unknown_core_weight": {
+          "default": 0.0,
+          "title": "Unknown Core Weight",
+          "type": "number"
+        },
+        "value_weighted": {
+          "default": false,
+          "title": "Value Weighted",
+          "type": "boolean"
+        }
+      },
+      "title": "ScoreBreakdown",
+      "type": "object"
+    },
+    "Season": {
+      "enum": [
+        "SS",
+        "FW"
+      ],
+      "title": "Season",
+      "type": "string"
+    },
+    "SeasonRequest": {
+      "properties": {
+        "year": {
+          "title": "Year",
+          "type": "integer"
+        },
+        "season": {
+          "$ref": "#/$defs/Season"
+        },
+        "raw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Raw"
+        },
+        "origin": {
+          "enum": [
+            "user_requested",
+            "default_next"
+          ],
+          "title": "Origin",
+          "type": "string"
+        }
+      },
+      "required": [
+        "year",
+        "season",
+        "origin"
+      ],
+      "title": "SeasonRequest",
+      "type": "object"
+    },
+    "Shape": {
+      "enum": [
+        "페플럼",
+        "머메이드",
+        "비대칭",
+        "벨보텀/플레어",
+        "부츠컷",
+        "펜슬",
+        "테이퍼드",
+        "A라인",
+        "스트레이트",
+        "H라인"
+      ],
+      "title": "Shape",
+      "type": "string"
+    },
+    "SleeveLength": {
+      "enum": [
+        "민소매",
+        "반팔",
+        "캡",
+        "7부소매",
+        "긴팔"
+      ],
+      "title": "SleeveLength",
+      "type": "string"
+    },
+    "Trend": {
+      "properties": {
+        "style": {
+          "$ref": "#/$defs/TrendStyle"
+        },
+        "items": {
+          "items": {
+            "$ref": "#/$defs/TrendItem"
+          },
+          "title": "Items",
+          "type": "array"
+        }
+      },
+      "required": [
+        "style"
+      ],
+      "title": "Trend",
+      "type": "object"
+    },
+    "TrendItem": {
+      "properties": {
+        "category_major": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CategoryMajor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "category_minor": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/CategoryMinor"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "colors": {
+          "items": {
+            "$ref": "#/$defs/Color"
+          },
+          "title": "Colors",
+          "type": "array"
+        },
+        "materials": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Materials",
+          "type": "array"
+        },
+        "patterns": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Patterns",
+          "type": "array"
+        },
+        "details": {
+          "items": {
+            "$ref": "#/$defs/DetailOut"
+          },
+          "title": "Details",
+          "type": "array"
+        },
+        "fit": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Fit"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "shape": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Shape"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "length_body": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/BodyLength"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "length_sleeve": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/SleeveLength"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "length_body_raw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Length Body Raw"
+        },
+        "length_sleeve_raw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Length Sleeve Raw"
+        },
+        "approx": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Approx",
+          "type": "array"
+        },
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "styling_raw": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Styling Raw"
+        },
+        "styling_accessory": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Styling Accessory"
+        },
+        "gender": {
+          "anyOf": [
+            {
+              "$ref": "#/$defs/Gender"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null
+        },
+        "request_match": {
+          "$ref": "#/$defs/MatchResult"
+        },
+        "image_urls": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Image Urls",
+          "type": "array"
+        },
+        "evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Evidence Ids",
+          "type": "array"
+        },
+        "similar_products": {
+          "items": {
+            "$ref": "#/$defs/ProductMatch"
+          },
+          "title": "Similar Products",
+          "type": "array"
+        }
+      },
+      "required": [
+        "id",
+        "name"
+      ],
+      "title": "TrendItem",
+      "type": "object"
+    },
+    "TrendStyle": {
+      "properties": {
+        "id": {
+          "title": "Id",
+          "type": "string"
+        },
+        "name": {
+          "title": "Name",
+          "type": "string"
+        },
+        "name_origin": {
+          "enum": [
+            "article",
+            "analyst"
+          ],
+          "title": "Name Origin",
+          "type": "string"
+        },
+        "seasons": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Seasons",
+          "type": "array"
+        },
+        "definition": {
+          "title": "Definition",
+          "type": "string"
+        },
+        "description": {
+          "items": {
+            "$ref": "#/$defs/DescriptionOut"
+          },
+          "title": "Description",
+          "type": "array"
+        },
+        "focus_core": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Focus Core",
+          "type": "array"
+        },
+        "focus_supporting": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Focus Supporting",
+          "type": "array"
+        },
+        "focus_evidence_ids": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Focus Evidence Ids",
+          "type": "array"
+        },
+        "aliases": {
+          "items": {
+            "type": "string"
+          },
+          "title": "Aliases",
+          "type": "array"
+        },
+        "article_id": {
+          "anyOf": [
+            {
+              "type": "string"
+            },
+            {
+              "type": "null"
+            }
+          ],
+          "default": null,
+          "title": "Article Id"
+        }
+      },
+      "required": [
+        "id",
+        "name",
+        "name_origin",
+        "definition"
+      ],
+      "title": "TrendStyle",
+      "type": "object"
+    }
+  },
+  "properties": {
+    "request_id": {
+      "title": "Request Id",
+      "type": "string"
+    },
+    "status": {
+      "enum": [
+        "ok",
+        "no_results",
+        "error"
+      ],
+      "title": "Status",
+      "type": "string"
+    },
+    "applied_filters": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/AppliedFilters"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "default": null
+    },
+    "trends": {
+      "items": {
+        "$ref": "#/$defs/Trend"
+      },
+      "title": "Trends",
+      "type": "array"
+    },
+    "evidence": {
+      "items": {
+        "$ref": "#/$defs/EvidenceRecord"
+      },
+      "title": "Evidence",
+      "type": "array"
+    },
+    "limitations": {
+      "items": {
+        "type": "string"
+      },
+      "title": "Limitations",
+      "type": "array"
+    },
+    "schema_version": {
+      "default": "1.1",
+      "title": "Schema Version",
+      "type": "string"
+    }
+  },
+  "required": [
+    "request_id",
+    "status"
+  ],
+  "title": "TrendAnalysisResult",
+  "type": "object",
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.vogue.invalid/workflow/0.1/upstream/trend-result-1.1.schema.json",
+  "$comment": "Actual Pydantic export; outer wrapper additionally pins schema_version=1.1."
+}

@@ -6,6 +6,7 @@ import tempfile
 import unittest
 from pathlib import Path
 
+from market_research_agent.domain.models import normalize_no_results_payload
 from market_research_agent import MarketResearchAgent, MarketResearchContext, ResultStatus, SourceReport
 
 
@@ -51,8 +52,8 @@ class UpstreamContextTests(unittest.TestCase):
         self.assertEqual(result.to_dict()["schema_version"], "1.0")
         self.assertNotIn("upstream_context", result.to_dict())
         self.assertNotIn("upstream_context", result.to_proposal_dict())
-        self.assertEqual(result.to_proposal_v1_2_dict()["upstream_context"], expected)
-        self.assertEqual(result.to_proposal_v1_3_dict()["upstream_context"], expected)
+        self.assertEqual(result.to_proposal_v1_2_dict()["upstream_context"], normalize_no_results_payload(expected))
+        self.assertEqual(result.to_proposal_v1_3_dict()["upstream_context"], normalize_no_results_payload(expected))
         proposal_schema = json.loads((Path(__file__).parents[1] / "contracts/schemas/proposals/sales-market-data-result-1.2-proposal.schema.json").read_text(encoding="utf-8"))
         self.assertEqual(set(result.to_proposal_v1_2_dict()), set(proposal_schema["properties"]))
         self.assertEqual(result.schema_version, "1.0")

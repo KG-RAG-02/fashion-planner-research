@@ -241,3 +241,52 @@ repository-root/
 ```
 
 구조는 `domain` / `sources` / `workflows` 책임을 따릅니다. 실제 운영 자료원은 연결되어 있지 않습니다. opt-in 합성 모드에서는 기본 UI와 stable `/runs`가 합성 proposal findings를 사용하고, 상세 Evidence lineage는 versioned simulation API에서 제공합니다. 서버는 loopback 개발용입니다. H&M 관측치와 시장 자료는 서로 다른 adapter 경로에서 유지합니다. 새상품 기획에 해당하는 합성 상품기획 데모는 Project_06 인계 폴더에 있습니다.
+
+### Full-Draft post-review API (independent workflow candidate)
+
+`POST /v1/agents/sales-market-agent/reviews` accepts the full retained
+PlanningDraft using the packaged `vogue-workflow/0.1` candidate schemas
+(workflow-contract/0.1.1). This is a separate parser, use case and serializer;
+legacy `/runs` and its serializers remain available. The shared baseline is
+still proposed; this implementation alone does not establish service integration.
+
+The review validates identity, producer/schema/status, Draft and source hashes,
+search mapping and evidence references before querying a source. Exact incoming
+request bytes, the parsed full Draft, search provenance and complete source
+result are saved as private content-addressed artifacts. Review evidence includes
+the full original Draft and source snapshot (including retrieval, calculations,
+comparability, missing data and original statuses). No legacy status normalization
+runs on Review responses. Replays reuse stored identity/results; conflicting
+Draft ID/revision hashes are rejected. Current company sales stays null without
+an explicitly verified source. Historical H&M and synthetic data are labeled;
+missing configuration returns no_results, configured source failures return errors.
+
+`SalesMarketReviewService(..., artifact_resolver=...)` additionally verifies P08
+raw artifact bytes and their typed JSON equality. The standalone HTTP profile
+retains incoming references without fetching private P08 artifacts; cross-service
+artifact access and source-document evidence indexing must be agreed with P08
+before live integration. Category/season remain in a separate search view. The
+legacy adapters do not apply a season filter; Review states that limitation.
+
+Local API: `vogue-market-research-http --host 127.0.0.1 --port 8766`.
+Set `VOGUE_AGENT_SERVICE_BEARER_TOKEN` in process environment. Container API:
+`docker compose --profile api up --build sales-market-agent-api`. Explicit
+`--service-mode --host 0.0.0.0` requires that token; use a private network/TLS
+termination at deployment. Host port publication stays on loopback. The idle
+sleep/network-none service has its own `idle` profile. The API profile defaults
+to no cloud sources; inject the selected existing R2/HM environment keys through
+an approved deployment override when those sources are needed. Artifacts and
+SQLite replay history persist in the `review-artifacts` volume.
+
+Install with `pip install .` (or `pip install '.[r2]'` for cloud sources).
+Configs, static UI and prompt assets are package data. After editing their
+source directories, run `python scripts/sync_package_resources.py` and check
+with `--check`. The workflow schema snapshot is owned by this package and must
+be reconciled against the coordinator's baseline explicitly.
+
+Run `python scripts/run_tests.py` to restore missing deterministic synthetic
+fixtures and collect `tests`, `tests/sales`, and `tests/market` separately.
+Reconstructed query labels are new hand-authored test cases, not the lost
+original evaluation corpus. Seeds and configuration assumptions are checked in;
+generated output directories are ignored. No real transactions, current market
+observations, R2 downloads or model calls are used by the restoration command.

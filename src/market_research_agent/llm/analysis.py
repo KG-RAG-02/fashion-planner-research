@@ -18,7 +18,8 @@ from .responses_api import LlmCallError, OpenAIResponsesClient
 
 
 ROOT = Path(__file__).resolve().parents[3]
-PROMPT_ROOT = ROOT / "prompts"
+from ..resource_paths import resource_root
+PROMPT_ROOT = resource_root("prompts")
 DEFAULT_HM_DIR = ROOT / "data/processed/hm-personalized-fashion-recommendations"
 DEFAULT_MARKET_DIR = ROOT / "examples/synthetic_market_scenario/generated"
 TEST_ONLY_PERMISSION = "authorized_for_synthetic_testing_only"

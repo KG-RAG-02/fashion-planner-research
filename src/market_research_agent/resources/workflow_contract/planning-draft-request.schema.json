@@ -1,0 +1,53 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://contracts.vogue.invalid/workflow/0.1/planning-draft-request.schema.json",
+  "title": "P08 → P06 Draft-only request",
+  "$comment": "PROPOSED workflow-contract/0.1.1: structural validation plus versioned semantic rules are required; see decisions/contract-baseline.json. Not service compatibility.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "request_id",
+    "input"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "vogue-workflow/0.1"
+    },
+    "request_id": {
+      "$ref": "common.schema.json#/$defs/id"
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "mode",
+        "user_input",
+        "planning_request",
+        "trend_response",
+        "stock_response",
+        "stock_call_context"
+      ],
+      "properties": {
+        "mode": {
+          "const": "draft_only"
+        },
+        "user_input": {
+          "$ref": "common.schema.json#/$defs/user_input"
+        },
+        "planning_request": {
+          "$ref": "common.schema.json#/$defs/planning_request"
+        },
+        "trend_response": {
+          "$ref": "common.schema.json#/$defs/retained_trend"
+        },
+        "stock_response": {
+          "$ref": "common.schema.json#/$defs/retained_stock"
+        },
+        "stock_call_context": {
+          "$ref": "common.schema.json#/$defs/stock_call_context"
+        }
+      }
+    }
+  }
+}

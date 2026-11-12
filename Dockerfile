@@ -14,6 +14,8 @@ COPY --chown=agent:agent examples/ ./examples/
 COPY --chown=agent:agent scripts/ ./scripts/
 COPY --chown=agent:agent tests/ ./tests/
 
+RUN mkdir -p /app/review-artifacts && chown agent:agent /app/review-artifacts
+
 RUN pip install --no-cache-dir .
 
 USER agent

@@ -8,7 +8,7 @@ version = "0.1.0"
 description = "Evidence-aware domain core for the VOGUE Market Research Agent"
 readme = "README.md"
 requires-python = ">=3.11"
-dependencies = []
+dependencies = ["jsonschema>=4.23,<5"]
 
 [project.optional-dependencies]
 r2 = ["boto3>=1.35,<2", "duckdb>=1.1,<2"]
@@ -19,3 +19,6 @@ vogue-market-research-http = "market_research_agent.http_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.setuptools.package-data]
+market_research_agent = ["resources/**/*"]

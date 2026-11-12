@@ -4,6 +4,7 @@ services:
       context: .
     image: vogue-market-research-agent:local
     network_mode: none
+    profiles: ["idle"]
     init: true
     restart: unless-stopped
 
@@ -20,7 +21,31 @@ services:
     build:
       context: .
     image: vogue-market-research-agent:local
-    command: ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
+    command: ["python", "scripts/run_tests.py"]
     network_mode: none
     profiles: ["test"]
     restart: "no"
+
+  sales-market-agent-api:
+    build:
+      context: .
+    image: vogue-market-research-agent:local
+    profiles: ["api"]
+    command: ["vogue-market-research-http", "--service-mode", "--host", "0.0.0.0", "--port", "8766"]
+    environment:
+      VOGUE_AGENT_SERVICE_BEARER_TOKEN: ${VOGUE_AGENT_SERVICE_BEARER_TOKEN:-}
+      VOGUE_PROJECT07_DISABLE_DOTENV: "1"
+      VOGUE_P07_REVIEW_ARTIFACT_DIR: /app/review-artifacts
+    volumes:
+      - review-artifacts:/app/review-artifacts
+    ports:
+      - "127.0.0.1:8766:8766"
+    init: true
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/api/health', timeout=3)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+volumes:
+  review-artifacts:

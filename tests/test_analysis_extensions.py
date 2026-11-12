@@ -135,7 +135,7 @@ class RetrievalAndPermissionTests(unittest.TestCase):
         self.assertNotIn("sales_retrieval", result.to_dict())
         self.assertIn("E-doc-1", {item.evidence_id for item in result.evidence})
 
-    def test_hm_permission_gate_does_not_read_or_probe_files(self) -> None:
+    def test_owner_authorized_hm_source_reports_missing_files(self) -> None:
         with tempfile.TemporaryDirectory() as temp:
             root = Path(temp) / "does-not-exist"
             source = HmHistoricalSalesSource(root, {"Jacket": "Outerwear"}, "map-v1")
@@ -143,8 +143,8 @@ class RetrievalAndPermissionTests(unittest.TestCase):
                 request_id="synthetic-request", planning_request={}, requested_category="Outerwear",
             ))
         self.assertEqual(report.status, ResultStatus.NO_RESULTS)
-        self.assertEqual(report.sales_data.missing_data[0].reason, "permission_not_confirmed")
-        self.assertIn("without reading", report.limitations[0])
+        self.assertEqual(report.sales_data.missing_data[0].reason, "source_not_configured")
+        self.assertTrue(source.usage_authorized)
 
 
 if __name__ == "__main__":
