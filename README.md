@@ -350,7 +350,7 @@ Container image (`docker build -t vogue/sales-market:dev .`):
   | Route | Auth | Notes |
   |---|---|---|
   | `GET /api/health` | none | Liveness only |
-  | `POST /v1/agents/sales-market-agent/reviews` (`vogue-workflow/0.1`) | `Authorization: Bearer` (`hmac.compare_digest`), checked before the body is read | Statuses: 200 (Review `partial`/`no_results`), 503 or 504 (Review `error` envelope); problem bodies for 400, 401, 413, 415, 422, 502, 503, 504, 500 |
+  | `POST /v1/agents/sales-market-agent/reviews` (`vogue-workflow/0.1`) | `Authorization: Bearer` (`hmac.compare_digest`), checked before the body is read | Statuses: 200 (Review `partial`/`no_results`), 503 or 504 (Review `error` envelope); problem bodies for 400, 401, 409 (`DRAFT_REVISION_CONFLICT`: same `draft_id` and revision already reviewed with different content), 413, 415, 422 (other semantic violations), 502, 503, 504, 500 |
   | Legacy `POST /v1/agents/sales-market-agent/runs` (`vogue-handoff/0.1`) and `/structured-runs` | Bearer | Unchanged |
 
 - **Profiles:** `docker compose --profile api up --build sales-market-agent-api`

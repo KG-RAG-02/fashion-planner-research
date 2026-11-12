@@ -143,8 +143,10 @@ class ReviewTests(unittest.TestCase):
         d['raw_response']['result']['draft']['title'] = 'changed title'
         d['raw_response']['result']['draft_identity']['content_sha256'] = fingerprint(d['raw_response']['result']['draft'])
         d['content_sha256'] = fingerprint(d['raw_response'])
-        with self.assertRaisesRegex(ReviewError, 'validation failed'):
+        with self.assertRaisesRegex(ReviewError, 'validation failed') as caught:
             self.service.review(changed)
+        # Conventions section 6: a revision conflict is a 409 state conflict, not a 422.
+        self.assertEqual((caught.exception.code, caught.exception.http_status), ('DRAFT_REVISION_CONFLICT', 409))
 
     def test_replay_database_connection_is_closed(self):
         with warnings.catch_warnings(record=True) as caught:

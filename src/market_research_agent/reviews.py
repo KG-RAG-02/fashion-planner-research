@@ -372,7 +372,11 @@ class SalesMarketReviewService:
             db.execute('CREATE TABLE IF NOT EXISTS responses (key TEXT PRIMARY KEY, code INTEGER, response BLOB)')
             db.execute('BEGIN IMMEDIATE')
             row = db.execute('SELECT hash FROM identities WHERE draft_id=? AND revision=?', (identity['draft_id'], identity['revision'])).fetchone()
-            require(row is None or row[0] == identity['content_sha256'], 'DRAFT_REVISION_CONFLICT')
+            if row is not None and row[0] != identity['content_sha256']:
+                # Conventions section 6: a revision conflict is a 409 state conflict.
+                raise ReviewError('DRAFT_REVISION_CONFLICT',
+                                  'Draft identity validation failed: this draft_id and revision were already '
+                                  'reviewed with different Draft content.', 409)
             db.execute('INSERT OR IGNORE INTO identities VALUES (?,?,?)', (identity['draft_id'], identity['revision'], identity['content_sha256']))
             cached = db.execute('SELECT code, response FROM responses WHERE key=?', (key,)).fetchone()
             if cached:

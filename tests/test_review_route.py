@@ -235,6 +235,29 @@ class ArtifactReaderRouteTests(ReviewRouteTestCase):
         blobs.symlink_to(self.artifact_root / 'p08' / 'real-blobs', target_is_directory=True)
         self.assert_rejected('INVALID_ARTIFACT_PATH', 422)
 
+    def test_draft_revision_conflict_is_409_and_other_semantic_errors_stay_422(self):
+        agent = Mock(return_value=MarketResearchAgent())
+        handler = make_handler(agent)
+        status, out = call(handler, canonical(self.request), self.reader_env)
+        self.assertEqual(status, 200, out)
+        # Same draft_id and revision, different Draft content: a state conflict.
+        changed = mint_p08(with_draft_scope(fixture_request(), category='아우터', season='2028FW',
+                                            title='2028FW 아우터 기획 초안'), self.artifact_root)
+        identity = changed['input']['planning_draft']['raw_response']['result']['draft_identity']
+        original = self.request['input']['planning_draft']['raw_response']['result']['draft_identity']
+        self.assertEqual((identity['draft_id'], identity['revision']), (original['draft_id'], original['revision']))
+        self.assertNotEqual(identity['content_sha256'], original['content_sha256'])
+        status, out = call(handler, canonical(changed), self.reader_env)
+        self.assert_problem('DRAFT_REVISION_CONFLICT', out, status, 409, retryable=False)
+        self.assertEqual(out['request_id'], changed['request_id'])
+        agent.assert_called_once()
+        # Other semantic violations keep 422.
+        broken = deepcopy(self.request)
+        broken['input']['planning_draft']['raw_response']['result']['draft_identity']['content_sha256'] = '0' * 64
+        broken['input']['planning_draft']['content_sha256'] = fingerprint(broken['input']['planning_draft']['raw_response'])
+        status, out = call(handler, canonical(mint_p08(broken, self.artifact_root)), self.reader_env)
+        self.assert_problem('DRAFT_HASH_MISMATCH', out, status, 422)
+
     def test_missing_bytes_or_missing_root_are_503(self):
         self.assert_rejected('ARTIFACT_UNAVAILABLE', 503, retryable=True,
                              env={**self.env, 'VOGUE_UPSTREAM_ARTIFACT_ROOT': str(self.root / 'absent')})
