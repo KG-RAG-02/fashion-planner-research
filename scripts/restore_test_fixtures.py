@@ -6,6 +6,16 @@ from generate_query_coverage_fixture import generate, MARKERS
 from synthetic_market_scenario import build
 from synthetic_market_rag.generate import write_corpus
 ROOT = Path(__file__).resolve().parents[1]
+# Seeded query-coverage configuration; also the source of the bundled review fixture
+# (scripts/build_synthetic_review_fixture.py).
+QUERY_COVERAGE_CONFIG = {'seed': 407, 'request_id': 'synthetic-query-coverage', 'generated_at_utc': '2026-11-12T00:00:00Z',
+          'period_start': '2027-01', 'period_months': 36,
+          'category_gender_pairs': [{'category': c, 'gender': g} for c in ['knitwear', 'footwear', 'outerwear'] for g in ['men', 'women']],
+          'geographies': ['KR', 'JP'], 'channels': ['online', 'offline'], 'colors': ['black', 'white', 'navy', 'gray', 'green', 'beige'],
+          'mapping': {'mapping_id': 'synthetic-query-map', 'version': '1.0'},
+          'generation_assumptions': {'seasonality_by_month': [1.1, 1, .9, 1, 1.1, 1, .9, 1, 1.1, 1.2, 1.1, 1.2],
+          'base_scenario_value_range_krw_million': [100, 500], 'yearly_drift': .02, 'random_noise_fraction': .03,
+          'note': 'Arbitrary synthetic assumptions; not observations, forecasts or business evidence.'}}
 
 def missing(path, value):
     if not path.exists():
@@ -14,15 +24,7 @@ def missing(path, value):
 
 def main():
     coverage = ROOT / 'examples/query_coverage'
-    config = {'seed': 407, 'request_id': 'synthetic-query-coverage', 'generated_at_utc': '2026-11-12T00:00:00Z',
-              'period_start': '2027-01', 'period_months': 36,
-              'category_gender_pairs': [{'category': c, 'gender': g} for c in ['knitwear', 'footwear', 'outerwear'] for g in ['men', 'women']],
-              'geographies': ['KR', 'JP'], 'channels': ['online', 'offline'], 'colors': ['black', 'white', 'navy', 'gray', 'green', 'beige'],
-              'mapping': {'mapping_id': 'synthetic-query-map', 'version': '1.0'},
-              'generation_assumptions': {'seasonality_by_month': [1.1, 1, .9, 1, 1.1, 1, .9, 1, 1.1, 1.2, 1.1, 1.2],
-              'base_scenario_value_range_krw_million': [100, 500], 'yearly_drift': .02, 'random_noise_fraction': .03,
-              'note': 'Arbitrary synthetic assumptions; not observations, forecasts or business evidence.'}}
-    missing(coverage / 'config.json', config)
+    missing(coverage / 'config.json', QUERY_COVERAGE_CONFIG)
     if not (coverage / 'generated/manifest.json').exists(): generate(coverage / 'config.json', coverage / 'generated')
     scenario = ROOT / 'examples/synthetic_market_scenario'
     config = {'seed': 407, 'request_id': 'synthetic-market-scenario', 'generated_at_utc': '2026-11-12T00:00:00Z',

@@ -6,6 +6,8 @@ from io import BytesIO
 import json
 import os
 from pathlib import Path
+import subprocess
+import sys
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
@@ -14,11 +16,15 @@ from jsonschema import Draft202012Validator
 
 from market_research_agent.artifact_reader import (MAX_ARTIFACT_BYTES, DirectoryArtifacts,
                                                    artifact_reader_from_env, require_artifact_reader)
-from market_research_agent.http_server import make_handler
+from market_research_agent.http_server import make_handler, review_agent_factory, serve
 from market_research_agent.reviews import (REVIEW_PATH, VERSION, _REGISTRY, ReviewError, canonical,
                                            fingerprint, parse_review_response, review_artifact_dir)
+from market_research_agent.sources.market.synthetic_review_fixture import (SyntheticReviewFixtureSource,
+                                                                           default_bundle_path, load_bundle)
+from market_research_agent.sources.shared.r2_object_store import R2ObjectStore
 from market_research_agent.workflows.market_research import MarketResearchAgent
 
+ROOT = Path(__file__).resolve().parents[1]
 FIXTURES = Path(__file__).parent / 'fixtures/reviews'
 TOKEN = 'test-only-token'
 PROBLEM = Draft202012Validator({'$ref': 'https://contracts.vogue.invalid/workflow/0.1/common.schema.json#/$defs/problem'},
@@ -225,6 +231,116 @@ class ArtifactReaderRouteTests(ReviewRouteTestCase):
                              env={**self.env, 'VOGUE_UPSTREAM_ARTIFACT_ROOT': str(self.root / 'absent')})
         self.draft_blob.unlink()
         self.assert_rejected('ARTIFACT_UNAVAILABLE', 503, retryable=True)
+
+
+def with_draft_scope(request, *, category, season, title):
+    """Same fixture Draft with another (possibly null) category/season; hashes recomputed."""
+    request = deepcopy(request)
+    result = request['input']['planning_draft']['raw_response']['result']
+    result['draft'].update(category=category, season=season, title=title)
+    result['draft_identity']['content_sha256'] = fingerprint(result['draft'])
+    return request
+
+
+def refuse_network(*args, **kwargs):
+    raise AssertionError('network access attempted')
+
+
+class SyntheticReviewSourceTests(ReviewRouteTestCase):
+    """VOGUE_P07_REVIEW_SOURCE=synthetic_local_fixture: offline, deterministic, labelled synthetic."""
+
+    def setUp(self):
+        super().setUp()
+        self.artifact_root = self.root / 'artifacts'
+        self.env = {**self.env, 'VOGUE_UPSTREAM_ARTIFACT_ROOT': str(self.artifact_root),
+                    'VOGUE_P07_REVIEW_SOURCE': 'synthetic_local_fixture'}
+
+    def review(self, request, store):
+        env = {**self.env, 'VOGUE_P07_REVIEW_ARTIFACT_DIR': str(self.root / store)}
+        with patch('socket.socket.connect', refuse_network), patch('socket.create_connection', refuse_network), \
+                patch.object(R2ObjectStore, 'from_env', side_effect=AssertionError('R2 is not allowed')):
+            return call(self.handler, canonical(mint_p08(request, self.artifact_root)), env)
+
+    def test_valid_draft_yields_partial_review_with_synthetic_metrics(self):
+        request = mint_p08(fixture_request(), self.artifact_root)
+        status, out = self.review(request, 'store-a')
+        self.assertEqual((status, out['status'], out['result']['status']), (200, 'partial', 'partial'), out)
+        self.agent_factory.assert_not_called()  # the configured default sources are bypassed
+        review = out['result']['review']
+        valued = [m for m in review['metrics'] if m['value'] is not None]
+        self.assertEqual(sorted((m['name'], m['value'], m['period']) for m in valued), [
+            ('market_data.scenario_market_value', 223.98, '2027-05-01/2027-05-31'),
+            ('market_data.scenario_market_value', 280.43, '2027-03-01/2027-03-31'),
+            ('market_data.scenario_market_value', 493.28, '2027-04-01/2027-04-30'),
+            ('sales_data.scenario_units_sold', 428, '2027-04-01/2027-04-30'),
+            ('sales_data.scenario_units_sold', 2057, '2027-05-01/2027-05-31'),
+            ('sales_data.scenario_units_sold', 2450, '2027-03-01/2027-03-31'),
+        ])
+        for metric in valued:
+            self.assertEqual((metric['observation']['synthetic'], metric['observation']['data_nature']),
+                             (True, 'synthetic_fixture'))
+            self.assertTrue(metric['evidence_refs'])
+        self.assertEqual((review['observation']['synthetic'], review['observation']['data_nature']),
+                         (True, 'synthetic_fixture'))
+        current = next(m for m in review['metrics'] if m['name'] == 'current_company_sales')
+        self.assertIsNone(current['value'])
+        self.assertTrue(current['missing_reason'])
+        limitations = out['result']['limitations']
+        self.assertTrue(any(item.startswith('SYNTHETIC TEST DATA ONLY') for item in limitations))
+        self.assertTrue(any('not filtered by' in item for item in limitations))
+        self.assertEqual(review['findings'], [])
+        self.assertEqual(parse_review_response(out, request), out)
+
+    def test_any_valid_draft_gets_the_same_values(self):
+        def values(out):
+            return sorted((m['name'], m['value'], m['period']) for m in out['result']['review']['metrics']
+                          if m['value'] is not None)
+        first = self.review(fixture_request(), 'store-1')
+        repeat = self.review(fixture_request(), 'store-2')
+        null_scope = self.review(with_draft_scope(fixture_request(), category=None, season=None,
+                                                  title='시즌 미정 카테고리 미정 기획 초안'), 'store-3')
+        other = self.review(with_draft_scope(fixture_request(), category='아우터', season='2028FW',
+                                             title='2028FW 아우터 기획 초안'), 'store-4')
+        for status, out in (first, repeat, null_scope, other):
+            self.assertEqual((status, out['status']), (200, 'partial'), out)
+        self.assertEqual(values(first[1]), values(repeat[1]))
+        self.assertEqual(values(first[1]), values(null_scope[1]))
+        self.assertEqual(values(first[1]), values(other[1]))
+
+    def test_unset_keeps_the_configured_default_and_unknown_values_fail_closed(self):
+        agent = Mock(return_value=MarketResearchAgent())
+        request = canonical(mint_p08(fixture_request(), self.artifact_root))
+        for value in ('', '  '):
+            status, out = call(make_handler(agent), request, {**self.env, 'VOGUE_P07_REVIEW_SOURCE': value})
+            self.assertEqual((status, out['status']), (200, 'no_results'), out)
+        self.assertEqual(agent.call_count, 1)  # second call replays the stored response
+        status, out = call(self.handler, request, {**self.env, 'VOGUE_P07_REVIEW_SOURCE': 'r2'})
+        self.assert_problem('REVIEW_SOURCE_UNSUPPORTED', out, status, 503, retryable=True)
+        with patch.dict(os.environ, {'VOGUE_AGENT_SERVICE_BEARER_TOKEN': TOKEN,
+                                     'VOGUE_P07_REVIEW_SOURCE': 'bogus'}, clear=True), \
+                patch('market_research_agent.http_server.ThreadingHTTPServer') as server:
+            with self.assertRaises(ReviewError):
+                serve(host='127.0.0.1', port=0)
+            server.assert_not_called()
+        self.assertIs(review_agent_factory(agent, {}), agent)
+
+    def test_invalid_bundle_is_a_source_error_not_values(self):
+        bundle = json.loads(default_bundle_path().read_text(encoding='utf-8'))
+        broken = self.root / 'bundle.json'
+        for mutate in (lambda b: b.update(synthetic=False), lambda b: b['sales_like'][0].update(value=None),
+                       lambda b: b['market_like'][0].update(evidence_ids=['missing']),
+                       lambda b: b['evidence'][0].update(permission_status='authorized')):
+            candidate = deepcopy(bundle); mutate(candidate)
+            broken.write_text(json.dumps(candidate), encoding='utf-8')
+            report = SyntheticReviewFixtureSource(broken).research(None)
+            self.assertEqual(report.status.value, 'error')
+            self.assertEqual((report.sales_data.observations, report.market_data.observations), ((), ()))
+        self.assertEqual(load_bundle()['generator']['seed'], 407)
+
+    def test_packaged_bundle_is_reproducible_from_the_seed_407_generator(self):
+        result = subprocess.run([sys.executable, str(ROOT / 'scripts/build_synthetic_review_fixture.py'), '--check'],
+                                cwd=ROOT, capture_output=True, text=True, timeout=120)
+        self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
 
 
 class ReviewArtifactDirTests(ReviewRouteTestCase):

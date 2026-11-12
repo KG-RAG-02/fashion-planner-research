@@ -24,6 +24,7 @@ from .reviews import (REVIEW_PATH, MAX_BODY_BYTES as REVIEW_MAX_BODY_BYTES, Sale
 from .domain.models import MarketResearchContext, normalize_no_results_payload
 from .sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
 from .sources.market.synthetic_r2 import SyntheticR2FixtureBundleStore
+from .sources.market.synthetic_review_fixture import SOURCE_MODE as SYNTHETIC_REVIEW_SOURCE, SyntheticReviewFixtureSource
 from .sources.sales.hm_kaggle.hm_sales_adapter import HmHistoricalSalesSource
 from .sources.sales.hm_kaggle.hm_r2_sales_source import R2HmHistoricalSalesSource
 from .sources.sales.hm_kaggle.hm_r2_duckdb_source import R2DuckDBHmHistoricalSalesSource
@@ -71,6 +72,23 @@ _INPUT_FIELDS = {
     "request_id", "planning_request", "trend_result", "inventory_product_result",
     "requested_metrics", *_STRING_FIELDS,
 }
+
+
+REVIEW_SOURCE_ENV = "VOGUE_P07_REVIEW_SOURCE"
+
+
+def review_agent_factory(
+    default_factory: Callable[[], MarketResearchAgent], environ: Any = None,
+) -> Callable[[], MarketResearchAgent]:
+    """Select the /reviews source. Unset keeps the configured default sources;
+    synthetic_local_fixture uses only the packaged, labelled synthetic bundle."""
+    mode = (os.environ if environ is None else environ).get(REVIEW_SOURCE_ENV, "").strip()
+    if not mode:
+        return default_factory
+    if mode == SYNTHETIC_REVIEW_SOURCE:
+        return lambda: MarketResearchAgent(SyntheticReviewFixtureSource())
+    raise ReviewError("REVIEW_SOURCE_UNSUPPORTED",
+                      "VOGUE_P07_REVIEW_SOURCE must be unset or synthetic_local_fixture.", 503)
 
 
 def _safe_error_request_id(value: Any) -> str | None:
@@ -419,7 +437,8 @@ def make_handler(
                 # Retained raw bytes are always verified over HTTP: without
                 # VOGUE_UPSTREAM_ARTIFACT_ROOT the reader fails closed (503).
                 service = review_service or SalesMarketReviewService(
-                    build_agent, ReviewArtifactStore(review_artifact_dir()), artifact_reader_from_env())
+                    review_agent_factory(build_agent), ReviewArtifactStore(review_artifact_dir()),
+                    artifact_reader_from_env())
                 code, response = service.review(body, raw)
                 send(code, response)
             except ReviewError as exc:
@@ -619,6 +638,7 @@ def serve(
         agent_factory = lambda: MarketResearchAgent(synthetic_source)
     else:
         agent_factory = configured_agent
+    review_agent_factory(agent_factory)  # fail fast on an unsupported VOGUE_P07_REVIEW_SOURCE
     server = ThreadingHTTPServer((host, port), make_handler(
         agent_factory, synthetic_simulation_enabled=enable_synthetic_simulation,
         synthetic_bundle_provider=bundle_store.load_bundle if bundle_store is not None else None,

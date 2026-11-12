@@ -293,6 +293,29 @@ the default, never the working directory itself):
 | `VOGUE_R2_HM_DB_CACHE_DIR` | `data/local/r2_hm_db` | `/data/hm-cache` | Versioned private copy of the H&M R2 DuckDB (`hm-<sha256>.duckdb`), only when an R2 DuckDB key is configured |
 | `VOGUE_R2_HM_DB_MAX_BYTES` | `2000000000` | (default) | Download size ceiling for that DuckDB object |
 
+`VOGUE_P07_REVIEW_SOURCE` selects the Review data source. It affects only
+`/reviews`.
+
+- **Unset (default):** behavior is unchanged. The configured sources are used
+  (H&M R2 DuckDB and the synthetic R2 release when configured). If none are
+  configured, the Review is `no_results`.
+- **`synthetic_local_fixture`** (stub profile, conventions §9): the Review uses
+  only the packaged `src/market_research_agent/resources/synthetic_review_fixture/bundle.json`.
+  - The bundle is a verbatim excerpt of the seed-407 query coverage fixture:
+    women knitwear, KR online, 2027-03 to 2027-05, with 3 sales-like rows, 3
+    market-like rows (color black) and 6 evidence records.
+  - Rebuild it with `python scripts/build_synthetic_review_fixture.py`. Verify it
+    with `--check`, which regenerates the fixture offline and compares bytes.
+  - The source makes no network or R2 call.
+  - Every valid Draft gets the same values, including a Draft with null
+    category or season. The values are not filtered by the Draft. The Review is
+    `partial` (HTTP 200).
+  - Each valued metric and the Review `observation` carry `synthetic: true` and
+    `data_nature: synthetic_fixture`. The limitations state that the values are
+    synthetic and not scoped to the Draft.
+- **Any other value:** the route returns 503 `REVIEW_SOURCE_UNSUPPORTED`, and
+  the server refuses to start.
+
 The Review limitations then report how many retained responses were verified.
 Library callers may still build `SalesMarketReviewService` without a resolver.
 That Review states that the raw bytes were not fetched. Category and season
