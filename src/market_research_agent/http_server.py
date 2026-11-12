@@ -18,7 +18,7 @@ from urllib.parse import unquote, urlsplit
 
 from .resource_paths import resource_root
 from .reviews import (REVIEW_PATH, MAX_BODY_BYTES as REVIEW_MAX_BODY_BYTES, SalesMarketReviewService,
-                      ReviewArtifactStore, ReviewError, parse_json, problem)
+                      ReviewArtifactStore, ReviewError, parse_json, parser_for, problem)
 
 from .domain.models import MarketResearchContext, normalize_no_results_payload
 from .sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
@@ -413,6 +413,8 @@ def make_handler(
                 if isinstance(body, dict):
                     request_id = _safe_error_request_id(body.get("request_id"))
                     if request_id is not None and not request_id.isascii(): request_id = None
+                # Version dispatch precedes schema, artifact, store and source work.
+                parser_for(body)
                 service = review_service or SalesMarketReviewService(build_agent, ReviewArtifactStore(
                     os.getenv("VOGUE_P07_REVIEW_ARTIFACT_DIR", ".local/review-artifacts")))
                 code, response = service.review(body, raw)

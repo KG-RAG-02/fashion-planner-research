@@ -250,6 +250,11 @@ PlanningDraft using the packaged `vogue-workflow/0.1` candidate schemas
 legacy `/runs` and its serializers remain available. The shared baseline is
 still proposed; this implementation alone does not establish service integration.
 
+The route dispatches on `contract_version` first. Authentication and transport
+checks come before it, but no schema, artifact, store or source work does. Only
+`vogue-workflow/0.1` is parsed. Any other value, a missing value or a non-object
+body returns a 422 problem `UNSUPPORTED_CONTRACT_VERSION`.
+
 The review validates identity, producer/schema/status, Draft and source hashes,
 search mapping and evidence references before querying a source. Exact incoming
 request bytes, the parsed full Draft, search provenance and complete source

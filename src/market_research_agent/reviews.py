@@ -243,6 +243,21 @@ def parse_review_request(value, artifact_resolver=None):
     return value, deepcopy(derived)
 
 
+# contract_version -> request parser. Dispatch happens before schema,
+# artifact, store or source work; unknown versions are never parsed.
+_REQUEST_PARSERS = {VERSION: parse_review_request}
+
+
+def parser_for(body):
+    """Return the parser for the body's contract_version or fail with 422."""
+    version = body.get('contract_version') if isinstance(body, dict) else None
+    parser = _REQUEST_PARSERS.get(version) if isinstance(version, str) else None
+    if parser is None:
+        raise ReviewError('UNSUPPORTED_CONTRACT_VERSION',
+                          'Unsupported contract_version; this route accepts vogue-workflow/0.1.', 422)
+    return parser
+
+
 class ReviewArtifactStore:
     """Private immutable local artifacts; no paths/bytes are served over HTTP."""
     def __init__(self, root):
@@ -312,7 +327,7 @@ class SalesMarketReviewService:
         self.artifact_resolver = artifact_resolver
 
     def review(self, request, raw_body=None):
-        snapshot, _ = parse_review_request(request, self.artifact_resolver)
+        snapshot, _ = parser_for(request)(request, self.artifact_resolver)
         # Persist every received transport, including formatting variants/replays.
         self.store.put(raw_body if raw_body is not None else canonical(snapshot))
         identity = snapshot['input']['planning_draft']['raw_response']['result']['draft_identity']
