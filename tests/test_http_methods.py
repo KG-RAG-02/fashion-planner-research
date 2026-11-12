@@ -3,19 +3,21 @@
 A live stdlib server on an ephemeral loopback port exercises the real method
 dispatch (unknown do_<METHOD> handlers used to fall through to 404/501).
 """
+import email.message
 from http.server import ThreadingHTTPServer
 import http.client
+from io import BytesIO
 import json
 import os
 from pathlib import Path
 import socket
 import threading
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from jsonschema import Draft202012Validator
 
-from market_research_agent.http_server import make_handler
+from market_research_agent.http_server import make_handler, serve
 from market_research_agent.reviews import REVIEW_PATH, _REGISTRY
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -109,6 +111,46 @@ class WrongMethodTests(LiveServerTestCase):
                     status, allow, _ = self.request('POST', path, body=b'{}',
                                                     headers={'Content-Type': 'application/json'})
                     self.assertEqual((status, allow), (401, None))
+
+
+def in_process_health(handler):
+    h = object.__new__(handler)
+    h.path, h.headers, h.wfile = '/api/health', email.message.Message(), BytesIO()
+    h.send_response, h.send_header, h.end_headers = Mock(), Mock(), Mock()
+    h.do_GET()
+    return h.send_response.call_args.args[0], json.loads(h.wfile.getvalue())
+
+
+class LocalHealthModeTests(LiveServerTestCase):
+    def test_local_development_mode_without_auth(self):
+        status, _, body = self.request('GET', '/api/health')
+        self.assertEqual((status, json.loads(body)), (200, {'status': 'ok', 'mode': 'local-development'}))
+
+
+class ServiceHealthModeTests(LiveServerTestCase):
+    handler_kwargs = {'service_mode': True}
+
+    def test_service_mode_is_reported_without_auth(self):
+        status, _, body = self.request('GET', '/api/health')  # no Authorization header
+        self.assertEqual((status, json.loads(body)), (200, {'status': 'ok', 'mode': 'service'}))
+
+    def test_serve_passes_the_real_mode_to_the_handler(self):
+        for kwargs, env, expected in (
+                ({'host': '0.0.0.0', 'service_mode': True}, {'VOGUE_AGENT_SERVICE_BEARER_TOKEN': 'test-only'}, 'service'),
+                ({'host': '127.0.0.1'}, {}, 'local-development')):
+            with self.subTest(expected=expected), patch.dict(os.environ, env, clear=True), \
+                    patch('market_research_agent.http_server.ThreadingHTTPServer') as server_type, \
+                    patch('builtins.print'):
+                serve(port=0, **kwargs)
+                status, health = in_process_health(server_type.call_args.args[1])
+                self.assertEqual((status, health), (200, {'status': 'ok', 'mode': expected}))
+
+    def test_synthetic_simulation_keeps_its_labels(self):
+        status, health = in_process_health(make_handler(service_mode=True, synthetic_simulation_enabled=True))
+        self.assertEqual((status, health['mode'], health['synthetic'], health['data_nature'], health['operational_eligible']),
+                         (200, 'service', True, 'synthetic_test', False))
+        status, health = in_process_health(make_handler(synthetic_simulation_enabled=True))
+        self.assertEqual((status, health['mode'], health['synthetic']), (200, 'synthetic_simulation', True))
 
 
 if __name__ == '__main__':

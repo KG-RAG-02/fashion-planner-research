@@ -279,8 +279,13 @@ def make_handler(
     synthetic_simulation_enabled: bool = False,
     synthetic_bundle_provider: Callable[[], dict[str, Any]] | None = None,
     review_service: SalesMarketReviewService | None = None,
+    service_mode: bool = False,
 ) -> type[BaseHTTPRequestHandler]:
-    """Create a handler; simulation routes are isolated behind an explicit flag."""
+    """Create a handler; simulation routes are isolated behind an explicit flag.
+
+    ``service_mode`` only changes the mode reported by /api/health; binding and
+    authentication rules are enforced by serve() and the routes themselves.
+    """
     build_agent = agent_factory or MarketResearchAgent
 
     class Project07Handler(BaseHTTPRequestHandler):
@@ -409,10 +414,11 @@ def make_handler(
                 return
             path = urlsplit(self.path).path
             if path == "/api/health":
-                health = {"status": "ok", "mode": "local-development"}
+                health = {"status": "ok", "mode": "service" if service_mode else "local-development"}
                 if synthetic_simulation_enabled:
                     health.update({
-                        "mode": "synthetic_simulation",
+                        # Under --service-mode the mode stays "service"; the markers label the data.
+                        "mode": "service" if service_mode else "synthetic_simulation",
                         "synthetic": True,
                         "data_nature": "synthetic_test",
                         "permission_status": "authorized_for_synthetic_testing_only",
@@ -670,6 +676,7 @@ def serve(
     server = ThreadingHTTPServer((host, port), make_handler(
         agent_factory, synthetic_simulation_enabled=enable_synthetic_simulation,
         synthetic_bundle_provider=bundle_store.load_bundle if bundle_store is not None else None,
+        service_mode=service_mode,
     ))
     print(f"Project_07 local service (vogue-handoff/0.1): http://{host}:{port}")
     if synthetic_demo:
