@@ -16,9 +16,12 @@ from jsonschema import Draft202012Validator
 
 from market_research_agent.artifact_reader import (MAX_ARTIFACT_BYTES, DirectoryArtifacts,
                                                    artifact_reader_from_env, require_artifact_reader)
+from market_research_agent.domain.models import (EvidenceRecord, FindingKind, PermissionStatus,
+                                                 ResearchFinding, ResultStatus, SourceReport)
+from market_research_agent.domain.sales import SalesDataResult, SalesObservation
 from market_research_agent.http_server import make_handler, review_agent_factory, serve
 from market_research_agent.reviews import (REVIEW_PATH, VERSION, _REGISTRY, ReviewError, canonical,
-                                           fingerprint, parse_review_response, review_artifact_dir)
+                                           fingerprint, parse_json, parse_review_response, review_artifact_dir)
 from market_research_agent.sources.market.synthetic_review_fixture import (SyntheticReviewFixtureSource,
                                                                            default_bundle_path, load_bundle)
 from market_research_agent.sources.shared.r2_object_store import R2ObjectStore
@@ -67,7 +70,13 @@ def mint_p08(request, root):
     return request
 
 
-def call(handler, raw, env, *, token=TOKEN, content_type='application/json'):
+def call(handler, raw, env, **kwargs):
+    status, body = call_raw(handler, raw, env, **kwargs)
+    return status, json.loads(body)
+
+
+def call_raw(handler, raw, env, *, token=TOKEN, content_type='application/json'):
+    """Return the status and the exact response bytes written by the handler."""
     h = object.__new__(handler)
     h.path = REVIEW_PATH
     h.headers = email.message.Message()
@@ -79,7 +88,7 @@ def call(handler, raw, env, *, token=TOKEN, content_type='application/json'):
     h.send_response, h.send_header, h.end_headers = Mock(), Mock(), Mock()
     with patch.dict(os.environ, {'VOGUE_AGENT_SERVICE_BEARER_TOKEN': TOKEN, **env}, clear=True):
         h.do_POST()
-    return h.send_response.call_args.args[0], json.loads(h.wfile.getvalue())
+    return h.send_response.call_args.args[0], h.wfile.getvalue()
 
 
 class ReviewRouteTestCase(unittest.TestCase):
@@ -341,6 +350,83 @@ class SyntheticReviewSourceTests(ReviewRouteTestCase):
         result = subprocess.run([sys.executable, str(ROOT / 'scripts/build_synthetic_review_fixture.py'), '--check'],
                                 cwd=ROOT, capture_output=True, text=True, timeout=120)
         self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+
+
+class NonEmptyReviewRoundTripTests(ReviewRouteTestCase):
+    """Regression P07-QA-SOURCE: a non-empty Review whose evidence carries the
+    p07_source_snapshot artifact is accepted by P07's own parser round-trip."""
+
+    def setUp(self):
+        super().setUp()
+        self.artifact_root = self.root / 'artifacts'
+        self.peer_root = self.root / 'peer'  # P08 mounts P07 reviews at <peer>/p07/reviews
+        self.request = mint_p08(fixture_request(), self.artifact_root)
+        self.env = {'VOGUE_P07_REVIEW_ARTIFACT_DIR': str(self.peer_root / 'p07/reviews'),
+                    'VOGUE_UPSTREAM_ARTIFACT_ROOT': str(self.artifact_root)}
+        source = Mock()
+        source.research.return_value = SourceReport(
+            status=ResultStatus.OK,
+            findings=(ResearchFinding('F-QA-1', 'sales', 'Historical purchase rows were observed for the test scope.',
+                                      kind=FindingKind.FACT, evidence_ids=('E-QA-1',)),),
+            evidence=(EvidenceRecord('E-QA-1', 'hm-historical', 'historical_sales', 'H&M test historical rows',
+                                     permission_status=PermissionStatus.AUTHORIZED, as_of='2020-09-22'),),
+            sales_data=SalesDataResult('ok', observations=(SalesObservation(
+                'O-QA-1', 'purchase_rows', 3, 'purchase_rows', ('E-QA-1',), period_start='2020-09-21',
+                period_end='2020-09-27', as_of='2020-09-27', data_nature='historical_external'),)))
+        self.handler = make_handler(Mock(side_effect=lambda: MarketResearchAgent(source)))
+
+    def produce(self):
+        status, body = call_raw(self.handler, canonical(self.request), self.env)
+        self.assertEqual(status, 200, body)
+        return body
+
+    def test_wire_bytes_round_trip_through_the_strict_parser(self):
+        body = self.produce()
+        document = parse_json(body)  # strict: unique keys, finite numbers, UTF-8
+        self.assertEqual(document['status'], 'partial')
+        review = document['result']['review']
+        self.assertTrue(review['findings'] and all(f['evidence_refs'] for f in review['findings']))
+        self.assertTrue(any(m['value'] is not None for m in review['metrics']))
+        snapshot = next(e for e in review['evidence'] if e.get('record_type') == 'p07_source_snapshot')
+        self.assertIn('artifact', snapshot)
+        self.assertEqual(parse_review_response(document, self.request), document)
+        # The replayed response is accepted too.
+        self.assertEqual(parse_review_response(parse_json(self.produce()), self.request), document)
+
+    def test_source_and_review_artifacts_resolve_through_the_peer_mount(self):
+        document = parse_json(self.produce())
+        review = document['result']['review']
+        snapshot = next(e for e in review['evidence'] if e.get('record_type') == 'p07_source_snapshot')
+        peer = DirectoryArtifacts(self.peer_root)
+        source_bytes = peer(snapshot['artifact'])
+        self.assertEqual(parse_json(source_bytes), snapshot['source_data'])
+        self.assertEqual(fingerprint(snapshot['source_data']), snapshot['source_response_sha256'])
+        self.assertIn(snapshot['artifact'], document['result']['artifacts'])
+        for artifact in document['result']['artifacts']:
+            self.assertTrue(artifact['uri'].startswith('artifact://p07/reviews/'))
+            self.assertEqual(sha256(peer(artifact)).hexdigest(), artifact['sha256'])
+
+    def test_tampered_non_empty_reviews_are_rejected(self):
+        document = parse_json(self.produce())
+
+        def evidence(doc):
+            return doc['result']['review']['evidence']
+
+        def rehash(doc):
+            doc['result']['review_identity']['content_sha256'] = fingerprint(doc['result']['review'])
+            return doc
+        changed_data = deepcopy(document)
+        evidence(changed_data)[-1]['source_data']['status'] = 'ok-but-edited'
+        changed_draft = deepcopy(document)
+        evidence(changed_draft)[-1]['retained_planning_draft']['observation']['source'] = 'edited'
+        dropped = deepcopy(document)
+        evidence(dropped).pop()
+        for label, candidate, code in (('source_data', changed_data, 'SOURCE_HASH_MISMATCH'),
+                                       ('retained draft', changed_draft, 'RETAINED_DRAFT_CHANGED'),
+                                       ('snapshot dropped', dropped, 'EVIDENCE_DOCUMENT_MISSING')):
+            with self.subTest(label), self.assertRaises(ReviewError) as caught:
+                parse_review_response(rehash(candidate), self.request)
+            self.assertEqual(caught.exception.code, code)
 
 
 class ReviewArtifactDirTests(ReviewRouteTestCase):
