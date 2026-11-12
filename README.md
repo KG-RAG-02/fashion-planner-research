@@ -354,8 +354,9 @@ Container image (`docker build -t vogue/sales-market:dev .`):
   | Legacy `POST /v1/agents/sales-market-agent/runs` (`vogue-handoff/0.1`) and `/structured-runs` | Bearer | Unchanged |
 
 - **Profiles:** `docker compose --profile api up --build sales-market-agent-api`
-  runs the same image with a read-only rootfs, tmpfs mounts, the
-  `review-artifacts` volume at `/data/reviews` and loopback publication. The
+  runs the same image with a read-only rootfs and tmpfs `/tmp`. It mounts the
+  `review-artifacts` volume at `/data/reviews` and the `hm-cache` volume at
+  `/data/hm-cache` (the DuckDB copy may reach 2 GB), and publishes on loopback. The
   idle loop (`python -m market_research_agent.runtime`) stays available under
   the `idle` profile. Deploy behind a private network or TLS termination.
 - **Cloud sources:** the API profile defaults to none. Inject the selected

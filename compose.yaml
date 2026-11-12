@@ -38,7 +38,6 @@ services:
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
-      - /data/hm-cache:size=64m,uid=10001,gid=10001,mode=0700
     environment:
       VOGUE_AGENT_SERVICE_BEARER_TOKEN: ${VOGUE_AGENT_SERVICE_BEARER_TOKEN:-}
       VOGUE_PROJECT07_DISABLE_DOTENV: "1"
@@ -49,9 +48,12 @@ services:
       # mount of P08 blobs at <root>/p08/blobs); without it /reviews fails closed with 503.
     volumes:
       - review-artifacts:/data/reviews
+      # The H&M R2 DuckDB copy can reach VOGUE_R2_HM_DB_MAX_BYTES (2 GB); keep it off tmpfs.
+      - hm-cache:/data/hm-cache
     ports:
       - "127.0.0.1:8766:8766"
     init: true
 
 volumes:
   review-artifacts:
+  hm-cache:
