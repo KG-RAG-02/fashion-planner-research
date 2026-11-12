@@ -56,7 +56,9 @@ class SalesMarketReviewAdapterTests(unittest.TestCase):
             "source_grade": "public_sale",
             "listed_price_statistics": {"median": 9000, "currency": "KRW"},
             "price_per_meter_krw_statistics": None,
-            "cost_per_meter_calculable": False,
+            "estimated_price_per_meter_available": True,
+            "verified_price_per_meter_available": False,
+            "cost_per_meter_operational_eligible": False,
         },)
         review = build_sales_market_review(
             result,
@@ -70,7 +72,8 @@ class SalesMarketReviewAdapterTests(unittest.TestCase):
         self.assertEqual(review["category_price_comparison"][0]["price_statistics"]["median"], 0.0254)
         self.assertIsNone(review["category_price_comparison"][0]["price_statistics"]["currency"])
         self.assertEqual(review["material_cost_analysis"][0]["source_grade"], "public_sale")
-        self.assertFalse(review["material_cost_analysis"][0]["cost_per_meter_calculable"])
+        self.assertTrue(review["material_cost_analysis"][0]["estimated_price_per_meter_available"])
+        self.assertFalse(review["material_cost_analysis"][0]["verified_price_per_meter_available"])
         self.assertEqual(review["status"], "partial")
         self.assertEqual({item["field"] for item in review["missing_data"]}, {"customer_segments"})
 

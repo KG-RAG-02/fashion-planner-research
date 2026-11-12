@@ -21,7 +21,10 @@ _REQUIRED_COLUMNS = {
     "record_id", "product_name", "category", "composition", "construction_or_finish",
     "weight_g_per_cut", "width_cm", "color", "original_unit", "price_amount", "currency",
     "unit_price_krw_per_meter", "supplier", "shipping_terms", "source_url", "observed_at",
-    "price_history_status", "source_page_type",
+    "price_history_status", "source_page_type", "estimated_sales_unit",
+    "estimated_length_m",
+    "unit_price_estimation_status", "unit_price_estimation_method",
+    "unit_price_estimation_confidence", "unit_price_estimation_evidence_urls",
 }
 _MATERIAL_ALIASES = {
     "linen": ("린넨",), "cotton": ("면",), "denim": ("데님",),
@@ -136,6 +139,16 @@ class R2FabricPriceSource:
             currency = next(iter(currencies)) if len(currencies) == 1 else None
             per_meter = [value for row, _amount in entries
                          if (value := _positive_decimal(row.get("unit_price_krw_per_meter", ""))) is not None]
+            per_meter_statuses = {
+                row.get("unit_price_estimation_status", "").strip()
+                for row, _amount in entries
+                if _positive_decimal(row.get("unit_price_krw_per_meter", "")) is not None
+            }
+            confidence_counts: dict[str, int] = {}
+            for row, _amount in entries:
+                if _positive_decimal(row.get("unit_price_krw_per_meter", "")) is not None:
+                    confidence = row.get("unit_price_estimation_confidence", "unknown").strip() or "unknown"
+                    confidence_counts[confidence] = confidence_counts.get(confidence, 0) + 1
             comparables = []
             for row, amount in entries:
                 comparables.append({
@@ -147,9 +160,15 @@ class R2FabricPriceSource:
                     "width_cm": row["width_cm"].strip() or None,
                     "color": row["color"].strip() or None,
                     "original_unit": row["original_unit"].strip() or None,
+                    "estimated_sales_unit": row.get("estimated_sales_unit", "").strip() or None,
+                    "estimated_length_m": row.get("estimated_length_m", "").strip() or None,
                     "listed_price": float(amount),
                     "currency": row.get("currency", "").strip().upper() or None,
                     "unit_price_krw_per_meter": float(value) if (value := _positive_decimal(row.get("unit_price_krw_per_meter", ""))) else None,
+                    "unit_price_estimation_status": row.get("unit_price_estimation_status", "").strip() or None,
+                    "unit_price_estimation_method": row.get("unit_price_estimation_method", "").strip() or None,
+                    "unit_price_estimation_confidence": row.get("unit_price_estimation_confidence", "").strip() or None,
+                    "unit_price_estimation_evidence_urls": row.get("unit_price_estimation_evidence_urls", "").strip() or None,
                     "supplier": row["supplier"].strip() or None,
                     "shipping_terms": row["shipping_terms"].strip() or None,
                     "source_url": row["source_url"].strip(),
@@ -173,14 +192,19 @@ class R2FabricPriceSource:
                     "median": float(median(amounts)),
                     "maximum": float(max(amounts)),
                     "currency": currency,
-                    "statistic": "unweighted_median_of_listing_rows; sales unit is not verified",
+                    "statistic": "unweighted_median_of_source_listing_rows; original sales unit is unverified",
                 },
                 "price_per_meter_krw_statistics": ({
                     "sample_count": len(per_meter), "minimum": float(min(per_meter)),
                     "median": float(median(per_meter)), "maximum": float(max(per_meter)),
                     "currency": "KRW", "unit": "KRW/m",
+                    "status": "estimated" if "estimated_not_verified" in per_meter_statuses else "observed",
+                    "confidence_counts": confidence_counts,
+                    "method": "estimated listed_price / 0.90m (1 Korean ma)",
                 } if per_meter else None),
-                "cost_per_meter_calculable": bool(per_meter),
+                "estimated_price_per_meter_available": bool(per_meter),
+                "verified_price_per_meter_available": "observed" in per_meter_statuses,
+                "cost_per_meter_operational_eligible": False,
                 "category_mapping": {
                     "mapping_id": "project07-fabric-material-terms",
                     "mapping_version": "1.0",
@@ -198,7 +222,8 @@ class R2FabricPriceSource:
                 "operational_eligible": False,
                 "limitations": [
                     "This is a point-in-time public listing snapshot, not a supplier quote or verified purchase cost.",
-                    "The listed sales unit is unverified; listed prices cannot be converted to a per-meter cost.",
+                    "Per-meter values are low-confidence estimates based on one listed-price unit being 1 Korean ma (90 cm); item-level units are not confirmed.",
+                    "Estimated per-meter prices are research references and are not automatically included in product margin costing.",
                     "Material percentages and some textile specifications are missing or unverified.",
                     "Shipping terms are separate and must not be treated as included in the listed price.",
                     "The snapshot has no prior history, so price trends and changes cannot be calculated.",
