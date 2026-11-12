@@ -322,15 +322,45 @@ That Review states that the raw bytes were not fetched. Category and season
 remain in a separate search view. The legacy adapters do not apply a season
 filter, and the Review states that limitation.
 
-Local API: `vogue-market-research-http --host 127.0.0.1 --port 8766`.
-Set `VOGUE_AGENT_SERVICE_BEARER_TOKEN` in process environment. Container API:
-`docker compose --profile api up --build sales-market-agent-api`. Explicit
-`--service-mode --host 0.0.0.0` requires that token; use a private network/TLS
-termination at deployment. Host port publication stays on loopback. The idle
-sleep/network-none service has its own `idle` profile. The API profile defaults
-to no cloud sources; inject the selected existing R2/HM environment keys through
-an approved deployment override when those sources are needed. Artifacts and
-SQLite replay history persist in the `review-artifacts` volume.
+Local API: `vogue-market-research-http --host 127.0.0.1 --port 8766`. Set
+`VOGUE_AGENT_SERVICE_BEARER_TOKEN` in the process environment. On the host it
+binds to loopback only.
+
+Container image (`docker build -t vogue/sales-market:dev .`):
+
+- **Base and packages:** `python:3.14-slim` with `pip install ".[r2]"`, which
+  adds boto3 and duckdb for the H&M R2 DuckDB source.
+- **User and filesystem:**
+  - The image runs as uid/gid 10001 with `HOME=/tmp` and a read-only root
+    filesystem.
+  - It sets `VOGUE_PROJECT07_DISABLE_DOTENV=1`, so `.env` is never read.
+  - It sets `VOGUE_P07_REVIEW_ARTIFACT_DIR=/data/reviews` and
+    `VOGUE_R2_HM_DB_CACHE_DIR=/data/hm-cache`. Both directories are created
+    with owner 10001 and mode 0700.
+  - Mount `/data/reviews` as a volume (or tmpfs) and `/tmp` as tmpfs.
+    `/data/hm-cache` is needed only when an R2 DuckDB key is configured.
+  - The image does not declare `VOLUME`, so no anonymous volumes are created.
+- **Command:** the default `CMD` is
+  `vogue-market-research-http --service-mode --host 0.0.0.0 --port 8766`.
+  Service mode refuses to start without `VOGUE_AGENT_SERVICE_BEARER_TOKEN`.
+- **Port and health:** `EXPOSE 8766`. `HEALTHCHECK` sends `GET /api/health` to
+  loopback with the stdlib, ignores proxies and makes no external call.
+- **Routes:**
+
+  | Route | Auth | Notes |
+  |---|---|---|
+  | `GET /api/health` | none | Liveness only |
+  | `POST /v1/agents/sales-market-agent/reviews` (`vogue-workflow/0.1`) | `Authorization: Bearer` (`hmac.compare_digest`), checked before the body is read | Statuses: 200 (Review `partial`/`no_results`), 503 or 504 (Review `error` envelope); problem bodies for 400, 401, 413, 415, 422, 502, 503, 504, 500 |
+  | Legacy `POST /v1/agents/sales-market-agent/runs` (`vogue-handoff/0.1`) and `/structured-runs` | Bearer | Unchanged |
+
+- **Profiles:** `docker compose --profile api up --build sales-market-agent-api`
+  runs the same image with a read-only rootfs, tmpfs mounts, the
+  `review-artifacts` volume at `/data/reviews` and loopback publication. The
+  idle loop (`python -m market_research_agent.runtime`) stays available under
+  the `idle` profile. Deploy behind a private network or TLS termination.
+- **Cloud sources:** the API profile defaults to none. Inject the selected
+  existing R2/HM environment keys through an approved deployment override when
+  those sources are needed.
 
 Install with `pip install .` (or `pip install '.[r2]'` for cloud sources).
 Configs, static UI and prompt assets are package data. After editing their

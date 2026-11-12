@@ -3,6 +3,8 @@ services:
     build:
       context: .
     image: vogue-market-research-agent:local
+    # The image default is now the bearer-protected HTTP service; keep the idle loop explicit.
+    command: ["python", "-m", "market_research_agent.runtime"]
     network_mode: none
     profiles: ["idle"]
     init: true
@@ -32,20 +34,24 @@ services:
     image: vogue-market-research-agent:local
     profiles: ["api"]
     command: ["vogue-market-research-http", "--service-mode", "--host", "0.0.0.0", "--port", "8766"]
+    user: "10001:10001"
+    read_only: true
+    tmpfs:
+      - /tmp:size=64m,mode=1777
+      - /data/hm-cache:size=64m,uid=10001,gid=10001,mode=0700
     environment:
       VOGUE_AGENT_SERVICE_BEARER_TOKEN: ${VOGUE_AGENT_SERVICE_BEARER_TOKEN:-}
       VOGUE_PROJECT07_DISABLE_DOTENV: "1"
-      VOGUE_P07_REVIEW_ARTIFACT_DIR: /app/review-artifacts
+      VOGUE_P07_REVIEW_ARTIFACT_DIR: /data/reviews
+      # Optional offline Review source for the stub profile (empty = configured default).
+      VOGUE_P07_REVIEW_SOURCE: ${VOGUE_P07_REVIEW_SOURCE:-}
+      # /reviews verifies P08 raw artifacts from VOGUE_UPSTREAM_ARTIFACT_ROOT (a read-only
+      # mount of P08 blobs at <root>/p08/blobs); without it /reviews fails closed with 503.
     volumes:
-      - review-artifacts:/app/review-artifacts
+      - review-artifacts:/data/reviews
     ports:
       - "127.0.0.1:8766:8766"
     init: true
-    healthcheck:
-      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/api/health', timeout=3)"]
-      interval: 30s
-      timeout: 5s
-      retries: 3
 
 volumes:
   review-artifacts:
