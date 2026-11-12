@@ -51,6 +51,12 @@ SUPPORTED_UPSTREAM_SCHEMA_VERSIONS = {
     "inventory_product_result": {"1.0"},
 }
 MAX_BODY_BYTES = 1_048_576
+# POST-only v1 agent routes: any other method gets 405 with "Allow: POST".
+LEGACY_POST_ROUTES = frozenset({
+    f"/v1/agents/{CANONICAL_ROUTE_ID}/runs",
+    f"/v1/agents/{CANONICAL_ROUTE_ID}/structured-runs",
+    *(f"/v1/agents/{alias}/runs" for alias in DEPRECATED_ROUTE_IDS),
+})
 SYNTHETIC_SIMULATION_PATH = "/v1/simulations/synthetic-rag/runs"
 AGENT_SIMULATION_PATH = f"/v1/agents/{CANONICAL_ROUTE_ID}/simulation-runs"
 SYNTHETIC_SIMULATION_UI_PATH = "/synthetic-simulation"
@@ -294,7 +300,27 @@ def make_handler(
             for name, value in (headers or {}).items():
                 self.send_header(name, value)
             self.end_headers()
-            self.wfile.write(encoded)
+            if getattr(self, "command", None) != "HEAD":  # HEAD responses carry no body
+                self.wfile.write(encoded)
+
+        def _method_not_allowed(self) -> bool:
+            """Answer 405 + Allow for a POST-only v1 agent route; False for any other path."""
+            path = unquote(urlsplit(self.path).path)
+            message = "Method not allowed; this route accepts POST."
+            if path == REVIEW_PATH:
+                self._send_json(405, problem("METHOD_NOT_ALLOWED", message), headers={"Allow": "POST"}, preserve=True)
+            elif path in LEGACY_POST_ROUTES:
+                self._send_json(405, _error_payload("METHOD_NOT_ALLOWED", message), headers={"Allow": "POST"})
+            else:
+                return False
+            return True
+
+        def _other_method(self) -> None:
+            # Other paths keep the stdlib answer for methods without a handler.
+            if not self._method_not_allowed():
+                self.send_error(501, "Unsupported method (%r)" % self.command)
+
+        do_HEAD = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = do_TRACE = do_CONNECT = _other_method
 
         def _send_static(self, path: Path, content_type: str) -> None:
             try:
@@ -379,6 +405,8 @@ def make_handler(
             self._send_json(200, result)
 
         def do_GET(self) -> None:
+            if self._method_not_allowed():
+                return
             path = urlsplit(self.path).path
             if path == "/api/health":
                 health = {"status": "ok", "mode": "local-development"}

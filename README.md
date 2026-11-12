@@ -351,7 +351,16 @@ Container image (`docker build -t vogue/sales-market:dev .`):
   |---|---|---|
   | `GET /api/health` | none | Liveness only |
   | `POST /v1/agents/sales-market-agent/reviews` (`vogue-workflow/0.1`) | `Authorization: Bearer` (`hmac.compare_digest`), checked before the body is read | Statuses: 200 (Review `partial`/`no_results`), 503 or 504 (Review `error` envelope); problem bodies for 400, 401, 409 (`DRAFT_REVISION_CONFLICT`: same `draft_id` and revision already reviewed with different content), 413, 415, 422 (other semantic violations), 502, 503, 504, 500 |
-  | Legacy `POST /v1/agents/sales-market-agent/runs` (`vogue-handoff/0.1`) and `/structured-runs` | Bearer | Unchanged |
+  | Legacy `POST /v1/agents/sales-market-agent/runs` (`vogue-handoff/0.1`), its deprecated alias `/v1/agents/market-research-agent/runs`, and `/structured-runs` | Bearer | Unchanged |
+
+  On these four routes every other method (`GET`, `HEAD`, `PUT`, `DELETE`,
+  `PATCH`, `OPTIONS`, `TRACE`, `CONNECT`) returns 405 with `Allow: POST`.
+  No authentication is needed for that answer, and HEAD responses have no
+  body. The body is a `METHOD_NOT_ALLOWED` problem on `/reviews`
+  (`common.schema.json#/$defs/problem`, `retryable: false`) and the
+  `vogue-handoff/0.1` error envelope on the legacy routes. Other paths keep
+  their previous answers: unknown GET paths return 404, and methods without a
+  handler return 501 from the standard library.
 
 - **Profiles:** `docker compose --profile api up --build sales-market-agent-api`
   runs the same image with a read-only rootfs and tmpfs `/tmp`. It mounts the
