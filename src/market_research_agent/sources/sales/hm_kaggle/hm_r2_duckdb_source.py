@@ -19,6 +19,7 @@ from .hm_sales_adapter import HmHistoricalSalesSource, HmSourceReadError, _perio
 _SOURCE_ID = "hm-kaggle-personalized-fashion-recommendations"
 _MAX_DB_BYTES = 2_000_000_000
 _CHUNK_BYTES = 8 * 1024 * 1024
+_DEFAULT_CACHE_DIR = "data/local/r2_hm_db"
 
 
 class HmDuckDBSourceError(HmSourceReadError):
@@ -48,7 +49,8 @@ class R2DuckDBCache:
         self.store = store
         self.object_key = (object_key or os.getenv("PROJECT07_HM_R2_DB_KEY", "")
                            or os.getenv("R2_DB_KEY", "")).strip()
-        self.cache_dir = Path(cache_dir or os.getenv("VOGUE_R2_HM_DB_CACHE_DIR", "data/local/r2_hm_db"))
+        # A blank VOGUE_R2_HM_DB_CACHE_DIR keeps the default instead of the working directory.
+        self.cache_dir = Path(cache_dir or os.getenv("VOGUE_R2_HM_DB_CACHE_DIR", "").strip() or _DEFAULT_CACHE_DIR)
         try:
             self.max_bytes = (max_bytes if max_bytes is not None
                               else int(os.getenv("VOGUE_R2_HM_DB_MAX_BYTES", str(_MAX_DB_BYTES))))

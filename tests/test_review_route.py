@@ -16,7 +16,7 @@ from market_research_agent.artifact_reader import (MAX_ARTIFACT_BYTES, Directory
                                                    artifact_reader_from_env, require_artifact_reader)
 from market_research_agent.http_server import make_handler
 from market_research_agent.reviews import (REVIEW_PATH, VERSION, _REGISTRY, ReviewError, canonical,
-                                           fingerprint, parse_review_response)
+                                           fingerprint, parse_review_response, review_artifact_dir)
 from market_research_agent.workflows.market_research import MarketResearchAgent
 
 FIXTURES = Path(__file__).parent / 'fixtures/reviews'
@@ -225,6 +225,27 @@ class ArtifactReaderRouteTests(ReviewRouteTestCase):
                              env={**self.env, 'VOGUE_UPSTREAM_ARTIFACT_ROOT': str(self.root / 'absent')})
         self.draft_blob.unlink()
         self.assert_rejected('ARTIFACT_UNAVAILABLE', 503, retryable=True)
+
+
+class ReviewArtifactDirTests(ReviewRouteTestCase):
+    def test_env_selects_the_store_and_blank_keeps_the_default(self):
+        self.assertEqual(review_artifact_dir({}), Path('.local/review-artifacts'))
+        self.assertEqual(review_artifact_dir({'VOGUE_P07_REVIEW_ARTIFACT_DIR': ' '}), Path('.local/review-artifacts'))
+        self.assertEqual(review_artifact_dir({'VOGUE_P07_REVIEW_ARTIFACT_DIR': '/data/reviews'}), Path('/data/reviews'))
+
+    def test_review_artifacts_land_in_the_configured_directory(self):
+        artifact_root = self.root / 'artifacts'
+        request = mint_p08(fixture_request(), artifact_root)
+        env = {**self.env, 'VOGUE_UPSTREAM_ARTIFACT_ROOT': str(artifact_root)}
+        status, out = call(make_handler(Mock(return_value=MarketResearchAgent())), canonical(request), env)
+        self.assertEqual(status, 200, out)
+        artifacts = out['result']['artifacts']
+        self.assertTrue(artifacts)
+        for artifact in artifacts:
+            self.assertRegex(artifact['uri'], r'^artifact://p07/reviews/[0-9a-f]{64}\.json$')
+            path = self.store_dir / artifact['uri'].rsplit('/', 1)[1]
+            self.assertEqual(sha256(path.read_bytes()).hexdigest(), artifact['sha256'])
+        self.assertTrue((self.store_dir / 'reviews.sqlite3').is_file())
 
 
 class DirectoryArtifactsTests(unittest.TestCase):

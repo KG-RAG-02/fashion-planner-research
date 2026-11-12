@@ -284,6 +284,15 @@ work:
 - Unreadable bytes return 503 `ARTIFACT_UNAVAILABLE`. With the root unset, the
   route fails closed with 503 `ARTIFACT_READER_REQUIRED`. Both are `retryable`.
 
+Writable locations (existing variable names are reused; unset or blank keeps
+the default, never the working directory itself):
+
+| Variable | Default | Container | Contents |
+|---|---|---|---|
+| `VOGUE_P07_REVIEW_ARTIFACT_DIR` | `.local/review-artifacts` (relative to the working directory) | `/data/reviews` | `artifact://p07/reviews/<sha256>.json` files (`<dir>/<sha256>.json`) and the `reviews.sqlite3` replay/revision index |
+| `VOGUE_R2_HM_DB_CACHE_DIR` | `data/local/r2_hm_db` | `/data/hm-cache` | Versioned private copy of the H&M R2 DuckDB (`hm-<sha256>.duckdb`), only when an R2 DuckDB key is configured |
+| `VOGUE_R2_HM_DB_MAX_BYTES` | `2000000000` | (default) | Download size ceiling for that DuckDB object |
+
 The Review limitations then report how many retained responses were verified.
 Library callers may still build `SalesMarketReviewService` without a resolver.
 That Review states that the raw bytes were not fetched. Category and season

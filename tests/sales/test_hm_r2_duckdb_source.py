@@ -10,7 +10,7 @@ from unittest.mock import patch
 
 from market_research_agent.domain.models import MarketResearchContext
 from market_research_agent.sources.sales.hm_kaggle.hm_r2_duckdb_source import (
-    R2DuckDBHmHistoricalSalesSource,
+    R2DuckDBCache, R2DuckDBHmHistoricalSalesSource,
 )
 from market_research_agent.sources.shared.r2_object_store import R2ObjectStore, R2Settings
 
@@ -35,6 +35,20 @@ class FakeR2Client:
         self.calls.append(("get", Key))
         return {"ContentLength": len(self.payload), "VersionId": self.get_version,
                 "ETag": self.etag, "Body": io.BytesIO(self.payload)}
+
+
+class R2DuckDBCacheLocationTests(unittest.TestCase):
+    """VOGUE_R2_HM_DB_CACHE_DIR selects the cache; constructing it needs no duckdb or R2 call."""
+
+    def test_explicit_argument_then_environment_then_default(self):
+        with patch.dict("os.environ", {"VOGUE_R2_HM_DB_CACHE_DIR": "/data/hm-cache"}):
+            self.assertEqual(R2DuckDBCache(object_key="k").cache_dir, Path("/data/hm-cache"))
+            self.assertEqual(R2DuckDBCache(object_key="k", cache_dir=Path("/x")).cache_dir, Path("/x"))
+        for value in ("", "  "):
+            with patch.dict("os.environ", {"VOGUE_R2_HM_DB_CACHE_DIR": value}):
+                self.assertEqual(R2DuckDBCache(object_key="k").cache_dir, Path("data/local/r2_hm_db"))
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(R2DuckDBCache(object_key="k").cache_dir, Path("data/local/r2_hm_db"))
 
 
 @unittest.skipUnless(HAS_DUCKDB, "duckdb optional dependency is required")

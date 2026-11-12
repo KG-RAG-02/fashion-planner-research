@@ -277,6 +277,20 @@ def parser_for(body):
     return parser
 
 
+REVIEW_ARTIFACT_DIR_ENV = 'VOGUE_P07_REVIEW_ARTIFACT_DIR'
+DEFAULT_REVIEW_ARTIFACT_DIR = '.local/review-artifacts'
+
+
+def review_artifact_dir(environ=None):
+    """Store root for artifact://p07/reviews/<sha256>.json and reviews.sqlite3.
+
+    Unset or blank keeps the historical default, relative to the working
+    directory; a blank value never means the working directory itself.
+    """
+    value = (os.environ if environ is None else environ).get(REVIEW_ARTIFACT_DIR_ENV, '').strip()
+    return Path(value or DEFAULT_REVIEW_ARTIFACT_DIR)
+
+
 class ReviewArtifactStore:
     """Private immutable local artifacts; no paths/bytes are served over HTTP."""
     def __init__(self, root):

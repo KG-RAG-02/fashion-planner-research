@@ -19,7 +19,7 @@ from urllib.parse import unquote, urlsplit
 from .resource_paths import resource_root
 from .artifact_reader import artifact_reader_from_env
 from .reviews import (REVIEW_PATH, MAX_BODY_BYTES as REVIEW_MAX_BODY_BYTES, SalesMarketReviewService,
-                      ReviewArtifactStore, ReviewError, parse_json, parser_for, problem)
+                      ReviewArtifactStore, ReviewError, parse_json, parser_for, problem, review_artifact_dir)
 
 from .domain.models import MarketResearchContext, normalize_no_results_payload
 from .sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
@@ -418,9 +418,8 @@ def make_handler(
                 parser_for(body)
                 # Retained raw bytes are always verified over HTTP: without
                 # VOGUE_UPSTREAM_ARTIFACT_ROOT the reader fails closed (503).
-                service = review_service or SalesMarketReviewService(build_agent, ReviewArtifactStore(
-                    os.getenv("VOGUE_P07_REVIEW_ARTIFACT_DIR", ".local/review-artifacts")),
-                    artifact_reader_from_env())
+                service = review_service or SalesMarketReviewService(
+                    build_agent, ReviewArtifactStore(review_artifact_dir()), artifact_reader_from_env())
                 code, response = service.review(body, raw)
                 send(code, response)
             except ReviewError as exc:
