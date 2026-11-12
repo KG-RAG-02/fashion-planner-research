@@ -1,0 +1,52 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vogue:sales-market-review:0.1:proposal",
+  "title": "Project_07 internal PlanningDraft review proposal request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "request_id", "input"],
+  "properties": {
+    "contract_version": {"const": "vogue-sales-market-review/0.1-proposal"},
+    "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "planning_draft"],
+      "properties": {
+        "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "planning_draft": {"$ref": "#/$defs/planning_draft"}
+      }
+    }
+  },
+  "$defs": {
+    "planning_draft": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["schema_version", "draft_id", "product"],
+      "properties": {
+        "schema_version": {"const": "1.0"},
+        "draft_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "product": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["category"],
+          "properties": {
+            "category": {"type": "string", "minLength": 1, "maxLength": 120},
+            "product_type": {"type": "string", "minLength": 1, "maxLength": 120},
+            "gender": {"enum": ["women", "men", "unisex", "unknown"]},
+            "season": {"type": "string", "minLength": 1, "maxLength": 120},
+            "material": {"type": "string", "minLength": 1, "maxLength": 120},
+            "proposed_price": {"type": "number", "exclusiveMinimum": 0},
+            "currency": {"type": "string", "pattern": "^[A-Za-z]{3}$"}
+          },
+          "allOf": [
+            {
+              "if": {"required": ["proposed_price"]},
+              "then": {"required": ["currency"]}
+            }
+          ]
+        }
+      }
+    }
+  }
+}

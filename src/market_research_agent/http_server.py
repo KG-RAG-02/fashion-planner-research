@@ -9,6 +9,7 @@ from __future__ import annotations
 import argparse
 import hmac
 import json
+import math
 import mimetypes
 import os
 from pathlib import Path
@@ -16,7 +17,8 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
-from .domain.models import MarketResearchContext, normalize_no_results_payload
+from .domain.models import MarketResearchContext, MarketResearchResult, ResultStatus, normalize_no_results_payload
+from .domain.sales_market_review import REVIEW_SCHEMA_VERSION, build_sales_market_review
 from .sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
 from .sources.market.synthetic_r2 import SyntheticR2FixtureBundleStore
 from .sources.sales.hm_kaggle.hm_sales_adapter import HmHistoricalSalesSource
@@ -37,6 +39,7 @@ from .synthetic_rag import (
 
 
 CONTRACT_VERSION = "vogue-handoff/0.1"
+REVIEW_CONTRACT_VERSION = "vogue-sales-market-review/0.1-proposal"
 AGENT_ID = MarketResearchAgent.agent_id
 CANONICAL_ROUTE_ID = "sales-market-agent"
 DEPRECATED_ROUTE_IDS = {"market-research-agent"}
@@ -48,6 +51,7 @@ MAX_BODY_BYTES = 1_048_576
 SYNTHETIC_SIMULATION_PATH = "/v1/simulations/synthetic-rag/runs"
 AGENT_SIMULATION_PATH = f"/v1/agents/{CANONICAL_ROUTE_ID}/simulation-runs"
 SYNTHETIC_SIMULATION_UI_PATH = "/synthetic-simulation"
+REVIEW_PATH = f"/v1/agents/{CANONICAL_ROUTE_ID}/reviews"
 _WEB_ROOT = Path(__file__).resolve().parents[2] / "web"
 _SYNTHETIC_UI_FILES = {
     "/synthetic-simulation.js": _WEB_ROOT / "synthetic_simulation.js",
@@ -86,11 +90,74 @@ def _error_payload(code: str, message: str, request_id: str | None = None) -> di
     }
 
 
+def _review_error_payload(code: str, message: str, request_id: str | None = None) -> dict[str, Any]:
+    return {
+        "contract_version": REVIEW_CONTRACT_VERSION,
+        "request_id": request_id,
+        "error": {"code": code, "message": message},
+    }
+
+
 class RequestValidationError(ValueError):
     def __init__(self, code: str, message: str, http_status: int = 422) -> None:
         super().__init__(message)
         self.code = code
         self.http_status = http_status
+
+
+def context_from_review_request(value: Any) -> tuple[str, dict[str, Any]]:
+    """Validate the local PlanningDraft review proposal input.
+
+    This contract is intentionally separate from the shared v0.1 research run.
+    """
+    if not isinstance(value, dict) or set(value) != {"contract_version", "request_id", "input"}:
+        raise RequestValidationError("INVALID_ENVELOPE", "Review request envelope is invalid.")
+    if value.get("contract_version") != REVIEW_CONTRACT_VERSION:
+        raise RequestValidationError("UNSUPPORTED_CONTRACT_VERSION", "Unsupported review contract_version.")
+    request_id = value.get("request_id")
+    if not isinstance(request_id, str) or not request_id.strip() or _safe_error_request_id(request_id) != request_id:
+        raise RequestValidationError("INVALID_REQUEST_ID", "request_id is invalid.")
+    payload = value.get("input")
+    if not isinstance(payload, dict) or set(payload) != {"request_id", "planning_draft"}:
+        raise RequestValidationError("INVALID_INPUT", "Review input must contain request_id and planning_draft only.")
+    if payload.get("request_id") != request_id:
+        raise RequestValidationError("REQUEST_ID_MISMATCH", "Envelope and input request_id must match.")
+    draft = payload.get("planning_draft")
+    if not isinstance(draft, dict) or set(draft) != {"schema_version", "draft_id", "product"}:
+        raise RequestValidationError("INVALID_PLANNING_DRAFT", "planning_draft fields do not match schema 1.0.")
+    if draft.get("schema_version") != "1.0":
+        raise RequestValidationError("UNSUPPORTED_PRODUCER_SCHEMA", "planning_draft schema_version must be 1.0.")
+    draft_id = draft.get("draft_id")
+    if not isinstance(draft_id, str) or not draft_id.strip() or _safe_error_request_id(draft_id) != draft_id:
+        raise RequestValidationError("INVALID_PLANNING_DRAFT", "planning_draft.draft_id is invalid.")
+    product = draft.get("product")
+    allowed_product_fields = {
+        "category", "product_type", "gender", "season", "material", "proposed_price", "currency",
+    }
+    if not isinstance(product, dict) or set(product) - allowed_product_fields:
+        raise RequestValidationError("INVALID_PLANNING_DRAFT", "planning_draft.product contains unsupported fields.")
+    category = product.get("category")
+    if not isinstance(category, str) or not category.strip() or len(category) > 120:
+        raise RequestValidationError("INVALID_PLANNING_DRAFT", "planning_draft.product.category is required.")
+    for field in ("product_type", "gender", "season", "material"):
+        item = product.get(field)
+        if item is not None and (not isinstance(item, str) or not item.strip() or len(item) > 120):
+            raise RequestValidationError("INVALID_PLANNING_DRAFT", f"planning_draft.product.{field} is invalid.")
+    gender = product.get("gender")
+    if gender is not None and gender.casefold() not in {"women", "men", "unisex", "unknown"}:
+        raise RequestValidationError("INVALID_PLANNING_DRAFT", "planning_draft.product.gender is unsupported.")
+    price = product.get("proposed_price")
+    currency = product.get("currency")
+    if price is not None and (
+        isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0
+    ):
+        raise RequestValidationError("INVALID_PLANNING_DRAFT", "proposed_price must be a positive finite number.")
+    if price is not None and (not isinstance(currency, str) or len(currency) != 3 or not currency.isalpha()):
+        raise RequestValidationError("INVALID_PLANNING_DRAFT", "currency must be supplied as a three-letter code with proposed_price.")
+    if currency is not None and (not isinstance(currency, str) or len(currency) != 3 or not currency.isalpha()):
+        raise RequestValidationError("INVALID_PLANNING_DRAFT", "currency must be a three-letter code.")
+    _validate_json_tree(draft, "planning_draft")
+    return request_id, draft
 
 
 def _reject_json_constant(value: str) -> None:
@@ -260,8 +327,16 @@ def make_handler(
             # Do not write request bodies or URL query data to the default log.
             return
 
-        def _send_json(self, status: int, body: dict[str, Any], *, headers: dict[str, str] | None = None) -> None:
-            encoded = json.dumps(normalize_no_results_payload(body), ensure_ascii=False, allow_nan=False).encode("utf-8")
+        def _send_json(
+            self,
+            status: int,
+            body: dict[str, Any],
+            *,
+            headers: dict[str, str] | None = None,
+            normalize_no_results: bool = True,
+        ) -> None:
+            payload = normalize_no_results_payload(body) if normalize_no_results else body
+            encoded = json.dumps(payload, ensure_ascii=False, allow_nan=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(encoded)))
@@ -386,8 +461,9 @@ def make_handler(
             if path in {SYNTHETIC_SIMULATION_PATH, AGENT_SIMULATION_PATH}:
                 self._handle_synthetic_simulation()
                 return
+            is_review = path == REVIEW_PATH
             prefix = "/v1/agents/"
-            suffix = "/structured-runs" if path.endswith("/structured-runs") else "/runs"
+            suffix = "/reviews" if is_review else "/structured-runs" if path.endswith("/structured-runs") else "/runs"
             if not (path.startswith(prefix) and path.endswith(suffix)):
                 self._send_json(404, _error_payload("NOT_FOUND", "Route not found."))
                 return
@@ -395,17 +471,20 @@ def make_handler(
             if route_agent not in {CANONICAL_ROUTE_ID, *DEPRECATED_ROUTE_IDS} or "/" in route_agent:
                 self._send_json(404, _error_payload("AGENT_NOT_FOUND", "Agent route not found."))
                 return
-            if suffix == "/structured-runs" and route_agent != CANONICAL_ROUTE_ID:
+            if suffix in {"/structured-runs", "/reviews"} and route_agent != CANONICAL_ROUTE_ID:
                 self._send_json(404, _error_payload("AGENT_NOT_FOUND", "Structured request route is not available for this agent."))
                 return
             if not self._authorized():
-                self._send_json(401, _error_payload("UNAUTHORIZED", "Bearer authentication required."))
+                error = _review_error_payload if is_review else _error_payload
+                self._send_json(401, error("UNAUTHORIZED", "Bearer authentication required."))
                 return
             if self.headers.get_content_type() != "application/json":
-                self._send_json(415, _error_payload("UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json."))
+                error = _review_error_payload if is_review else _error_payload
+                self._send_json(415, error("UNSUPPORTED_MEDIA_TYPE", "Content-Type must be application/json."))
                 return
             if self.headers.get("Transfer-Encoding"):
-                self._send_json(400, _error_payload("UNSUPPORTED_TRANSFER_ENCODING", "Transfer-Encoding is unsupported."))
+                error = _review_error_payload if is_review else _error_payload
+                self._send_json(400, error("UNSUPPORTED_TRANSFER_ENCODING", "Transfer-Encoding is unsupported."))
                 return
             try:
                 raw_length = self.headers.get("Content-Length")
@@ -421,7 +500,10 @@ def make_handler(
                 if len(raw_body) != length:
                     raise RequestValidationError("INCOMPLETE_BODY", "Request body was incomplete.", 400)
                 body = json.loads(raw_body, parse_constant=_reject_json_constant)
-                if suffix == "/structured-runs":
+                if is_review:
+                    request_id, planning_draft = context_from_review_request(body)
+                    context = MarketResearchContext(request_id=request_id, planning_request={})
+                elif suffix == "/structured-runs":
                     try:
                         context = context_from_canonical_request(body)
                     except CanonicalRequestError as exc:
@@ -430,12 +512,41 @@ def make_handler(
                     context = context_from_handoff_request(body)
             except RequestValidationError as exc:
                 request_id = _safe_error_request_id(body.get("request_id")) if "body" in locals() and isinstance(body, dict) else None
-                self._send_json(exc.http_status, _error_payload(exc.code, str(exc), request_id))
+                error = _review_error_payload if is_review else _error_payload
+                self._send_json(exc.http_status, error(exc.code, str(exc), request_id))
                 return
             except (ValueError, json.JSONDecodeError, RecursionError):
-                self._send_json(400, _error_payload("INVALID_JSON", "Request body must be valid JSON."))
+                error = _review_error_payload if is_review else _error_payload
+                self._send_json(400, error("INVALID_JSON", "Request body must be valid JSON."))
                 return
             try:
+                if is_review:
+                    # Keep the review path isolated from historical Kaggle and synthetic
+                    # sources until approved category-review providers are configured.
+                    result = MarketResearchResult(
+                        schema_version="1.0",
+                        request_id=context.request_id,
+                        agent_id=AGENT_ID,
+                        status=ResultStatus.NO_RESULTS,
+                        summary="No approved post-planning review sources are configured.",
+                        limitations=("No connected Musinsa price, fabric-cost, or approved customer aggregate source is available.",),
+                    )
+                    review = build_sales_market_review(result, planning_draft=planning_draft).to_dict()
+                    if (
+                        review.get("schema_version") != REVIEW_SCHEMA_VERSION
+                        or review.get("request_id") != context.request_id
+                        or review.get("producer_id") != AGENT_ID
+                        or review.get("status") not in {"ok", "partial", "no_results", "error"}
+                    ):
+                        raise RuntimeError("Review result violates its local proposal contract.")
+                    self._send_json(200, {
+                        "contract_version": REVIEW_CONTRACT_VERSION,
+                        "request_id": context.request_id,
+                        "producer": {"agent_id": AGENT_ID, "schema_version": REVIEW_SCHEMA_VERSION},
+                        "status": review["status"],
+                        "result": review,
+                    }, normalize_no_results=False)
+                    return
                 result = build_agent().run(context).to_dict()
                 if (
                     result.get("schema_version") != "1.0"
@@ -461,9 +572,11 @@ def make_handler(
                 else:
                     self._send_json(200, response, headers=mode_headers)
             except (ConnectionError, TimeoutError, OSError):
-                self._send_json(503, _error_payload("SERVICE_UNAVAILABLE", "Project_07 is temporarily unavailable.", context.request_id))
+                error = _review_error_payload if is_review else _error_payload
+                self._send_json(503, error("SERVICE_UNAVAILABLE", "Project_07 is temporarily unavailable.", context.request_id))
             except Exception:
-                self._send_json(500, _error_payload("RUN_FAILED", "Project_07 run failed.", context.request_id))
+                error = _review_error_payload if is_review else _error_payload
+                self._send_json(500, error("RUN_FAILED", "Project_07 run failed.", context.request_id))
 
     return Project07Handler
 

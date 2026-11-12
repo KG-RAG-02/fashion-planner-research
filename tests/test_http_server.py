@@ -310,6 +310,91 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertEqual(status, 422)
         self.assertEqual(response["error"]["code"], "INVALID_CANONICAL_REQUEST")
 
+    def test_planning_draft_review_route_returns_internal_proposal_envelope(self):
+        request = {
+            "contract_version": "vogue-sales-market-review/0.1-proposal",
+            "request_id": "review-http-001",
+            "input": {
+                "request_id": "review-http-001",
+                "planning_draft": {
+                    "schema_version": "1.0",
+                    "draft_id": "draft-http-001",
+                    "product": {
+                        "category": "Outerwear",
+                        "product_type": "Jacket",
+                        "gender": "women",
+                        "season": "winter",
+                        "material": "wool blend",
+                        "proposed_price": 129000,
+                        "currency": "KRW",
+                    },
+                },
+            },
+        }
+        status, response, _ = self.post(
+            request,
+            path="/v1/agents/sales-market-agent/reviews",
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response["contract_version"], "vogue-sales-market-review/0.1-proposal")
+        self.assertEqual(response["request_id"], "review-http-001")
+        self.assertEqual(response["producer"]["schema_version"], "sales-market-review/0.1-internal")
+        self.assertEqual(response["status"], response["result"]["status"])
+        self.assertEqual(response["result"]["draft_context"], {
+            "category": "Outerwear", "product_type": "Jacket", "gender": "women",
+            "season": "winter", "material": "wool blend", "proposed_price": 129000,
+            "currency": "KRW",
+        })
+        self.assertEqual(response["result"]["status"], "no_results")
+        self.assertEqual(response["result"]["margin_estimate"]["basis_price"], 129000)
+        self.assertEqual(response["result"]["margin_estimate"]["currency"], "KRW")
+        self.assertEqual(
+            {item["field"] for item in response["result"]["missing_data"]},
+            {"musinsa_prices", "fabric_costs", "customer_segments"},
+        )
+
+    def test_planning_draft_review_rejects_unknown_fields_and_id_mismatch(self):
+        request = {
+            "contract_version": "vogue-sales-market-review/0.1-proposal",
+            "request_id": "review-http-002",
+            "input": {
+                "request_id": "other-request",
+                "planning_draft": {
+                    "schema_version": "1.0",
+                    "draft_id": "draft-http-002",
+                    "product": {"category": "Knitwear", "unreviewed_field": "ignored?"},
+                },
+            },
+        }
+        status, response, _ = self.post(request, path="/v1/agents/sales-market-agent/reviews")
+        self.assertEqual(status, 422)
+        self.assertEqual(response["error"]["code"], "REQUEST_ID_MISMATCH")
+
+        request["input"]["request_id"] = request["request_id"]
+        status, response, _ = self.post(request, path="/v1/agents/sales-market-agent/reviews")
+        self.assertEqual(status, 422)
+        self.assertEqual(response["error"]["code"], "INVALID_PLANNING_DRAFT")
+
+    def test_planning_draft_review_requires_authentication(self):
+        request = {
+            "contract_version": "vogue-sales-market-review/0.1-proposal",
+            "request_id": "review-http-auth",
+            "input": {
+                "request_id": "review-http-auth",
+                "planning_draft": {
+                    "schema_version": "1.0", "draft_id": "draft-auth",
+                    "product": {"category": "Knitwear"},
+                },
+            },
+        }
+        status, response, _ = self.post(
+            request, path="/v1/agents/sales-market-agent/reviews", token=None,
+        )
+        self.assertEqual(status, 401)
+        self.assertEqual(response["contract_version"], "vogue-sales-market-review/0.1-proposal")
+        self.assertEqual(response["error"]["code"], "UNAUTHORIZED")
+
     def test_opt_in_synthetic_demo_returns_labeled_analysis_without_changing_v01_envelope(self):
         request = valid_demo_request()
         status, response, _ = self.post(

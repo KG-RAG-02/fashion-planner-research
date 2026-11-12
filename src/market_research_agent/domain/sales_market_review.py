@@ -32,6 +32,7 @@ class SalesMarketReview:
     draft_id: str | None
     producer_id: str
     status: str
+    draft_context: dict[str, Any]
     category_price_comparison: tuple[dict[str, Any], ...]
     material_cost_analysis: tuple[dict[str, Any], ...]
     customer_segment_analysis: tuple[dict[str, Any], ...]
@@ -48,6 +49,7 @@ class SalesMarketReview:
             "draft_id": self.draft_id,
             "producer_id": self.producer_id,
             "status": self.status,
+            "draft_context": self.draft_context,
             "category_price_comparison": list(self.category_price_comparison),
             "material_cost_analysis": list(self.material_cost_analysis),
             "customer_segment_analysis": list(self.customer_segment_analysis),
@@ -66,6 +68,26 @@ def _draft_id(draft: dict[str, Any]) -> str | None:
         if isinstance(value, str) and value.strip():
             return value.strip()
     return None
+
+
+def _draft_context(draft: dict[str, Any]) -> dict[str, Any]:
+    """Return only the allowlisted non-personal product fields."""
+    product = draft.get("product")
+    if not isinstance(product, dict):
+        return {}
+    allowed = ("category", "product_type", "gender", "season", "material")
+    context = {
+        key: product[key]
+        for key in allowed
+        if isinstance(product.get(key), str) and product[key].strip()
+    }
+    price = product.get("proposed_price")
+    currency = product.get("currency")
+    if isinstance(price, (int, float)) and not isinstance(price, bool):
+        context["proposed_price"] = price
+    if isinstance(currency, str) and currency.strip():
+        context["currency"] = currency.strip().upper()
+    return context
 
 
 def build_sales_market_review(
@@ -89,11 +111,14 @@ def build_sales_market_review(
         for field, message in _UNAVAILABLE_SOURCES
     ]
     unit = result.unit_economics
+    draft_context = _draft_context(planning_draft)
     margin = (
         unit.to_dict()
         if unit is not None
         else {
             "status": "no_results",
+            "basis_price": draft_context.get("proposed_price"),
+            "currency": draft_context.get("currency"),
             "calculations": [],
             "limitations": ["No approved margin formula and complete unit-cost inputs are available."],
             "errors": [],
@@ -115,6 +140,7 @@ def build_sales_market_review(
         draft_id=_draft_id(planning_draft),
         producer_id=result.agent_id,
         status=result.status.value,
+        draft_context=draft_context,
         category_price_comparison=(),
         material_cost_analysis=(),
         customer_segment_analysis=(),

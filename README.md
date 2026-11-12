@@ -109,6 +109,8 @@ Canonical endpoint는 `POST http://127.0.0.1:8766/v1/agents/sales-market-agent/r
 
 구조화된 요청만 전달하는 입력 경로는 `POST /v1/agents/sales-market-agent/structured-runs`입니다. 이 경로는 proposal schema [`vogue-orchestration-request-0.1-proposal.schema.json`](contracts/schemas/proposals/vogue-orchestration-request-0.1-proposal.schema.json)을 검증하고 기존 응답 envelope/result 1.0을 반환합니다. 입력 proposal은 타 저장소와 합의되지 않았으므로 통합 오케스트레이터 연결 전에 계약 owner 검토가 필요합니다. 안정된 `/runs` 경로의 입력 계약은 바뀌지 않았습니다.
 
+기획 초안 사후 검토 proposal은 `POST /v1/agents/sales-market-agent/reviews`입니다. 요청 예시는 [`sales-market-review-0.1-proposal.request.json`](contracts/examples/sales-market-review-0.1-proposal.request.json), schema는 [`sales-market-review-0.1-proposal.schema.json`](contracts/schemas/proposals/sales-market-review-0.1-proposal.schema.json)입니다. 이 경로는 별도 `vogue-sales-market-review/0.1-proposal` envelope와 기존 bearer 인증을 사용하며 `/runs` 계약을 변경하지 않습니다. 현재 Musinsa 가격, 실제 원단가 DB, 운영 사용 승인이 확인된 고객 aggregate가 연결되어 있지 않아 해당 필드는 `missing_data`이며 실제 결과 상태는 `no_results`입니다. 제안가격은 basis로 보존하지만 원가/마진을 만들어내지 않습니다. Orchestrator가 호출자가 되어 동기 응답을 받는 흐름으로 설계했으며, 다른 저장소의 실제 호출은 별도 반영이 필요합니다.
+
 다른 터미널에서 합성 입력 fixture를 보낼 수 있습니다.
 
 ```bash
