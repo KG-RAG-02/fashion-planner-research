@@ -70,6 +70,8 @@ PYTHONPATH=src python3 -m market_research_agent.cli \\
 
 핵심 설정 환경변수는 `PROJECT07_SYNTHETIC_R2_MANIFEST_KEY`(또는 release prefix), `PROJECT07_HM_R2_DB_KEY`(또는 공유 `R2_DB_KEY`), legacy bundle용 `PROJECT07_HM_R2_PREFIX` / `PROJECT07_HM_R2_MANIFEST_KEY`, `VOGUE_HM_CATEGORY_MAP`, `VOGUE_HM_MAPPING_VERSION`, `VOGUE_HM_USAGE_AUTHORIZED`입니다. R2 연동은 read-only `HeadObject` / `GetObject`만 사용합니다. 이 패키지는 `.env`를 자동 로드하지 않으며 필요한 값을 셸 또는 실행환경에서 설정합니다. `.env`는 Git 제외 상태로 유지합니다.
 
+Post-planning review optionally reads externally prepared CSV snapshots via `MUSINSA_PRICE_SNAPSHOT_PATH` and `FABRIC_PRICE_SNAPSHOT_PATH`. These paths are read-only local files; the service does not fetch webpages. Rows require `permission_status=authorized`, an operator attestation rather than an automated rights audit. Musinsa matching uses exact project category and any supplied gender/product type. Fabric observations are separated by source grade, currency, unit, material specifications, MOQ, quantity tier, and shipping/tax inclusion. Detailed columns and limitations are documented in [`docs/design/post-planning-sales-market-review.md`](docs/design/post-planning-sales-market-review.md). Customer analysis remains unavailable without a separately approved aggregate dataset; H&M Kaggle customer rows are not used.
+
 ## 합성 RAG 평가 자료
 
 2026-11-12 기준, 로컬 합성 런타임·예제·평가 자료 55개를 R2에 아카이브한 뒤 저장소에서 삭제했습니다. 아카이브 키와 해시 목록은 [R2 데이터 소스 안내](docs/design/r2-data-sources.md)에 있습니다. 기본 서비스는 R2 전용이며, 로컬 픽스처가 필요한 생성·평가 명령과 해당 테스트를 실행하려면 먼저 아카이브를 복원해야 합니다.

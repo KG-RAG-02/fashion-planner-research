@@ -11,17 +11,10 @@ from typing import Any
 
 from .apparel_costing import calculate_apparel_margin
 from .models import MarketResearchResult
+from .price_references import SnapshotError, analyze_fabric_snapshot, analyze_musinsa_snapshot
 
 
 REVIEW_SCHEMA_VERSION = "sales-market-review/0.1-internal"
-_UNAVAILABLE_SOURCES = (
-    ("musinsa_prices", "No approved Musinsa price snapshot is connected."),
-    ("fabric_costs", "No actual fabric-cost database is connected."),
-    (
-        "customer_segments",
-        "No separately approved commercial customer aggregate is connected; H&M Kaggle customer data is out of scope.",
-    ),
-)
 
 
 @dataclass(frozen=True, slots=True)
@@ -100,21 +93,47 @@ def build_sales_market_review(
 ) -> SalesMarketReview:
     """Adapt an existing result into an internal review shape.
 
-    Draft fields are intentionally not guessed. The draft is used only to
-    extract a stable identifier; product attributes require an approved schema
-    before they can drive source queries or calculations.
+    Product attributes are taken only from validated PlanningDraft fields.
+    Snapshot adapters are offline CSV readers and never fetch external pages.
     """
     if not isinstance(planning_draft, dict):
         raise TypeError("planning_draft must be an object.")
     if not isinstance(result, MarketResearchResult):
         raise TypeError("result must be a MarketResearchResult.")
 
-    missing = [
-        {"field": field, "reason": "source_not_configured", "message": message}
-        for field, message in _UNAVAILABLE_SOURCES
-    ]
     unit = result.unit_economics
     draft_context = _draft_context(planning_draft)
+    product = planning_draft.get("product") if isinstance(planning_draft.get("product"), dict) else {}
+    errors: list[dict[str, Any]] = [
+        {"code": item.code, "message": item.message} for item in result.errors
+    ]
+    missing: list[dict[str, Any]] = []
+    musinsa_error = False
+    try:
+        musinsa = analyze_musinsa_snapshot(product)
+    except SnapshotError as exc:
+        musinsa = None
+        musinsa_error = True
+        errors.append({"code": "MUSINSA_SNAPSHOT_INVALID", "message": str(exc)})
+    fabric_error = False
+    try:
+        fabrics = analyze_fabric_snapshot(product)
+    except SnapshotError as exc:
+        fabrics = []
+        fabric_error = True
+        errors.append({"code": "FABRIC_SNAPSHOT_INVALID", "message": str(exc)})
+    if musinsa is None:
+        missing.append({"field": "musinsa_prices", "reason": "source_error" if musinsa_error else "source_not_configured",
+                         "message": "Configured Musinsa snapshot could not be read." if musinsa_error else "Set MUSINSA_PRICE_SNAPSHOT_PATH to a permitted CSV snapshot."})
+    elif not musinsa["comparables"]:
+        missing.append({"field": "musinsa_prices", "reason": "no_matching_observations",
+                         "message": "No authorized snapshot rows exactly match the product category and supplied filters."})
+    if not fabrics:
+        reason = "source_error" if fabric_error else "material_not_specified" if not product.get("material") else "source_not_configured_or_no_match"
+        missing.append({"field": "fabric_costs", "reason": reason,
+                        "message": "Set FABRIC_PRICE_SNAPSHOT_PATH and supply an exact material match; source prices remain references."})
+    missing.append({"field": "customer_segments", "reason": "source_not_configured",
+                    "message": "No separate authorized aggregate customer CSV is configured. H&M Kaggle customer data is not used."})
     costing = planning_draft.get("costing")
     if costing is not None:
         margin = calculate_apparel_margin(
@@ -146,6 +165,12 @@ def build_sales_market_review(
         }
         for item in margin.get("materials", [])
     )
+    if fabrics:
+        material_rows += tuple(fabrics)
+    if musinsa and musinsa["comparables"]:
+        review_status = "partial"
+    if fabrics:
+        review_status = "partial"
     return SalesMarketReview(
         schema_version=REVIEW_SCHEMA_VERSION,
         request_id=result.request_id,
@@ -153,7 +178,7 @@ def build_sales_market_review(
         producer_id=result.agent_id,
         status=review_status,
         draft_context=draft_context,
-        category_price_comparison=(),
+        category_price_comparison=(musinsa,) if musinsa and musinsa["comparables"] else (),
         material_cost_analysis=material_rows,
         customer_segment_analysis=(),
         margin_estimate=margin,
@@ -171,6 +196,6 @@ def build_sales_market_review(
             for item in result.evidence
         ),
         missing_data=tuple(missing),
-        errors=tuple({"code": item.code, "message": item.message} for item in result.errors),
+        errors=tuple(errors),
         limitations=tuple(dict.fromkeys(limitations)),
     )

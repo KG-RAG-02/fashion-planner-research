@@ -1,6 +1,9 @@
 from __future__ import annotations
 
 import unittest
+import os
+from pathlib import Path
+import tempfile
 
 from market_research_agent import (
     MarketResearchAgent,
@@ -11,6 +14,47 @@ from tests.test_apparel_costing import costing_input
 
 
 class SalesMarketReviewAdapterTests(unittest.TestCase):
+    def test_review_reads_explicit_musinsa_and_public_fabric_snapshots(self):
+        with tempfile.TemporaryDirectory() as directory:
+            musinsa_path = Path(directory) / "musinsa.csv"
+            musinsa_path.write_text(
+                "project_category,gender,product_type,product_name,brand,product_id,source_url,regular_price,current_price,currency,collected_at,permission_status\n"
+                "Outerwear,women,Jacket,Coat,Brand,1,https://example.test/item,120000,90000,KRW,2026-10-01T00:00:00Z,authorized\n",
+                encoding="utf-8",
+            )
+            fabric_path = Path(directory) / "fabric.csv"
+            fabric_path.write_text(
+                "material,composition,construction,weight_gsm,width,color,source_grade,price,currency,unit,source_url,collected_at,permission_status\n"
+                "wool blend,70% wool,plain,280,150cm,navy,public_sale,9000,KRW,yd,https://example.test/cloth,2026-10-01T00:00:00Z,authorized\n",
+                encoding="utf-8",
+            )
+            old_musinsa = os.environ.get("MUSINSA_PRICE_SNAPSHOT_PATH")
+            old_fabric = os.environ.get("FABRIC_PRICE_SNAPSHOT_PATH")
+            os.environ["MUSINSA_PRICE_SNAPSHOT_PATH"] = str(musinsa_path)
+            os.environ["FABRIC_PRICE_SNAPSHOT_PATH"] = str(fabric_path)
+            try:
+                result = MarketResearchAgent().run(
+                    MarketResearchContext(request_id="review-snapshots", planning_request={})
+                )
+                review = build_sales_market_review(
+                    result,
+                    planning_draft={"draft_id": "draft-snapshots", "product": {
+                        "category": "Outerwear", "product_type": "Jacket", "gender": "women",
+                        "material": "wool blend", "proposed_price": 100000, "currency": "KRW",
+                    }},
+                ).to_dict()
+                self.assertEqual(review["category_price_comparison"][0]["current_price_stats"]["median"], 90000)
+                self.assertEqual(review["material_cost_analysis"][0]["source_grade"], "public_sale")
+                self.assertEqual(review["status"], "partial")
+                self.assertEqual({item["field"] for item in review["missing_data"]}, {"customer_segments"})
+            finally:
+                for key, value in (("MUSINSA_PRICE_SNAPSHOT_PATH", old_musinsa),
+                                   ("FABRIC_PRICE_SNAPSHOT_PATH", old_fabric)):
+                    if value is None:
+                        os.environ.pop(key, None)
+                    else:
+                        os.environ[key] = value
+
     def test_internal_review_marks_unconnected_sources_and_does_not_echo_draft(self):
         result = MarketResearchAgent().run(
             MarketResearchContext(request_id="review-001", planning_request={})
