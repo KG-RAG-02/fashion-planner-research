@@ -9,6 +9,7 @@ from __future__ import annotations
 import csv
 import json
 import math
+import re
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any
@@ -69,7 +70,7 @@ class LocalMarketCsvSource:
             return self._invalid("The market source manifest is missing required source identity fields.")
 
         try:
-            observations, evidence, query_search_available = self._read_observations(manifest, context)
+            observations, evidence = self._read_observations(manifest, context)
         except FileNotFoundError:
             return self._missing("source_not_configured", "Market CSV or source manifest was not found.")
         except (OSError, ValueError, csv.Error, UnicodeError):
@@ -78,8 +79,6 @@ class LocalMarketCsvSource:
         if not observations:
             reason = "no_matching_records"
             message = "The configured market source returned no observations matching the requested category and scope."
-            if context.requested_query and not query_search_available:
-                message += " The CSV has no search_text column, so the raw query could not be applied to row text."
             return SourceReport(
                 status=ResultStatus.NO_RESULTS,
                 limitations=(message,),
@@ -107,8 +106,8 @@ class LocalMarketCsvSource:
             for item in observations
         )
         limitations = tuple(dict.fromkeys(limitation for item in observations for limitation in _scope_limitations(item, context)))
-        if context.requested_query and not query_search_available:
-            limitations = (*limitations, "The raw user query was passed to the source but not applied to CSV row text because the file has no search_text column.")
+        if context.requested_query:
+            limitations = (*limitations, "The original natural-language query was preserved for traceability; matching used structured scope fields rather than literal search_text equality.")
         market_status = "partial" if limitations else "ok"
         return SourceReport(
             status=ResultStatus.PARTIAL if limitations else ResultStatus.OK,
@@ -134,7 +133,7 @@ class LocalMarketCsvSource:
 
     def _read_observations(
         self, manifest: dict[str, Any], context: MarketResearchContext
-    ) -> tuple[list[MarketObservation], dict[str, EvidenceRecord], bool]:
+    ) -> tuple[list[MarketObservation], dict[str, EvidenceRecord]]:
         path = self.observations_path.expanduser()
         if not path.is_file():
             raise FileNotFoundError
@@ -144,33 +143,43 @@ class LocalMarketCsvSource:
         rows: list[MarketObservation] = []
         evidence: dict[str, EvidenceRecord] = {}
         seen_observation_ids: set[str] = set()
-        requested_metrics = {value.casefold() for value in context.requested_metrics}
-        query_search_available = False
+        requested_metrics = {_normalize_text(value) for value in context.requested_metrics}
+        requested_dates = _period_bounds(context.requested_period)
         fetched_at = manifest.get("fetched_at") or datetime.now(timezone.utc).isoformat()
         with path.open("r", encoding="utf-8-sig", newline="") as stream:
             reader = csv.DictReader(stream)
             if not REQUIRED_COLUMNS.issubset(set(reader.fieldnames or ())):
                 raise ValueError("market CSV has missing required columns")
-            query_search_available = "search_text" in set(reader.fieldnames or ())
             for row_number, row in enumerate(reader, start=1):
                 if row_number > MAX_OBSERVATIONS:
                     raise ValueError("market CSV row limit exceeded")
                 category = _optional(row, "category")
                 metric_name = _required(row, "metric_name")
-                if requested_metrics and metric_name.casefold() not in requested_metrics:
+                if requested_metrics and _normalize_text(metric_name) not in requested_metrics:
                     continue
-                if context.requested_query and query_search_available:
-                    row_search_text = (row.get("search_text") or "").casefold()
-                    if context.requested_query.casefold() not in row_search_text:
-                        continue
-                if context.requested_category and category and category.casefold() != context.requested_category.casefold():
+                # Raw natural-language queries are not reliable exact filters.
+                # Keep them for traceability, while applying structured scope below.
+                if context.requested_category and category and _normalize_text(category) != _normalize_text(context.requested_category):
+                    continue
+                if context.requested_category and category is None:
                     continue
                 geography = _optional(row, "geography")
                 channel = _optional(row, "channel")
-                if context.requested_geography and geography and geography.casefold() != context.requested_geography.casefold():
+                if context.requested_geography and geography and _normalize_text(geography) != _normalize_text(context.requested_geography):
                     continue
-                if context.requested_channel and channel and channel.casefold() != context.requested_channel.casefold():
+                if context.requested_geography and geography is None:
                     continue
+                if context.requested_channel and channel and _normalize_text(channel) != _normalize_text(context.requested_channel):
+                    continue
+                if context.requested_channel and channel is None:
+                    continue
+                if requested_dates is not None:
+                    observed_start = _optional(row, "period_start")
+                    observed_end = _optional(row, "period_end") or _optional(row, "as_of")
+                    if not observed_start or not observed_end:
+                        continue
+                    if observed_end < requested_dates[0] or observed_start > requested_dates[1]:
+                        continue
 
                 value = float((row.get("value") or "").strip())
                 if not math.isfinite(value):
@@ -226,7 +235,7 @@ class LocalMarketCsvSource:
                     permission_status=PermissionStatus.AUTHORIZED,
                     manifest_id=manifest["manifest_id"],
                 ))
-        return rows, evidence, query_search_available
+        return rows, evidence
 
     @staticmethod
     def _missing(reason: str, message: str) -> SourceReport:
@@ -258,6 +267,37 @@ def _required(row: dict[str, str], key: str) -> str:
 def _optional(row: dict[str, str], key: str) -> str | None:
     value = (row.get(key) or "").strip()
     return value or None
+
+
+def _normalize_text(value: str) -> str:
+    """Normalize spacing and case for Korean/English structured labels."""
+    return "".join(value.casefold().split())
+
+
+def _period_bounds(value: str | None) -> tuple[str, str] | None:
+    """Parse supported year, month, date, or year-range scope forms."""
+    if not value:
+        return None
+    text = value.strip()
+    years = re.fullmatch(r"(20\d{2})\s*[-–~]\s*(20\d{2})", text)
+    if years:
+        return f"{years.group(1)}-01-01", f"{years.group(2)}-12-31"
+    year_month = re.fullmatch(r"(20\d{2})-(\d{2})", text)
+    if year_month:
+        year, month = int(year_month.group(1)), int(year_month.group(2))
+        if 1 <= month <= 12:
+            last_day = 31 if month in {1, 3, 5, 7, 8, 10, 12} else 30 if month != 2 else 28
+            if month == 2 and (year % 4 == 0 and (year % 100 != 0 or year % 400 == 0)):
+                last_day = 29
+            return f"{year:04d}-{month:02d}-01", f"{year:04d}-{month:02d}-{last_day:02d}"
+        return None
+    year = re.fullmatch(r"20\d{2}", text)
+    if year:
+        return f"{text}-01-01", f"{text}-12-31"
+    date = re.fullmatch(r"20\d{2}-\d{2}-\d{2}", text)
+    if date:
+        return text, text
+    return None
 
 
 def _scope_limitations(

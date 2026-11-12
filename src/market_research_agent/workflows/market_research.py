@@ -45,7 +45,7 @@ class RetrievalResult:
 class MarketResearchAgent:
     """Build a result while enforcing source permission and evidence links."""
 
-    agent_id = "market-research-agent"
+    agent_id = "sales-market-agent"
     # This is the implemented local envelope version. Proposed fields in the
     # schema draft are not advertised as a shared wire-contract version.
     schema_version = "1.0"
@@ -72,6 +72,21 @@ class MarketResearchAgent:
                 limitations=context_limitations,
             )
         upstream_context = self._snapshot_upstream_context(context)
+        requested_scope = self._requested_scope(context)
+        if context.canonical_request is not None and context.query_ambiguities:
+            ambiguity_report = SourceReport(
+                status=ResultStatus.NO_RESULTS,
+                limitations=(
+                    "Canonical request contains unresolved ambiguity; no sales or market source was queried.",
+                ),
+            )
+            return self._assemble(
+                context.request_id, ambiguity_report,
+                context_limitations=context_limitations,
+                incomplete_context=True,
+                requested_scope=requested_scope,
+                upstream_context=upstream_context,
+            )
 
         try:
             report = self._source.research(context)
@@ -214,22 +229,7 @@ class MarketResearchAgent:
             report,
             context_limitations=context_limitations,
             incomplete_context=incomplete_context,
-            requested_scope={
-                "category": context.requested_category,
-                "metrics": list(context.requested_metrics),
-                "geography": context.requested_geography,
-                "channel": context.requested_channel,
-                "query": context.requested_query,
-                "period": context.requested_period,
-                "population": context.requested_population,
-                "unit": context.requested_unit,
-                "currency": context.requested_currency,
-                "measure_type": context.requested_measure_type,
-                "mapping_id": context.requested_mapping_id,
-                "mapping_version": context.requested_mapping_version,
-                "period_grain": context.requested_period_grain,
-                "document_version": context.requested_document_version,
-            },
+            requested_scope=requested_scope,
             sales_retrieval=retrieval_results.get("sales"),
             market_retrieval=retrieval_results.get("market"),
             upstream_context=upstream_context,
@@ -284,11 +284,27 @@ class MarketResearchAgent:
             if evidence.permission_status == PermissionStatus.AUTHORIZED
             and evidence_id not in duplicate_ids
         }
+        synthetic_test_evidence = {
+            evidence_id: evidence
+            for evidence_id, evidence in all_evidence.items()
+            if evidence.permission_status == PermissionStatus.SYNTHETIC_TEST_ONLY
+            and evidence.synthetic is True
+            and evidence.data_nature == "synthetic_test"
+            and evidence.operational_eligible is False
+            and evidence_id not in duplicate_ids
+        }
         sales_data = report.sales_data
         if sales_data is not None:
             valid_sales = tuple(
                 item for item in sales_data.observations
-                if set(item.evidence_ids).issubset(permitted_evidence)
+                if (
+                    set(item.evidence_ids).issubset(permitted_evidence)
+                    if not item.synthetic
+                    else item.data_nature == "synthetic_test"
+                    and item.permission_status == PermissionStatus.SYNTHETIC_TEST_ONLY.value
+                    and item.operational_eligible is False
+                    and set(item.evidence_ids).issubset(synthetic_test_evidence)
+                )
             )
             if len(valid_sales) != len(sales_data.observations):
                 limitations.append(
@@ -313,11 +329,18 @@ class MarketResearchAgent:
         if market_data is not None:
             valid_market = tuple(
                 item for item in market_data.observations
-                if set(item.evidence_ids).issubset(permitted_evidence)
+                if (
+                    set(item.evidence_ids).issubset(permitted_evidence)
+                    if not item.synthetic
+                    else item.data_nature == "synthetic_test"
+                    and item.permission_status == PermissionStatus.SYNTHETIC_TEST_ONLY.value
+                    and item.operational_eligible is False
+                    and set(item.evidence_ids).issubset(synthetic_test_evidence)
+                )
             )
             if len(valid_market) != len(market_data.observations):
-                limitations.append("Market observations without authorized, resolvable Evidence were omitted.")
-                errors.append(AgentError("INVALID_MARKET_EVIDENCE", "Some market observations did not reference authorized Evidence."))
+                limitations.append("Market observations without matching authorized or explicitly test-only Evidence were omitted.")
+                errors.append(AgentError("INVALID_MARKET_EVIDENCE", "Some market observations did not reference valid Evidence."))
             market_data = MarketDataResult(
                 status=("partial" if market_data.status == "ok" and len(valid_market) != len(market_data.observations) else market_data.status),
                 observations=valid_market,
@@ -343,7 +366,7 @@ class MarketResearchAgent:
                 errors=unit_economics.errors,
                 missing_data=unit_economics.missing_data,
             )
-        unapproved_ids = set(all_evidence) - set(permitted_evidence)
+        unapproved_ids = set(all_evidence) - set(permitted_evidence) - set(synthetic_test_evidence)
         if unapproved_ids:
             limitations.append(
                 "Evidence with denied or unconfirmed usage permission was omitted."
@@ -386,7 +409,7 @@ class MarketResearchAgent:
                 continue
             findings.append(finding)
 
-        evidence = tuple(permitted_evidence.values())
+        evidence = tuple((*permitted_evidence.values(), *synthetic_test_evidence.values()))
         def keep_resolvable_hits(retrieval):
             if retrieval is None:
                 return None
@@ -459,7 +482,7 @@ class MarketResearchAgent:
                         comparisons.append(compare_sales_to_market(
                             sales_item, market_item,
                             sales_permission_authorized=True,
-                            market_permission_authorized=True,
+                            market_permission_authorized=not market_item.synthetic,
                         ))
                 if comparison_truncated:
                     break
@@ -559,7 +582,7 @@ class MarketResearchAgent:
         if status == ResultStatus.PARTIAL:
             return (
                 f"Produced {finding_count} findings with partial source coverage; "
-                f"{evidence_count} authorized evidence records were retained."
+                f"{evidence_count} evidence records were retained (synthetic test records remain labeled as such)."
             )
         if status == ResultStatus.NO_RESULTS:
             return "No market findings were returned."
@@ -587,7 +610,7 @@ class MarketResearchAgent:
         for name in ("planning_request", "trend_result", "inventory_product_result"):
             payload = getattr(context, name)
             if payload is None:
-                if name != "planning_request":
+                if name != "planning_request" and context.canonical_request is None:
                     notes.append(f"Optional upstream input '{name}' was not supplied.")
                     incomplete = True
                 continue
@@ -628,6 +651,36 @@ class MarketResearchAgent:
                         incomplete = True
 
         return tuple(dict.fromkeys(notes)), incomplete
+
+    @staticmethod
+    def _requested_scope(context: MarketResearchContext) -> dict:
+        gender = (context.explicit_scope or {}).get("gender")
+        if gender is None and context.inferred_scope:
+            inferred_gender = context.inferred_scope.get("gender")
+            gender = inferred_gender.get("value") if isinstance(inferred_gender, dict) else inferred_gender
+        return {
+            "category": context.requested_category,
+            "gender": gender,
+            "metrics": list(context.requested_metrics),
+            "geography": context.requested_geography,
+            "channel": context.requested_channel,
+            "query": context.requested_query,
+            "period": context.requested_period,
+            "population": context.requested_population,
+            "unit": context.requested_unit,
+            "currency": context.requested_currency,
+            "measure_type": context.requested_measure_type,
+            "mapping_id": context.requested_mapping_id,
+            "mapping_version": context.requested_mapping_version,
+            "period_grain": context.requested_period_grain,
+            "document_version": context.requested_document_version,
+            "inferred_scope": context.inferred_scope or {},
+            "explicit_scope": context.explicit_scope or {},
+            "intent": context.query_intent,
+            "ambiguities": list(context.query_ambiguities),
+            "parser_version": context.parser_version,
+            "canonical_request": context.canonical_request,
+        }
 
     @staticmethod
     def _validate_upstream_context(context: MarketResearchContext) -> tuple[str, str] | None:

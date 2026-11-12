@@ -25,13 +25,16 @@ from .domain.sales import (
 from .sources.shared.composite import CompositeMarketResearchSource
 from .sources.shared.noop import NoConfiguredSources
 from .workflows.market_research import MarketResearchAgent
+from .orchestration_request import CanonicalRequestError, context_from_canonical_request
 
 __all__ = [
     "AgentError",
+    "CanonicalRequestError",
     "CompositeMarketResearchSource",
     "EvidenceRecord",
     "FindingKind",
     "MarketResearchAgent",
+    "context_from_canonical_request",
     "MarketResearchContext",
     "MarketResearchResult",
     "NoConfiguredSources",

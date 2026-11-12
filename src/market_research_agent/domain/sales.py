@@ -34,12 +34,29 @@ class SalesObservation:
     currency: str | None = None
     metric_definition: str | None = None
     product_mapping: str | None = None
+    measure_type: str = "transaction_actual"
+    population: str | None = None
+    gender: str | None = None
+    season: str | None = None
+    season_year: int | None = None
+    product_mapping_id: str | None = None
+    product_mapping_version: str | None = None
+    synthetic: bool = False
+    data_nature: str | None = None
+    permission_status: str | None = None
+    operational_eligible: bool | None = None
 
     def __post_init__(self) -> None:
         if not self.observation_id.strip() or not self.metric_name.strip() or not self.unit.strip():
             raise ValueError("observation_id, metric_name, and unit are required.")
         if not self.evidence_ids or any(not item.strip() for item in self.evidence_ids):
             raise ValueError("Each sales observation requires traceable Evidence IDs.")
+        if self.synthetic and (
+            self.data_nature != "synthetic_test"
+            or self.permission_status != "authorized_for_synthetic_testing_only"
+            or self.operational_eligible is not False
+        ):
+            raise ValueError("Synthetic sales observations must retain all test-only markers.")
         if isinstance(self.value, bool) or not isinstance(self.value, (int, float)) or not math.isfinite(self.value):
             raise ValueError("Sales observation value must be numeric.")
 
@@ -103,7 +120,7 @@ class MissingData:
 
 @dataclass(frozen=True, slots=True)
 class MarketObservation:
-    """One external market statistic/estimate with declared scope and Evidence."""
+    """One market observation with declared scope, nature, and Evidence."""
 
     observation_id: str
     metric_name: str
@@ -126,7 +143,12 @@ class MarketObservation:
     source_category: str | None = None
     product_mapping_id: str | None = None
     product_mapping_version: str | None = None
+    attributes: dict[str, Any] | None = None
     calculation_reference: str | None = None
+    synthetic: bool = False
+    data_nature: str | None = None
+    permission_status: str | None = None
+    operational_eligible: bool | None = None
 
     def __post_init__(self) -> None:
         allowed = {"transaction_actual", "aggregate_index", "market_estimate", "forecast", "search_interest"}
@@ -136,6 +158,12 @@ class MarketObservation:
             raise ValueError("Unsupported market observation measure_type.")
         if not self.evidence_ids or any(not item.strip() for item in self.evidence_ids):
             raise ValueError("Each market observation requires Evidence IDs.")
+        if self.synthetic and (
+            self.data_nature != "synthetic_test"
+            or self.permission_status != "authorized_for_synthetic_testing_only"
+            or self.operational_eligible is not False
+        ):
+            raise ValueError("Synthetic market observations must retain all test-only markers.")
         if isinstance(self.value, bool) or not isinstance(self.value, (int, float)) or not math.isfinite(self.value):
             raise ValueError("Market observation value must be finite and numeric.")
 
@@ -195,6 +223,8 @@ def compare_sales_to_market(
         matches.append("metric_name")
     if not sales_permission_authorized or not market_permission_authorized:
         mismatches.append("permission:not_authorized")
+    if market.synthetic:
+        mismatches.append("market_measure:synthetic_test_only")
     if sales.unit == "purchase_rows":
         mismatches.append("sales_measure:historical_purchase_rows_not_market_size")
     return ComparabilityResult(not mismatches, tuple(matches), tuple(mismatches), sales.observation_id, market.observation_id)

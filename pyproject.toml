@@ -10,8 +10,12 @@ readme = "README.md"
 requires-python = ">=3.11"
 dependencies = []
 
+[project.optional-dependencies]
+r2 = ["boto3>=1.35,<2", "duckdb>=1.1,<2"]
+
 [project.scripts]
 vogue-market-research = "market_research_agent.cli:main"
+vogue-market-research-http = "market_research_agent.http_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

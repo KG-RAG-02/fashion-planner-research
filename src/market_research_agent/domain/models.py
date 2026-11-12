@@ -14,6 +14,30 @@ from .sales import (
 )
 
 
+def normalize_no_results_payload(value: Any) -> Any:
+    """Map serialized no-results statuses to partial at outbound boundaries.
+
+    Empty or unavailable evidence remains empty and is explained by the
+    existing limitations/missing-data fields. This policy changes status
+    labeling only; it never fabricates observations or findings.
+    """
+    if isinstance(value, dict):
+        normalized = {key: normalize_no_results_payload(item) for key, item in value.items()}
+        if normalized.get("status") == "no_results":
+            normalized["status"] = "partial"
+            limitations = normalized.get("limitations")
+            if isinstance(limitations, list):
+                note = "No usable evidence was returned for this scope; this partial result contains no implied zero value."
+                if note not in limitations:
+                    normalized["limitations"] = [*limitations, note]
+        return normalized
+    if isinstance(value, list):
+        return [normalize_no_results_payload(item) for item in value]
+    if isinstance(value, tuple):
+        return tuple(normalize_no_results_payload(item) for item in value)
+    return value
+
+
 class ResultStatus(StrEnum):
     OK = "ok"
     PARTIAL = "partial"
@@ -32,6 +56,7 @@ class PermissionStatus(StrEnum):
     AUTHORIZED = "authorized"
     UNKNOWN = "unknown"
     DENIED = "denied"
+    SYNTHETIC_TEST_ONLY = "authorized_for_synthetic_testing_only"
 
 
 @dataclass(frozen=True, slots=True)
@@ -44,8 +69,8 @@ class MarketResearchContext:
     inventory_product_result: dict[str, Any] | None = None
     requested_category: str | None = None
     requested_metrics: tuple[str, ...] = ()
-    requested_geography: str | None = "KR"
-    requested_channel: str | None = "online"
+    requested_geography: str | None = None
+    requested_channel: str | None = None
     requested_query: str | None = None
     requested_period: str | None = None
     # Optional local retrieval scope. These fields are not part of an approved
@@ -58,6 +83,15 @@ class MarketResearchContext:
     requested_mapping_version: str | None = None
     requested_period_grain: str | None = None
     requested_document_version: str | None = None
+    inferred_scope: dict[str, Any] | None = None
+    explicit_scope: dict[str, Any] | None = None
+    query_intent: str = "unresolved"
+    query_ambiguities: tuple[str, ...] = ()
+    parser_version: str | None = None
+    # The canonical orchestration request is an input-side proposal. It lets
+    # the orchestrator own query interpretation without requiring Project_07
+    # to re-parse the raw query or consume other agents' result payloads.
+    canonical_request: dict[str, Any] | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -82,6 +116,9 @@ class EvidenceRecord:
     calculation_reference: str | None = None
     permission_status: PermissionStatus = PermissionStatus.UNKNOWN
     manifest_id: str | None = None
+    synthetic: bool = False
+    data_nature: str | None = None
+    operational_eligible: bool | None = None
 
 
 @dataclass(frozen=True, slots=True)
@@ -167,10 +204,13 @@ class MarketResearchResult:
             "evidence": [
                 asdict(item) | {"permission_status": item.permission_status.value}
                 for item in self.evidence
+                if item.permission_status != PermissionStatus.SYNTHETIC_TEST_ONLY
             ],
             "errors": [asdict(item) for item in self.errors],
         }
-        return payload
+        if self.status == ResultStatus.NO_RESULTS:
+            payload["summary"] = "Partial result: no eligible findings were returned; see limitations for the source gap."
+        return normalize_no_results_payload(payload)
 
     def to_proposal_dict(self) -> dict[str, Any]:
         """Serialize the unratified 1.1 proposal without changing local 1.0."""
@@ -187,7 +227,7 @@ class MarketResearchResult:
             asdict(item) | {"permission_status": item.permission_status.value}
             for item in self.evidence
         ]
-        return payload
+        return normalize_no_results_payload(payload)
 
     def to_proposal_v1_2_dict(self) -> dict[str, Any]:
         """Serialize the unratified separated-data proposal explicitly."""
@@ -209,6 +249,10 @@ class MarketResearchResult:
             for item in (self.sales_data.observations if self.sales_data else ())
         ]
         payload["sales_data"] = sales_block
+        sales_block["observations"] = [
+            asdict(item)
+            for item in (self.sales_data.observations if self.sales_data else ())
+        ]
         sales_block.pop("calculations", None)
         payload["market_data"] = (
             self.market_data.to_dict()
@@ -220,6 +264,12 @@ class MarketResearchResult:
             ).to_dict()
         )
         payload["market_data"].pop("calculations", None)
+        # Proposal output can carry explicitly test-only synthetic Evidence;
+        # stable 1.0 serialization intentionally omits it.
+        payload["evidence"] = [
+            asdict(item) | {"permission_status": item.permission_status.value}
+            for item in self.evidence
+        ]
         payload["unit_economics"] = (
             self.unit_economics.to_dict()
             if self.unit_economics
@@ -234,7 +284,7 @@ class MarketResearchResult:
             for block in (payload["sales_data"], payload["market_data"], payload["unit_economics"])
             for item in block["missing_data"]
         ]
-        return payload
+        return normalize_no_results_payload(payload)
 
     def to_proposal_v1_3_dict(self) -> dict[str, Any]:
         """Serialize the explicit, unratified analysis and retrieval proposal."""
@@ -245,4 +295,4 @@ class MarketResearchResult:
         payload["sales_retrieval"] = self.sales_retrieval.to_dict() if self.sales_retrieval else None
         payload["market_retrieval"] = self.market_retrieval.to_dict() if self.market_retrieval else None
         payload["comparability"] = [asdict(item) for item in self.comparability]
-        return payload
+        return normalize_no_results_payload(payload)

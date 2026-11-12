@@ -1,0 +1,26 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vogue:handoff:0.1:project-07:response",
+  "title": "VOGUE handoff v0.1 Project_07 run response",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "request_id", "producer", "status", "result"],
+  "properties": {
+    "contract_version": {"const": "vogue-handoff/0.1"},
+    "request_id": {"type": "string", "minLength": 1},
+    "producer": {"$ref": "#/$defs/producer"},
+    "status": {"enum": ["ok", "partial", "no_results", "error"]},
+    "result": {"$ref": "market-research-result.schema.json"}
+  },
+  "$defs": {
+    "producer": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["agent_id", "schema_version"],
+      "properties": {
+        "agent_id": {"const": "sales-market-agent"},
+        "schema_version": {"const": "1.0"}
+      }
+    }
+  }
+}

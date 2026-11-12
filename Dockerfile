@@ -11,6 +11,7 @@ COPY --chown=agent:agent pyproject.toml README.md ./
 COPY --chown=agent:agent src/ ./src/
 COPY --chown=agent:agent contracts/ ./contracts/
 COPY --chown=agent:agent examples/ ./examples/
+COPY --chown=agent:agent scripts/ ./scripts/
 COPY --chown=agent:agent tests/ ./tests/
 
 RUN pip install --no-cache-dir .
