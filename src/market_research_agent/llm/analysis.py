@@ -34,7 +34,7 @@ def _load_prompt(domain: str) -> tuple[str, str, str]:
         raise AnalysisInputError("Unknown analysis prompt.")
     manifest = json.loads((PROMPT_ROOT / "manifest.json").read_text(encoding="utf-8"))
     entry = manifest["prompts"][domain]["versions"]["v1"]
-    system = (PROMPT_ROOT / entry["system_template"]).read_text(encoding="utf-8")
+    system = (PROMPT_ROOT / entry["rendered_system"]).read_text(encoding="utf-8")
     user_template = (PROMPT_ROOT / entry["user_template"]).read_text(encoding="utf-8")
     if "{{ANALYSIS_INPUT_JSON}}" not in user_template:
         raise AnalysisInputError("Prompt input placeholder is missing.")
@@ -45,7 +45,7 @@ def _load_prompt(domain: str) -> tuple[str, str, str]:
         "The summary may only restate cited findings and must not add new facts or numbers. "
         "Do not infer calculations; explain calculations only when already present in input.\n" + contract
     )
-    return system, user_template, entry["system_template"]
+    return system, user_template, entry["rendered_system"]
 
 
 def _format_user_prompt(template: str, payload: dict[str, Any]) -> str:
@@ -79,6 +79,14 @@ def _validate_output(
         if finding.get("kind", "fact") in {"fact", "interpretation"} and not evidence_ids:
             raise LlmCallError("Factual findings must cite supplied Evidence IDs.")
 
+    output_status = output["status"]
+    if output_status == "no_results":
+        output_status = "partial"
+        output["limitations"] = [
+            *output["limitations"],
+            "No eligible evidence supported the request; this partial analysis contains no implied zero value.",
+        ]
+
     return {
         "schema_version": f"{domain.replace('_', '-')}-llm/0.1-proposal",
         "request_id": request_id,
@@ -91,6 +99,7 @@ def _validate_output(
             else "caller_asserted_external_permission_reference"
         ),
         **output,
+        "status": output_status,
     }
 
 
@@ -103,6 +112,7 @@ def _call_domain(
         raise AnalysisInputError("request_id is required.")
     system, user_template, prompt_path = _load_prompt(domain)
     input_text = _format_user_prompt(user_template, payload)
+    llm = None
     if call is not None:
         response = call(instructions=system, input_text=input_text)
     else:
@@ -116,7 +126,7 @@ def _call_domain(
         "analysis": validated,
         "llm": {
             "provider": "openai_responses_api",
-            "model": (client.model if client else None),
+            "model": (llm.model if llm else None),
             "response_id": response.get("response_id"),
             "prompt_id": domain,
             "prompt_version": "v1",

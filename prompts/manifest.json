@@ -13,7 +13,7 @@
           "user_template": "sales_analysis/v1/user_template.md",
           "examples": "sales_analysis/v1/examples.json",
           "rendered_system": "sales_analysis/v1/rendered_system.md",
-          "output_contract": "local proposal only; no model or shared generation contract is connected",
+          "output_contract": "local opt-in runtime appends the versioned JSON output contract; no shared generation contract",
           "evaluation_fixture": "tests/fixtures/market_analysis_prompt_injection/cases.json"
         }
       }
@@ -28,7 +28,7 @@
           "user_template": "market_analysis/v1/user_template.md",
           "examples": "market_analysis/v1/examples.json",
           "rendered_system": "market_analysis/v1/rendered_system.md",
-          "output_contract": "local proposal only; no model or shared generation contract is connected",
+          "output_contract": "local opt-in runtime appends the versioned JSON output contract; no shared generation contract",
           "evaluation_fixture": "tests/fixtures/market_analysis_prompt_injection/cases.json"
         }
       }

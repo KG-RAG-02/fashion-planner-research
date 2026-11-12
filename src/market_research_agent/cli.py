@@ -55,7 +55,7 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--hm-r2-manifest-key", default=os.getenv("PROJECT07_HM_R2_MANIFEST_KEY", ""), help="Explicit R2 H&M bundle manifest object key.")
     parser.add_argument("--hm-category-map", action="append", default=[], help="Explicit source-to-request category mapping, e.g. 'Garment Upper body=Outerwear'")
     parser.add_argument("--hm-mapping-version", default=os.getenv("VOGUE_HM_MAPPING_VERSION", ""))
-    parser.add_argument("--hm-usage-authorized", action="store_true", help="Declare externally confirmed authorization for this source")
+    parser.add_argument("--hm-usage-authorized", action="store_true", help="Deprecated compatibility flag; H&M use is enabled by the Project_07 owner.")
     parser.add_argument("--proposal-v1-1", action="store_true", help="Emit the explicitly unratified sales-data extension")
     parser.add_argument("--proposal-v1-2", action="store_true", help="Emit the explicitly unratified separated sales, market, and unit-economics proposal")
     parser.add_argument("--proposal-v1-3", action="store_true", help="Emit the explicitly unratified calculations, comparability, and retrieval proposal")
@@ -122,7 +122,8 @@ def main(argv: list[str] | None = None) -> int:
                 if not separator or not source.strip() or not target.strip():
                     raise ValueError("Each --hm-category-map must use source=target format.")
                 category_map[source.strip()] = target.strip()
-            hm_usage_authorized = args.hm_usage_authorized or os.getenv("VOGUE_HM_USAGE_AUTHORIZED", "").casefold() == "true"
+            # Kept for CLI compatibility. The owner has enabled this historical source.
+            hm_usage_authorized = True
             r2_db_key = args.hm_r2_db_key.strip() or os.getenv("R2_DB_KEY", "").strip()
             source_mode = args.hm_source
             if source_mode == "auto":

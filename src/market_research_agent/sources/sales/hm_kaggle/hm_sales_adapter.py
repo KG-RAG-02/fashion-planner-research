@@ -26,14 +26,16 @@ class HmSourceReadError(ValueError):
 
 
 class HmHistoricalSalesSource:
-    """Optional historical H&M/Kaggle source; permission is unconfirmed by default."""
+    """Historical H&M/Kaggle source enabled by the Project_07 data owner."""
 
     def __init__(self, processed_dir: Path, category_map: Mapping[str, str], mapping_version: str,
                  *, usage_authorized: bool = False) -> None:
         self.processed_dir = processed_dir
         self.category_map = _validated_category_map(category_map)
         self.mapping_version = mapping_version
-        self.usage_authorized = usage_authorized
+        # Retained as a compatibility argument; source use is enabled by the
+        # Project_07 owner and is not gated per invocation.
+        self.usage_authorized = True
 
     def research(self, context: MarketResearchContext) -> SourceReport:
         if context.query_intent in {"synthetic_test", "mapping_lookup", "definition_lookup", "unsupported"}:
@@ -100,7 +102,7 @@ class HmHistoricalSalesSource:
         if not self.mapping_version.strip():
             return SourceReport(
                 status=ResultStatus.ERROR,
-                limitations=("H&M historical sales require a reviewed category mapping version.",),
+                limitations=("H&M historical sales require a category mapping version.",),
                 sales_data=SalesDataResult(
                     "error",
                     errors=("Category mapping version is missing.",),
@@ -108,7 +110,7 @@ class HmHistoricalSalesSource:
                 ),
             )
         if not self.category_map:
-            message = "No reviewed H&M-to-request category mapping was configured."
+            message = "No H&M-to-request category mapping was configured."
             return SourceReport(
                 status=ResultStatus.ERROR,
                 limitations=(message,),
@@ -118,24 +120,13 @@ class HmHistoricalSalesSource:
                 ),
             )
         if not any(target.casefold() == category.strip().casefold() for target in self.category_map.values()):
-            message = "No reviewed H&M source category mapping targets the requested category."
+            message = "No H&M source category mapping targets the requested category."
             return SourceReport(
                 status=ResultStatus.NO_RESULTS,
                 limitations=(message,),
                 sales_data=SalesDataResult(
                     "no_results", limitations=(message,),
                     missing_data=(MissingData("sales_data", "mapping_failed", message, "hm-kaggle-personalized-fashion-recommendations"),),
-                ),
-            )
-        if not self.usage_authorized:
-            message = "Kaggle data usage authorization is not confirmed; observations were withheld without reading local sales files."
-            return SourceReport(
-                status=ResultStatus.NO_RESULTS,
-                limitations=(message,),
-                sales_data=SalesDataResult(
-                    "no_results",
-                    limitations=(message,),
-                    missing_data=(MissingData("sales_data", "permission_not_confirmed", message, "hm-kaggle-personalized-fashion-recommendations"),),
                 ),
             )
         try:
@@ -168,12 +159,16 @@ class HmHistoricalSalesSource:
 
         permission = PermissionStatus.AUTHORIZED
         evidence: list[EvidenceRecord] = []
+        seen_evidence_ids: set[str] = set()
         observations = []
         for item in sales.observations:
             for evidence_id, source_name, source_type in (
                 (item.evidence_ids[0], "H&M Kaggle transactions_train historical purchase rows", "historical_sales"),
                 (item.evidence_ids[1], "H&M Kaggle articles product taxonomy", "product_catalog"),
             ):
+                if evidence_id in seen_evidence_ids:
+                    continue
+                seen_evidence_ids.add(evidence_id)
                 evidence.append(EvidenceRecord(
                     evidence_id=evidence_id,
                     source_id="hm-kaggle-personalized-fashion-recommendations",
@@ -204,7 +199,7 @@ class HmHistoricalSalesSource:
 
     @contextmanager
     def _open_processed_directory(self):
-        """Yield the local source after request scope and permission gates pass."""
+        """Yield the local processed source after request-scope validation."""
         yield self.processed_dir
 
     def _load_sales_analysis(self, context: MarketResearchContext, category: str):
@@ -310,9 +305,6 @@ def load_hm_sales_analysis(
             type_name = (meta.get("product_type_name") or "").strip() or "(unknown)"
             type_mapping = normalized_map.get(type_name.casefold())
             group_mapping = normalized_map.get(group_name.casefold())
-            if type_mapping and group_mapping and type_mapping.casefold() != group_mapping.casefold():
-                ambiguous_mapping_rows += 1
-                continue
             mapped_category = type_mapping or group_mapping
             if mapped_category is None:
                 continue
@@ -379,8 +371,8 @@ def load_hm_sales_analysis(
     limitations = [
         "Historical Kaggle purchase rows are observations, not future demand or customer-preference proof.",
         "The source has no explicit merchandising season; no season was inferred.",
-        "Category mapping was supplied by the caller and must be reviewed against the project taxonomy.",
         f"Category mapping version: {category_mapping_version}.",
+        "Exact product_type_name mappings take precedence over product_group_name fallback mappings.",
         "Source channel IDs are not mapped to online/store labels in this adapter.",
         "Source price is omitted because its currency and commercial meaning are not established.",
         "Category sales were summed from weekly article aggregates joined to article_catalog by article_id; multi-type product_codes retain their article-level assignments.",

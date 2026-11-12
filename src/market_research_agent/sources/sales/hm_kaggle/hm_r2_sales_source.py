@@ -1,8 +1,4 @@
-"""H&M processed-object reader for a separately declared R2 bundle.
-
-The parent adapter enforces usage permission and category mapping before this
-class opens the bundle or fetches any object.
-"""
+"""H&M processed-object reader for the owner-enabled R2 data bundle."""
 
 from __future__ import annotations
 
@@ -56,7 +52,7 @@ class R2HmHistoricalSalesSource(HmHistoricalSalesSource):
     @contextmanager
     def _open_processed_directory(self):
         # This context manager is reached only after the parent has accepted an
-        # explicit request, category mapping/version, and external permission declaration.
+        # request scope and category mapping are validated by the parent adapter.
         store = self.store or R2ObjectStore.from_env()
         try:
             bundle_bytes = store.get_bytes(self.manifest_key, max_bytes=8_000_000)

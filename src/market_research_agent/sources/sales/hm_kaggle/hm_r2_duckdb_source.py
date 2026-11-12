@@ -249,11 +249,8 @@ class R2DuckDBHmHistoricalSalesSource(HmHistoricalSalesSource):
                 FROM grouped
             ), resolved AS (
                 SELECT *,
-                    (type_target IS NOT NULL AND group_target IS NOT NULL
-                     AND LOWER(type_target) <> LOWER(group_target)) AS mapping_conflict,
-                    CASE WHEN type_target IS NOT NULL AND group_target IS NOT NULL
-                                   AND LOWER(type_target) <> LOWER(group_target)
-                         THEN NULL ELSE COALESCE(type_target, group_target) END AS mapped_category
+                    FALSE AS mapping_conflict,
+                    COALESCE(type_target, group_target) AS mapped_category
                 FROM classified
             ), stats AS (
                 SELECT COALESCE(SUM(purchase_rows) FILTER (WHERE mapping_conflict), 0)::BIGINT AS conflicting_rows
@@ -328,7 +325,7 @@ class R2DuckDBHmHistoricalSalesSource(HmHistoricalSalesSource):
             "H&M 과거 데이터이며 현재 판매, 수요, 매출액, 시장규모 또는 시장점유율을 뜻하지 않습니다.",
             "purchase_rows counts historical transaction rows, not unique customers or units sold.",
             "The original sales_channel_id is preserved and is not interpreted as online or offline.",
-            "Category mapping is caller-supplied and must be reviewed; conflicting type/group mappings are excluded.",
+            "Versioned H&M mapping is applied at product_type_name first, with product_group_name as a fallback when the product type is unmapped.",
             "Transactions without a matching article catalog record and rows with invalid dates are excluded; their counts are not measured by this query.",
             "A requested partial week returns the full purchase_rows aggregate for each overlapping source week.",
             "Missing weeks are not filled with zero. No transaction row for a week is not an observed zero.",

@@ -169,7 +169,7 @@ class LocalMarketCsvSourceTests(unittest.TestCase):
         payload = json.loads(output.getvalue())
         self.assertEqual(exit_code, 0)
         self.assertEqual(payload["requested_scope"]["query"], query)
-        self.assertEqual(payload["market_data"]["status"], "no_results")
+        self.assertEqual(payload["market_data"]["status"], "partial")
 
     def test_missing_scope_metadata_retains_row_as_partial_without_claiming_scope_match(self) -> None:
         row = dict(self.row, channel="", period_start="", period_end="", as_of="", product_mapping_version="")

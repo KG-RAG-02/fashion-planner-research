@@ -8,8 +8,11 @@ from collections import defaultdict
 from pathlib import Path
 from typing import Any, Callable
 
-from ...domain.models import FindingKind, MarketResearchContext, ResearchFinding, ResultStatus, SourceReport
-from ...domain.sales import MarketDataResult, SalesDataResult
+from ...domain.models import (
+    EvidenceRecord, FindingKind, MarketResearchContext, PermissionStatus,
+    ResearchFinding, ResultStatus, SourceReport,
+)
+from ...domain.sales import MarketDataResult, MarketObservation, SalesDataResult
 
 DEFAULT_FIXTURE_DIR = Path(__file__).resolve().parents[4] / "examples/query_coverage/generated"
 LIMITATION = (
@@ -139,6 +142,14 @@ class SyntheticQueryCoverageSource:
                 sales_data=SalesDataResult("error", errors=("Synthetic demo fixture is missing or invalid.",)),
                 market_data=MarketDataResult("error", errors=("Synthetic demo fixture is missing or invalid.",)),
             )
+        fallback_marker = fixture.get("_source_fallback")
+        fallback_limitation = (
+            "Cloud synthetic data was unavailable or unconfigured; an allowlisted local synthetic copy was used."
+            if fallback_marker in {
+                "cloud_r2_unavailable_local_synthetic_copy",
+                "cloud_r2_not_configured_local_synthetic_copy",
+            } else None
+        )
         scope = _extract_scope(context)
         if scope["metrics"]:
             market_rows = [row for row in market_rows if row.get("metric_name") in scope["metrics"]]
@@ -149,13 +160,15 @@ class SyntheticQueryCoverageSource:
             message = "No generated fixture rows match this exact scope; values were not inferred or extrapolated."
             return SourceReport(
                 status=ResultStatus.NO_RESULTS,
-                limitations=(message, LIMITATION),
+                limitations=(message, LIMITATION, *((fallback_limitation,) if fallback_limitation else ())),
                 sales_data=SalesDataResult("no_results", limitations=(message, LIMITATION)),
                 market_data=MarketDataResult("no_results", limitations=(message, LIMITATION)),
             )
 
         findings = []
-        limitations = [LIMITATION]
+        limitations = [LIMITATION, *((fallback_limitation,) if fallback_limitation else ())]
+        market_observations: list[MarketObservation] = []
+        market_evidence: dict[str, EvidenceRecord] = {}
         applied_scope_note = (
             f"Applied canonical scope: {scope['gender']} {scope['category']}, {scope['period_start']}–{scope['period_end']}, "
             f"{scope['geography']}/{scope['channel']}, excluded colors={','.join(scope['colors_exclude']) or 'none'}."
@@ -175,6 +188,9 @@ class SyntheticQueryCoverageSource:
                 limitations.append(f"Sales-like display omitted {duplicate_months} months with duplicate declared grain rows; those values require source QA.")
         if matching_market:
             series, omitted_groups, omitted_months, duplicate_months = self._group_monthly_series(matching_market)
+            market_observations, market_evidence = self._structured_market_output(
+                matching_market, series,
+            )
             findings.append(ResearchFinding(
                 finding_id=f"synthetic-market:{context.request_id}", topic="synthetic_market_demo",
                 statement=("[SYNTHETIC TEST DATA] " + applied_scope_note + " Generated scenario market-value series, kept separate by geography, channel, population, category, mapping, and other declared dimensions: "
@@ -192,10 +208,89 @@ class SyntheticQueryCoverageSource:
         return SourceReport(
             status=ResultStatus.PARTIAL,
             findings=tuple(findings),
-            limitations=(*limitations, partial_note, "The stable HTTP result schema 1.0 has no structured sales_data, market_data, synthetic marker, or chart artifact fields; values are therefore carried as explicitly labeled proposal findings only.", "Unscoped dimension series are kept separate; the stable route does not calculate adjacent-period changes."),
+            evidence=tuple(market_evidence.values()),
+            limitations=(*limitations, partial_note, "The stable HTTP result schema 1.0 has no structured sales_data, market_data, synthetic marker, or chart artifact fields; the stable route carries labeled findings only. The unratified 1.3 proposal output includes structured market observations with test-only markers.", "Unscoped dimension series are kept separate; the stable route does not calculate adjacent-period changes."),
             sales_data=SalesDataResult("partial" if matching_sales else "no_results", limitations=(LIMITATION,)),
-            market_data=MarketDataResult("partial" if matching_market else "no_results", limitations=(LIMITATION,)),
+            market_data=MarketDataResult(
+                "partial" if matching_market else "no_results",
+                observations=tuple(market_observations),
+                limitations=(LIMITATION,),
+            ),
         )
+
+    @staticmethod
+    def _structured_market_output(
+        rows: list[dict[str, Any]], series: list[dict[str, Any]],
+    ) -> tuple[list[MarketObservation], dict[str, EvidenceRecord]]:
+        """Materialize visible synthetic market rows with explicit test markers."""
+        grouped_rows: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            dimensions = {key: row.get(key) for key in _DIMENSION_FIELDS}
+            group_key = json.dumps(dimensions, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            grouped_rows[(group_key, row["period_start"][:7])].append(row)
+
+        observations: list[MarketObservation] = []
+        evidence: dict[str, EvidenceRecord] = {}
+        for item in series:
+            dimensions = item["dimensions"]
+            group_key = json.dumps(dimensions, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            for month in item["monthly_values"]:
+                candidates = grouped_rows.get((group_key, month), [])
+                # The display path omits duplicate declared month grains. Keep
+                # the structured output aligned with exactly those visible rows.
+                if len(candidates) != 1:
+                    continue
+                row = candidates[0]
+                evidence_ids = tuple(dict.fromkeys(row.get("evidence_ids", ())))
+                if not evidence_ids:
+                    continue
+                source_id = str(row["source_id"])
+                for evidence_id in evidence_ids:
+                    evidence.setdefault(evidence_id, EvidenceRecord(
+                        evidence_id=evidence_id,
+                        source_id=source_id,
+                        source_type="synthetic_market_fixture",
+                        source_name="Synthetic query coverage market scenario",
+                        locator=f"synthetic://query-coverage/{source_id}/{evidence_id}",
+                        period_start=row.get("period_start"),
+                        period_end=row.get("period_end"),
+                        geography=row.get("geography"),
+                        channel=row.get("channel"),
+                        product_mapping=row.get("product_mapping_version"),
+                        unit=row.get("unit"),
+                        currency=row.get("currency"),
+                        metric_definition=row.get("metric_definition"),
+                        permission_status=PermissionStatus.SYNTHETIC_TEST_ONLY,
+                        synthetic=True,
+                        data_nature="synthetic_test",
+                        operational_eligible=False,
+                    ))
+                observations.append(MarketObservation(
+                    observation_id=str(row["observation_id"]),
+                    metric_name=str(row["metric_name"]),
+                    measure_type=str(row["measure_type"]),
+                    value=float(row["value"]),
+                    unit=str(row["unit"]),
+                    evidence_ids=evidence_ids,
+                    currency=row.get("currency"),
+                    metric_definition=row.get("metric_definition"),
+                    period_start=row.get("period_start"),
+                    period_end=row.get("period_end"),
+                    period_grain=row.get("period_grain"),
+                    geography=row.get("geography"),
+                    channel=row.get("channel"),
+                    population=row.get("population"),
+                    category=row.get("category"),
+                    source_category=row.get("source_category"),
+                    product_mapping_id=row.get("product_mapping_id"),
+                    product_mapping_version=row.get("product_mapping_version"),
+                    attributes=row.get("attributes"),
+                    synthetic=True,
+                    data_nature="synthetic_test",
+                    permission_status="authorized_for_synthetic_testing_only",
+                    operational_eligible=False,
+                ))
+        return observations, evidence
 
     @staticmethod
     def _filter(rows: list[dict[str, Any]], scope: dict[str, Any]) -> list[dict[str, Any]]:

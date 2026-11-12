@@ -93,13 +93,14 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertEqual(context.inferred_scope["category"], "Outerwear")
         self.assertIn("explicit_category_overrides_query_hint", context.query_ambiguities)
 
-    def test_http_configured_hm_source_obeys_permission_gate_without_reading_files(self):
+    def test_http_configured_hm_source_reads_without_usage_flag(self):
         with tempfile.TemporaryDirectory() as folder:
             root = Path(folder)
             settings = {
                 "VOGUE_HM_PROCESSED_DIR": str(root / "does-not-exist"),
                 "VOGUE_HM_CATEGORY_MAP": "Jacket=Outerwear", "VOGUE_HM_MAPPING_VERSION": "test-map-v1",
                 "VOGUE_HM_USAGE_AUTHORIZED": "", "R2_DB_KEY": "", "PROJECT07_HM_R2_DB_KEY": "",
+                "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
             }
             request = valid_request()
             request["input"]["planning_request"]["query"] = "Outerwear purchase rows"
@@ -111,9 +112,9 @@ class Project07HttpServerTests(unittest.TestCase):
                 context = context_from_handoff_request(request)
                 result = configured_agent().run(context)
             self.assertEqual(result.sales_data.status, "no_results")
-            self.assertEqual(result.sales_data.missing_data[0].reason, "permission_not_confirmed")
+            self.assertEqual(result.sales_data.missing_data[0].reason, "source_not_configured")
 
-    def test_http_configured_hm_r2_source_does_not_fetch_manifest_without_permission(self):
+    def test_http_configured_hm_r2_source_fetches_manifest_without_usage_flag(self):
         settings = {
             "VOGUE_HM_CATEGORY_MAP": "Jacket=Outerwear",
             "VOGUE_HM_MAPPING_VERSION": "test-map-v1",
@@ -121,6 +122,7 @@ class Project07HttpServerTests(unittest.TestCase):
             "PROJECT07_HM_R2_PREFIX": "example/hm",
             "PROJECT07_HM_R2_MANIFEST_KEY": "example/hm/bundle.json",
             "R2_DB_KEY": "", "PROJECT07_HM_R2_DB_KEY": "",
+            "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
         }
         request = valid_request()
         request["input"]["planning_request"]["query"] = "Outerwear purchase rows"
@@ -131,9 +133,9 @@ class Project07HttpServerTests(unittest.TestCase):
         with patch.dict(os.environ, settings, clear=True):
             result = configured_agent().run(context_from_handoff_request(request))
         self.assertEqual(result.sales_data.status, "no_results")
-        self.assertEqual(result.sales_data.missing_data[0].reason, "permission_not_confirmed")
+        self.assertEqual(result.sales_data.missing_data[0].reason, "source_error")
 
-    def test_http_prefers_shared_duckdb_over_legacy_bundle_without_reading_before_permission(self):
+    def test_http_prefers_shared_duckdb_over_legacy_bundle_without_usage_flag(self):
         from market_research_agent.sources.sales.hm_kaggle.hm_r2_duckdb_source import R2DuckDBHmHistoricalSalesSource
         from market_research_agent.sources.shared.r2_object_store import R2ObjectStore
 
@@ -144,6 +146,7 @@ class Project07HttpServerTests(unittest.TestCase):
             "R2_DB_KEY": "shared.duckdb",
             "PROJECT07_HM_R2_PREFIX": "example/hm",
             "PROJECT07_HM_R2_MANIFEST_KEY": "example/hm/bundle.json",
+            "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
         }
         request = valid_request()
         request["input"]["planning_request"]["query"] = "Outerwear purchase rows"
@@ -159,12 +162,12 @@ class Project07HttpServerTests(unittest.TestCase):
             agent = configured_agent()
             result = agent.run(context_from_handoff_request(request))
         self.assertEqual(result.sales_data.status, "no_results")
-        self.assertEqual(result.sales_data.missing_data[0].reason, "permission_not_confirmed")
+        self.assertEqual(result.sales_data.missing_data[0].reason, "source_error")
         duckdb_source.from_env.assert_called_once()
         csv_source.assert_not_called()
         from_env.assert_not_called()
 
-    def test_http_shared_r2_duckdb_source_keeps_permission_gate_lazy(self):
+    def test_http_shared_r2_duckdb_source_reads_without_usage_flag(self):
         from market_research_agent.sources.shared.r2_object_store import R2ObjectStore
 
         settings = {
@@ -172,6 +175,7 @@ class Project07HttpServerTests(unittest.TestCase):
             "VOGUE_HM_MAPPING_VERSION": "test-map-v1",
             "VOGUE_HM_USAGE_AUTHORIZED": "false",
             "R2_DB_KEY": "shared.duckdb",
+            "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
         }
         request = valid_request()
         request["input"]["planning_request"]["query"] = "Outerwear purchase rows"
@@ -182,8 +186,8 @@ class Project07HttpServerTests(unittest.TestCase):
         with patch.dict(os.environ, settings, clear=True), patch.object(R2ObjectStore, "from_env") as from_env:
             result = configured_agent().run(context_from_handoff_request(request))
         self.assertEqual(result.sales_data.status, "no_results")
-        self.assertEqual(result.sales_data.missing_data[0].reason, "permission_not_confirmed")
-        from_env.assert_not_called()
+        self.assertEqual(result.sales_data.missing_data[0].reason, "source_error")
+        from_env.assert_called_once()
 
     def post(self, request_body: dict | bytes, *, path="/v1/agents/sales-market-agent/runs", content_type="application/json", agent_factory=None, token="test-agent-token", synthetic_simulation_enabled=False, synthetic_bundle_provider=None):
         if agent_factory is None and synthetic_simulation_enabled:
@@ -259,8 +263,8 @@ class Project07HttpServerTests(unittest.TestCase):
         self.assertEqual(response["request_id"], REQUEST_ID)
         self.assertEqual(response["producer"]["agent_id"], "sales-market-agent")
         self.assertEqual(response["producer"]["schema_version"], "1.0")
-        self.assertEqual(response["status"], "no_results")
-        self.assertEqual(response["result"]["status"], "no_results")
+        self.assertEqual(response["status"], "partial")
+        self.assertEqual(response["result"]["status"], "partial")
         self.assertEqual(response["result"]["request_id"], REQUEST_ID)
         self.assertEqual(response["result"]["schema_version"], "1.0")
         self.assertEqual(set(response), RESPONSE_FIELDS)

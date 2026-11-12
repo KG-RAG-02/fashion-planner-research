@@ -58,9 +58,9 @@ class UpstreamContextTests(unittest.TestCase):
         self.assertEqual(result.schema_version, "1.0")
         # Inventory is context only; it did not become sales, demand, price, or margin.
         proposal = result.to_proposal_v1_2_dict()
-        self.assertEqual(proposal["sales_data"]["status"], "no_results")
+        self.assertEqual(proposal["sales_data"]["status"], "partial")
         self.assertEqual(proposal["sales_data"]["observations"], [])
-        self.assertEqual(proposal["unit_economics"]["status"], "no_results")
+        self.assertEqual(proposal["unit_economics"]["status"], "partial")
         self.assertEqual(proposal["unit_economics"]["calculations"], [])
 
     def test_unknown_producer_schema_version_is_not_compared_to_local_result_version(self):

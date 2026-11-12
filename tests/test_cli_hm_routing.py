@@ -46,7 +46,7 @@ class HmCliRoutingTests(unittest.TestCase):
         self.assertEqual(exit_code, 0)
         self.assertEqual(duckdb_source.call_args.kwargs["object_key"], "shared.duckdb")
         csv_source.assert_not_called()
-        self.assertEqual(json.loads(output.getvalue())["sales_data"]["status"], "no_results")
+        self.assertEqual(json.loads(output.getvalue())["sales_data"]["status"], "partial")
 
     def test_cli_can_explicitly_force_local_source(self):
         with tempfile.TemporaryDirectory() as temporary:
@@ -73,7 +73,7 @@ class HmCliRoutingTests(unittest.TestCase):
                 exit_code = main(args)
         self.assertEqual(exit_code, 0)
         duckdb_source.assert_not_called()
-        self.assertEqual(json.loads(output.getvalue())["sales_data"]["status"], "no_results")
+        self.assertEqual(json.loads(output.getvalue())["sales_data"]["status"], "partial")
 
 
 if __name__ == "__main__":

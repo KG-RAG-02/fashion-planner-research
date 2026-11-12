@@ -16,7 +16,7 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any, Callable
 from urllib.parse import unquote, urlsplit
 
-from .domain.models import MarketResearchContext
+from .domain.models import MarketResearchContext, normalize_no_results_payload
 from .sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
 from .sources.market.synthetic_r2 import SyntheticR2FixtureBundleStore
 from .sources.sales.hm_kaggle.hm_sales_adapter import HmHistoricalSalesSource
@@ -33,6 +33,7 @@ from .synthetic_rag import (
     SYNTHETIC_MARKERS,
     SyntheticFixtureError,
     analyze_synthetic_request,
+    load_fixture_bundle,
 )
 
 
@@ -261,7 +262,7 @@ def make_handler(
             return
 
         def _send_json(self, status: int, body: dict[str, Any], *, headers: dict[str, str] | None = None) -> None:
-            encoded = json.dumps(body, ensure_ascii=False, allow_nan=False).encode("utf-8")
+            encoded = json.dumps(normalize_no_results_payload(body), ensure_ascii=False, allow_nan=False).encode("utf-8")
             self.send_response(status)
             self.send_header("Content-Type", "application/json; charset=utf-8")
             self.send_header("Content-Length", str(len(encoded)))
@@ -469,8 +470,11 @@ def make_handler(
 
 
 def configured_agent() -> MarketResearchAgent:
-    """Build local sources only from explicit process settings and source gates."""
+    """Build the configured read-only cloud sales and synthetic market sources."""
+    _load_project_r2_env()
     sources = []
+    hm_mapping_path = Path(__file__).resolve().parents[2] / "configs" / "hm-category-map.v1.json"
+    mapping_data = json.loads(hm_mapping_path.read_text(encoding="utf-8"))
     hm_map_raw = os.getenv("VOGUE_HM_CATEGORY_MAP", "").strip()
     if hm_map_raw:
         category_map = {}
@@ -479,24 +483,78 @@ def configured_agent() -> MarketResearchAgent:
             if not separator or not source.strip() or not target.strip():
                 raise ValueError("VOGUE_HM_CATEGORY_MAP must contain comma-separated source=target pairs.")
             category_map[source.strip()] = target.strip()
-        mapping_version = os.getenv("VOGUE_HM_MAPPING_VERSION", "")
-        usage_authorized = os.getenv("VOGUE_HM_USAGE_AUTHORIZED", "").casefold() == "true"
-        if (os.getenv("PROJECT07_HM_R2_DB_KEY", "").strip()
-                or os.getenv("R2_DB_KEY", "").strip()):
-            sources.append(R2DuckDBHmHistoricalSalesSource.from_env(
-                category_map, mapping_version, usage_authorized=usage_authorized,
-            ))
-        elif os.getenv("PROJECT07_HM_R2_MANIFEST_KEY", "").strip():
-            sources.append(R2HmHistoricalSalesSource.from_env(
-                category_map, mapping_version, usage_authorized=usage_authorized,
-            ))
-        elif os.getenv("VOGUE_HM_PROCESSED_DIR", "").strip():
-            # Explicit local directory is retained for offline/manual development.
-            sources.append(HmHistoricalSalesSource(
-                Path(os.environ["VOGUE_HM_PROCESSED_DIR"]), category_map, mapping_version,
-                usage_authorized=usage_authorized,
-            ))
+        mapping_version = os.getenv("VOGUE_HM_MAPPING_VERSION", "").strip() or "project07-hm-category-map/1.0"
+    else:
+        # Exact product types provide a more precise category than their broad
+        # H&M group. The source adapter resolves type mappings before group fallback.
+        category_map = {**mapping_data["product_group_name"], **mapping_data["product_type_name"]}
+        mapping_version = mapping_data["mapping_version"]
+    r2_db_key = (os.getenv("PROJECT07_HM_R2_DB_KEY", "").strip()
+                 or os.getenv("R2_DB_KEY", "").strip())
+    if r2_db_key:
+        sources.append(R2DuckDBHmHistoricalSalesSource.from_env(
+            category_map, mapping_version, usage_authorized=True,
+        ))
+    elif os.getenv("PROJECT07_HM_R2_MANIFEST_KEY", "").strip():
+        sources.append(R2HmHistoricalSalesSource.from_env(
+            category_map, mapping_version, usage_authorized=True,
+        ))
+    elif os.getenv("VOGUE_HM_PROCESSED_DIR", "").strip():
+        # Explicit local directory is retained for offline/manual development.
+        sources.append(HmHistoricalSalesSource(
+            Path(os.environ["VOGUE_HM_PROCESSED_DIR"]), category_map, mapping_version,
+            usage_authorized=True,
+        ))
+    r2_configured = all(os.getenv(name, "").strip() for name in (
+        "R2_ACCOUNT_ID", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+    ))
+    if r2_configured:
+        bundle_store = SyntheticR2FixtureBundleStore.from_env()
+        def load_cloud_or_local_synthetic_bundle():
+            try:
+                return bundle_store.load_bundle()
+            except Exception:
+                local_bundle = load_fixture_bundle()
+                local_bundle["_source_fallback"] = "cloud_r2_unavailable_local_synthetic_copy"
+                return local_bundle
+
+        synthetic_loader = load_cloud_or_local_synthetic_bundle
+    else:
+        def load_local_synthetic_bundle():
+            local_bundle = load_fixture_bundle()
+            local_bundle["_source_fallback"] = "cloud_r2_not_configured_local_synthetic_copy"
+            return local_bundle
+
+        synthetic_loader = load_local_synthetic_bundle
+    sources.append(SyntheticQueryCoverageSource(bundle_loader=synthetic_loader))
     return MarketResearchAgent(CompositeMarketResearchSource(sources) if sources else NoConfiguredSources())
+
+
+def _load_project_r2_env() -> None:
+    """Load only R2 settings from this checkout's .env when the shell omitted them."""
+    if os.getenv("VOGUE_PROJECT07_DISABLE_DOTENV", "").casefold() in {"1", "true", "yes"}:
+        return
+    env_path = Path(__file__).resolve().parents[2] / ".env"
+    if not env_path.is_file():
+        return
+    for raw_line in env_path.read_text(encoding="utf-8-sig").splitlines():
+        line = raw_line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if line.startswith("export "):
+            line = line[len("export "):].strip()
+        key, separator, value = line.partition("=")
+        key = key.strip()
+        if not separator or not (key.startswith("R2_") or key.startswith("VOGUE_HM_")
+                                 or key.startswith("PROJECT07_HM_R2_")
+                                 or key.startswith("PROJECT07_SYNTHETIC_R2_")):
+            continue
+        value = value.strip()
+        if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
+            value = value[1:-1]
+        elif " #" in value:
+            value = value.split(" #", 1)[0].rstrip()
+        os.environ.setdefault(key, value)
 
 
 def serve(

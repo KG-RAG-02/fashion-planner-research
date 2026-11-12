@@ -284,6 +284,15 @@ class MarketResearchAgent:
             if evidence.permission_status == PermissionStatus.AUTHORIZED
             and evidence_id not in duplicate_ids
         }
+        synthetic_test_evidence = {
+            evidence_id: evidence
+            for evidence_id, evidence in all_evidence.items()
+            if evidence.permission_status == PermissionStatus.SYNTHETIC_TEST_ONLY
+            and evidence.synthetic is True
+            and evidence.data_nature == "synthetic_test"
+            and evidence.operational_eligible is False
+            and evidence_id not in duplicate_ids
+        }
         sales_data = report.sales_data
         if sales_data is not None:
             valid_sales = tuple(
@@ -313,11 +322,18 @@ class MarketResearchAgent:
         if market_data is not None:
             valid_market = tuple(
                 item for item in market_data.observations
-                if set(item.evidence_ids).issubset(permitted_evidence)
+                if (
+                    set(item.evidence_ids).issubset(permitted_evidence)
+                    if not item.synthetic
+                    else item.data_nature == "synthetic_test"
+                    and item.permission_status == PermissionStatus.SYNTHETIC_TEST_ONLY.value
+                    and item.operational_eligible is False
+                    and set(item.evidence_ids).issubset(synthetic_test_evidence)
+                )
             )
             if len(valid_market) != len(market_data.observations):
-                limitations.append("Market observations without authorized, resolvable Evidence were omitted.")
-                errors.append(AgentError("INVALID_MARKET_EVIDENCE", "Some market observations did not reference authorized Evidence."))
+                limitations.append("Market observations without matching authorized or explicitly test-only Evidence were omitted.")
+                errors.append(AgentError("INVALID_MARKET_EVIDENCE", "Some market observations did not reference valid Evidence."))
             market_data = MarketDataResult(
                 status=("partial" if market_data.status == "ok" and len(valid_market) != len(market_data.observations) else market_data.status),
                 observations=valid_market,
@@ -343,7 +359,7 @@ class MarketResearchAgent:
                 errors=unit_economics.errors,
                 missing_data=unit_economics.missing_data,
             )
-        unapproved_ids = set(all_evidence) - set(permitted_evidence)
+        unapproved_ids = set(all_evidence) - set(permitted_evidence) - set(synthetic_test_evidence)
         if unapproved_ids:
             limitations.append(
                 "Evidence with denied or unconfirmed usage permission was omitted."
@@ -386,7 +402,7 @@ class MarketResearchAgent:
                 continue
             findings.append(finding)
 
-        evidence = tuple(permitted_evidence.values())
+        evidence = tuple((*permitted_evidence.values(), *synthetic_test_evidence.values()))
         def keep_resolvable_hits(retrieval):
             if retrieval is None:
                 return None
@@ -459,7 +475,7 @@ class MarketResearchAgent:
                         comparisons.append(compare_sales_to_market(
                             sales_item, market_item,
                             sales_permission_authorized=True,
-                            market_permission_authorized=True,
+                            market_permission_authorized=not market_item.synthetic,
                         ))
                 if comparison_truncated:
                     break
@@ -559,7 +575,7 @@ class MarketResearchAgent:
         if status == ResultStatus.PARTIAL:
             return (
                 f"Produced {finding_count} findings with partial source coverage; "
-                f"{evidence_count} authorized evidence records were retained."
+                f"{evidence_count} evidence records were retained (synthetic test records remain labeled as such)."
             )
         if status == ResultStatus.NO_RESULTS:
             return "No market findings were returned."

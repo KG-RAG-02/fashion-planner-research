@@ -34,7 +34,7 @@
       "minLength": 1
     },
     "agent_id": {
-      "const": "market-research-agent"
+      "const": "sales-market-agent"
     },
     "status": {
       "$ref": "#/$defs/status"
@@ -45,23 +45,82 @@
     "requested_scope": {
       "type": "object",
       "properties": {
-        "population": {"type": ["string", "null"]},
-        "unit": {"type": ["string", "null"]},
-        "currency": {"type": ["string", "null"]},
-        "measure_type": {"type": ["string", "null"]},
-        "mapping_id": {"type": ["string", "null"]},
-        "mapping_version": {"type": ["string", "null"]},
-        "period_grain": {"type": ["string", "null"]},
-        "document_version": {"type": ["string", "null"]}
+        "population": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "currency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "measure_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mapping_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mapping_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "period_grain": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "document_version": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     },
     "upstream_context": {
-      "type": ["object", "null"],
-      "required": ["planning_request", "trend_result", "inventory_product_result"],
+      "type": [
+        "object",
+        "null"
+      ],
+      "required": [
+        "planning_request",
+        "trend_result",
+        "inventory_product_result"
+      ],
       "properties": {
-        "planning_request": {"type": "object"},
-        "trend_result": {"type": ["object", "null"]},
-        "inventory_product_result": {"type": ["object", "null"]}
+        "planning_request": {
+          "type": "object"
+        },
+        "trend_result": {
+          "type": [
+            "object",
+            "null"
+          ]
+        },
+        "inventory_product_result": {
+          "type": [
+            "object",
+            "null"
+          ]
+        }
       }
     },
     "sales_data": {
@@ -378,6 +437,39 @@
             "string",
             "null"
           ]
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "data_nature": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "permission_status": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "enum": [
+            "authorized",
+            "authorized_for_synthetic_testing_only",
+            null
+          ]
+        },
+        "operational_eligible": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "attributes": {
+          "type": [
+            "object",
+            "null"
+          ],
+          "additionalProperties": true
         }
       }
     },
@@ -614,6 +706,12 @@
           "items": {
             "type": "string"
           }
+        },
+        "related_concept_ids": {
+          "type": "array",
+          "items": {
+            "type": "string"
+          }
         }
       }
     },
@@ -746,6 +844,7 @@
         "permission_status": {
           "enum": [
             "authorized",
+            "authorized_for_synthetic_testing_only",
             "unknown",
             "denied"
           ]
@@ -757,6 +856,27 @@
           }
         },
         "manifest_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "synthetic": {
+          "type": "boolean"
+        },
+        "data_nature": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "operational_eligible": {
+          "type": [
+            "boolean",
+            "null"
+          ]
+        },
+        "product_mapping": {
           "type": [
             "string",
             "null"
@@ -1132,16 +1252,66 @@
             "null"
           ]
         },
-        "period_start": {"type": ["string", "null"]},
-        "period_end": {"type": ["string", "null"]},
-        "period_grain": {"type": ["string", "null"]},
-        "population": {"type": ["string", "null"]},
-        "unit": {"type": ["string", "null"]},
-        "currency": {"type": ["string", "null"]},
-        "measure_type": {"type": ["string", "null"]},
-        "metric_name": {"type": ["string", "null"]},
-        "metric_definition": {"type": ["string", "null"]},
-        "mapping_id": {"type": ["string", "null"]}
+        "period_start": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "period_end": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "period_grain": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "population": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "unit": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "currency": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "measure_type": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metric_name": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "metric_definition": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "mapping_id": {
+          "type": [
+            "string",
+            "null"
+          ]
+        }
       }
     }
   }

@@ -26,7 +26,7 @@ class SerializationTests(unittest.TestCase):
         self.assertNotIn("sales_data", result.to_dict())
         proposed = result.to_proposal_dict()
         self.assertEqual(proposed["schema_version"], "1.1-proposal")
-        self.assertEqual(proposed["sales_data"]["status"], "no_results")
+        self.assertEqual(proposed["sales_data"]["status"], "partial")
         self.assertNotIn("missing_data", proposed["sales_data"])
 
     def test_default_result_is_json_compatible_and_matches_schema_envelope(self) -> None:
@@ -45,7 +45,7 @@ class SerializationTests(unittest.TestCase):
         schema = json.loads(schema_path.read_text(encoding="utf-8"))
 
         self.assertEqual(set(decoded), set(schema["required"]))
-        self.assertEqual(decoded["status"], "no_results")
+        self.assertEqual(decoded["status"], "partial")
         self.assertEqual(decoded["schema_version"], "1.0")
         self.assertEqual(decoded["agent_id"], "sales-market-agent")
 
@@ -63,9 +63,9 @@ class SerializationTests(unittest.TestCase):
         self.assertEqual(proposed["schema_version"], "1.2-proposal")
         self.assertEqual(proposed["requested_scope"]["category"], "outerwear")
         self.assertEqual(proposed["requested_scope"]["metrics"], ["market_size", "retail_sales_index", "unit_margin"])
-        self.assertEqual(proposed["sales_data"]["status"], "no_results")
-        self.assertEqual(proposed["market_data"]["status"], "no_results")
-        self.assertEqual(proposed["unit_economics"]["status"], "no_results")
+        self.assertEqual(proposed["sales_data"]["status"], "partial")
+        self.assertEqual(proposed["market_data"]["status"], "partial")
+        self.assertEqual(proposed["unit_economics"]["status"], "partial")
         self.assertTrue(all(item["reason"] == "source_not_configured" for item in proposed["missing_data"]))
         self.assertNotIn("sales_data", result.to_dict())
         self.assertNotIn("market_data", result.to_proposal_dict())

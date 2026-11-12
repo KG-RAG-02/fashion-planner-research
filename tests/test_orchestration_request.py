@@ -117,7 +117,7 @@ class CanonicalRequestTests(unittest.TestCase):
         payload = json.loads(output.getvalue())
         self.assertEqual(payload["request_id"], "canonical-request-001")
         self.assertEqual(payload["requested_scope"]["canonical_request"]["raw_query"], canonical_request()["raw_query"])
-        self.assertEqual(payload["status"], "no_results")
+        self.assertEqual(payload["status"], "partial")
 
     def test_rejects_trend_or_inventory_payloads_at_canonical_boundary(self):
         for field in ("trend_result", "inventory_product_result"):

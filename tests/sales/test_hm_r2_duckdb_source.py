@@ -99,14 +99,14 @@ class HmR2DuckDBTests(unittest.TestCase):
             requested_period=requested_period, query_intent="sales_observation",
         )
 
-    def test_permission_and_mapping_gates_precede_any_r2_request(self):
+    def test_usage_flag_is_ignored_but_mapping_gates_precede_any_r2_request(self):
         with tempfile.TemporaryDirectory() as temporary:
             path = Path(temporary) / "fixture.duckdb"
             payload = self.make_database(path)
             source, client = self.make_source(payload, Path(temporary), authorized=False)
             report = source.research(self.context())
-            self.assertEqual(report.sales_data.missing_data[0].reason, "permission_not_confirmed")
-            self.assertEqual(client.calls, [])
+            self.assertNotEqual(report.sales_data.missing_data[0].reason, "permission_not_confirmed")
+            self.assertTrue(client.calls)
 
             source_no_category = R2DuckDBHmHistoricalSalesSource(
                 {}, "synthetic-mapping-v1", usage_authorized=True,
@@ -194,7 +194,7 @@ class HmR2DuckDBTests(unittest.TestCase):
             self.assertEqual(no_data.sales_data.status, "no_results")
             self.assertEqual(no_data.sales_data.observations, ())
 
-    def test_conflicting_type_and_group_mappings_are_excluded_and_explained(self):
+    def test_exact_type_mapping_precedes_broad_group_fallback(self):
         with tempfile.TemporaryDirectory() as temporary:
             root = Path(temporary)
             payload = self.make_database(root / "fixture.duckdb")
@@ -206,9 +206,9 @@ class HmR2DuckDBTests(unittest.TestCase):
                 store=store, object_key="shared.duckdb", cache_dir=root / "cache",
             )
             report = source.research(self.context())
-        self.assertEqual(report.sales_data.status, "no_results")
-        self.assertEqual(report.sales_data.observations, ())
-        self.assertTrue(any("purchase rows with conflicting" in limitation for limitation in report.limitations), repr(report.limitations))
+        self.assertEqual(report.sales_data.status, "ok")
+        self.assertEqual([item.value for item in report.sales_data.observations], [2])
+        self.assertTrue(all(item.category == "Knitwear" for item in report.sales_data.observations))
 
     def test_r2_version_size_and_table_schema_errors_are_reported(self):
         with tempfile.TemporaryDirectory() as temporary:
