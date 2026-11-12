@@ -281,7 +281,8 @@
             "aggregate_index",
             "market_estimate",
             "forecast",
-            "search_interest"
+            "search_interest",
+            "synthetic_sales_aggregate"
           ]
         },
         "value": {
@@ -435,6 +436,24 @@
             "null"
           ],
           "additionalProperties": true
+        },
+        "gender": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "season": {
+          "type": [
+            "string",
+            "null"
+          ]
+        },
+        "season_year": {
+          "type": [
+            "integer",
+            "null"
+          ]
         }
       }
     },

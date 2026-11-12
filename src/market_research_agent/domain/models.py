@@ -249,6 +249,10 @@ class MarketResearchResult:
             for item in (self.sales_data.observations if self.sales_data else ())
         ]
         payload["sales_data"] = sales_block
+        sales_block["observations"] = [
+            asdict(item)
+            for item in (self.sales_data.observations if self.sales_data else ())
+        ]
         sales_block.pop("calculations", None)
         payload["market_data"] = (
             self.market_data.to_dict()

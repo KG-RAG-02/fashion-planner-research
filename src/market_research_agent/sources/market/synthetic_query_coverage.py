@@ -1,4 +1,4 @@
-"""Opt-in local demo source backed only by test-only generated fixtures."""
+"""R2-backed analysis source for test-only generated fixtures."""
 
 from __future__ import annotations
 
@@ -12,7 +12,7 @@ from ...domain.models import (
     EvidenceRecord, FindingKind, MarketResearchContext, PermissionStatus,
     ResearchFinding, ResultStatus, SourceReport,
 )
-from ...domain.sales import MarketDataResult, MarketObservation, SalesDataResult
+from ...domain.sales import MarketDataResult, MarketObservation, SalesDataResult, SalesObservation
 
 DEFAULT_FIXTURE_DIR = Path(__file__).resolve().parents[4] / "examples/query_coverage/generated"
 LIMITATION = (
@@ -168,13 +168,16 @@ class SyntheticQueryCoverageSource:
         findings = []
         limitations = [LIMITATION, *((fallback_limitation,) if fallback_limitation else ())]
         market_observations: list[MarketObservation] = []
-        market_evidence: dict[str, EvidenceRecord] = {}
+        sales_observations: list[SalesObservation] = []
+        synthetic_evidence: dict[str, EvidenceRecord] = {}
         applied_scope_note = (
             f"Applied canonical scope: {scope['gender']} {scope['category']}, {scope['period_start']}–{scope['period_end']}, "
             f"{scope['geography']}/{scope['channel']}, excluded colors={','.join(scope['colors_exclude']) or 'none'}."
         )
         if matching_sales:
             series, omitted_groups, omitted_months, duplicate_months = self._group_monthly_series(matching_sales)
+            sales_observations, sales_evidence = self._structured_sales_output(matching_sales, series)
+            synthetic_evidence.update(sales_evidence)
             findings.append(ResearchFinding(
                 finding_id=f"synthetic-sales:{context.request_id}", topic="synthetic_sales_demo",
                 statement=("[SYNTHETIC TEST DATA] " + applied_scope_note + " Retailer-like item-unit scenario series, kept separate by geography, channel, population, category, mapping, and other declared dimensions: "
@@ -191,6 +194,7 @@ class SyntheticQueryCoverageSource:
             market_observations, market_evidence = self._structured_market_output(
                 matching_market, series,
             )
+            synthetic_evidence.update(market_evidence)
             findings.append(ResearchFinding(
                 finding_id=f"synthetic-market:{context.request_id}", topic="synthetic_market_demo",
                 statement=("[SYNTHETIC TEST DATA] " + applied_scope_note + " Generated scenario market-value series, kept separate by geography, channel, population, category, mapping, and other declared dimensions: "
@@ -208,15 +212,90 @@ class SyntheticQueryCoverageSource:
         return SourceReport(
             status=ResultStatus.PARTIAL,
             findings=tuple(findings),
-            evidence=tuple(market_evidence.values()),
+            evidence=tuple(synthetic_evidence.values()),
             limitations=(*limitations, partial_note, "The stable HTTP result schema 1.0 has no structured sales_data, market_data, synthetic marker, or chart artifact fields; the stable route carries labeled findings only. The unratified 1.3 proposal output includes structured market observations with test-only markers.", "Unscoped dimension series are kept separate; the stable route does not calculate adjacent-period changes."),
-            sales_data=SalesDataResult("partial" if matching_sales else "no_results", limitations=(LIMITATION,)),
+            sales_data=SalesDataResult(
+                "partial" if matching_sales else "no_results",
+                observations=tuple(sales_observations),
+                limitations=(LIMITATION,),
+            ),
             market_data=MarketDataResult(
                 "partial" if matching_market else "no_results",
                 observations=tuple(market_observations),
                 limitations=(LIMITATION,),
             ),
         )
+
+    @staticmethod
+    def _structured_sales_output(
+        rows: list[dict[str, Any]], series: list[dict[str, Any]],
+    ) -> tuple[list[SalesObservation], dict[str, EvidenceRecord]]:
+        """Materialize visible synthetic sales rows with explicit test markers."""
+        grouped_rows: dict[tuple[str, str], list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            dimensions = {key: row.get(key) for key in _DIMENSION_FIELDS}
+            group_key = json.dumps(dimensions, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            grouped_rows[(group_key, row["period_start"][:7])].append(row)
+
+        observations: list[SalesObservation] = []
+        evidence: dict[str, EvidenceRecord] = {}
+        for item in series:
+            group_key = json.dumps(item["dimensions"], ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+            for month in item["monthly_values"]:
+                candidates = grouped_rows.get((group_key, month), [])
+                if len(candidates) != 1:
+                    continue
+                row = candidates[0]
+                evidence_ids = tuple(dict.fromkeys(row.get("evidence_ids", ())))
+                if not evidence_ids:
+                    continue
+                source_id = str(row["source_id"])
+                for evidence_id in evidence_ids:
+                    evidence.setdefault(evidence_id, EvidenceRecord(
+                        evidence_id=evidence_id,
+                        source_id=source_id,
+                        source_type="synthetic_sales_fixture",
+                        source_name="Synthetic query coverage sales scenario",
+                        locator=f"synthetic://query-coverage/{source_id}/{evidence_id}",
+                        period_start=row.get("period_start"),
+                        period_end=row.get("period_end"),
+                        geography=row.get("geography"),
+                        channel=row.get("channel"),
+                        product_mapping=row.get("product_mapping_version"),
+                        unit=row.get("unit"),
+                        metric_definition="Generated retailer-like item-unit scenario; not actual H&M, VOGUE, or observed company sales.",
+                        permission_status=PermissionStatus.SYNTHETIC_TEST_ONLY,
+                        synthetic=True,
+                        data_nature="synthetic_test",
+                        operational_eligible=False,
+                    ))
+                observations.append(SalesObservation(
+                    observation_id=str(row["observation_id"]),
+                    metric_name=str(row["metric_name"]),
+                    value=float(row["value"]),
+                    unit=str(row["unit"]),
+                    evidence_ids=evidence_ids,
+                    category=row.get("category"),
+                    period_start=row.get("period_start"),
+                    period_end=row.get("period_end"),
+                    period_grain=row.get("period_grain"),
+                    geography=row.get("geography"),
+                    channel=row.get("channel"),
+                    metric_definition="Generated retailer-like item-unit scenario; not actual H&M, VOGUE, or observed company sales.",
+                    product_mapping=row.get("product_mapping_version"),
+                    measure_type=str(row.get("measure_type", "synthetic_sales_aggregate")),
+                    population=row.get("population"),
+                    gender=row.get("gender"),
+                    season=row.get("season"),
+                    season_year=row.get("season_year"),
+                    product_mapping_id=row.get("product_mapping_id"),
+                    product_mapping_version=row.get("product_mapping_version"),
+                    synthetic=True,
+                    data_nature="synthetic_test",
+                    permission_status="authorized_for_synthetic_testing_only",
+                    operational_eligible=False,
+                ))
+        return observations, evidence
 
     @staticmethod
     def _structured_market_output(

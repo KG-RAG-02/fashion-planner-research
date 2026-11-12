@@ -297,7 +297,14 @@ class MarketResearchAgent:
         if sales_data is not None:
             valid_sales = tuple(
                 item for item in sales_data.observations
-                if set(item.evidence_ids).issubset(permitted_evidence)
+                if (
+                    set(item.evidence_ids).issubset(permitted_evidence)
+                    if not item.synthetic
+                    else item.data_nature == "synthetic_test"
+                    and item.permission_status == PermissionStatus.SYNTHETIC_TEST_ONLY.value
+                    and item.operational_eligible is False
+                    and set(item.evidence_ids).issubset(synthetic_test_evidence)
+                )
             )
             if len(valid_sales) != len(sales_data.observations):
                 limitations.append(

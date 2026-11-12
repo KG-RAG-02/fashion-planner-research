@@ -33,7 +33,6 @@ from .synthetic_rag import (
     SYNTHETIC_MARKERS,
     SyntheticFixtureError,
     analyze_synthetic_request,
-    load_fixture_bundle,
 )
 
 
@@ -510,22 +509,12 @@ def configured_agent() -> MarketResearchAgent:
     ))
     if r2_configured:
         bundle_store = SyntheticR2FixtureBundleStore.from_env()
-        def load_cloud_or_local_synthetic_bundle():
-            try:
-                return bundle_store.load_bundle()
-            except Exception:
-                local_bundle = load_fixture_bundle()
-                local_bundle["_source_fallback"] = "cloud_r2_unavailable_local_synthetic_copy"
-                return local_bundle
-
-        synthetic_loader = load_cloud_or_local_synthetic_bundle
+        synthetic_loader = bundle_store.load_bundle
     else:
-        def load_local_synthetic_bundle():
-            local_bundle = load_fixture_bundle()
-            local_bundle["_source_fallback"] = "cloud_r2_not_configured_local_synthetic_copy"
-            return local_bundle
+        def require_synthetic_r2():
+            raise ValueError("R2 synthetic source is not configured; local fixture fallback is disabled.")
 
-        synthetic_loader = load_local_synthetic_bundle
+        synthetic_loader = require_synthetic_r2
     sources.append(SyntheticQueryCoverageSource(bundle_loader=synthetic_loader))
     return MarketResearchAgent(CompositeMarketResearchSource(sources) if sources else NoConfiguredSources())
 
@@ -570,12 +559,10 @@ def serve(
         raise ValueError("The local proposal server may only bind to loopback.")
     if synthetic_demo and enable_synthetic_simulation:
         raise ValueError("Choose either legacy --synthetic-demo or --enable-synthetic-simulation, not both.")
-    if synthetic_source_backend not in {"r2", "local"}:
-        raise ValueError("Synthetic source backend must be 'r2' or explicit offline 'local'.")
+    if synthetic_source_backend != "r2":
+        raise ValueError("Synthetic local fixture mode is unavailable; configure the R2 source.")
     bundle_store = None
-    if synthetic_demo or (enable_synthetic_simulation and synthetic_source_backend == "local"):
-        agent_factory = lambda: MarketResearchAgent(SyntheticQueryCoverageSource())
-    elif enable_synthetic_simulation:
+    if synthetic_demo or enable_synthetic_simulation:
         bundle_store = SyntheticR2FixtureBundleStore.from_env()
         synthetic_source = SyntheticQueryCoverageSource(bundle_loader=bundle_store.load_bundle)
         agent_factory = lambda: MarketResearchAgent(synthetic_source)
@@ -602,9 +589,9 @@ def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--host", default="127.0.0.1")
     parser.add_argument("--port", type=int, default=8766)
-    parser.add_argument("--synthetic-demo", action="store_true", help="Use only the local test-only synthetic query coverage fixture.")
+    parser.add_argument("--synthetic-demo", action="store_true", help="Use only the R2 test-only synthetic query coverage fixture.")
     parser.add_argument("--enable-synthetic-simulation", action="store_true", help="Serve the main UI and stable /runs from labeled synthetic fixtures; also expose detailed simulation analysis.")
-    parser.add_argument("--synthetic-source", choices=("r2", "local"), default="r2", help="Synthetic simulation source; R2 is the service default, local is an explicit offline development mode.")
+    parser.add_argument("--synthetic-source", choices=("r2",), default="r2", help="Synthetic simulation source; only the connected R2 release is supported.")
     args = parser.parse_args(argv)
     serve(args.host, args.port, synthetic_demo=args.synthetic_demo,
           enable_synthetic_simulation=args.enable_synthetic_simulation,
