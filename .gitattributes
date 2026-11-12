@@ -1,0 +1,2 @@
+# Contract schemas and fixtures are pinned by raw-byte SHA-256; keep JSON LF on every platform.
+*.json text eol=lf
