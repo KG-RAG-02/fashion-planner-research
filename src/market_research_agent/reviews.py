@@ -6,6 +6,7 @@ the legacy no_results normalizer or proposal serializers.
 """
 from __future__ import annotations
 
+from contextlib import closing
 from copy import deepcopy
 from dataclasses import asdict
 from datetime import datetime, timezone
@@ -365,7 +366,8 @@ class SalesMarketReviewService:
         self.store.put(raw_body if raw_body is not None else canonical(snapshot))
         identity = snapshot['input']['planning_draft']['raw_response']['result']['draft_identity']
         key = fingerprint(snapshot)
-        with sqlite3.connect(self.store.root / 'reviews.sqlite3', timeout=30) as db:
+        # closing() releases the handle; the inner "db" context commits or rolls back.
+        with closing(sqlite3.connect(self.store.root / 'reviews.sqlite3', timeout=30)) as db, db:
             db.execute('CREATE TABLE IF NOT EXISTS identities (draft_id TEXT, revision INTEGER, hash TEXT, PRIMARY KEY(draft_id, revision))')
             db.execute('CREATE TABLE IF NOT EXISTS responses (key TEXT PRIMARY KEY, code INTEGER, response BLOB)')
             db.execute('BEGIN IMMEDIATE')

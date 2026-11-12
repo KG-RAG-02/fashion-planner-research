@@ -1,6 +1,7 @@
 """Independent P07 parser/serializer and authenticated route regressions."""
 import copy
 from dataclasses import replace
+import gc
 from hashlib import sha256
 from io import BytesIO
 import json
@@ -9,6 +10,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from unittest.mock import Mock, patch
+import warnings
 
 from market_research_agent.reviews import *
 from market_research_agent.http_server import make_handler, serve
@@ -143,6 +145,14 @@ class ReviewTests(unittest.TestCase):
         d['content_sha256'] = fingerprint(d['raw_response'])
         with self.assertRaisesRegex(ReviewError, 'validation failed'):
             self.service.review(changed)
+
+    def test_replay_database_connection_is_closed(self):
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always', ResourceWarning)
+            self.service.review(request())
+            self.service.review(request())  # replay path
+            gc.collect()
+        self.assertEqual([w for w in caught if issubclass(w.category, ResourceWarning)], [])
 
     def test_raw_artifact_verification_rejects_wrong_bytes(self):
         # Conventions section 8 codes: wrong length, then right length but wrong digest.
