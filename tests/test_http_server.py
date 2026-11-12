@@ -19,6 +19,7 @@ from market_research_agent.http_server import (
     SYNTHETIC_SIMULATION_UI_PATH,
     AGENT_SIMULATION_PATH,
     context_from_handoff_request,
+    context_from_review_request,
     make_handler,
     configured_agent,
 )
@@ -347,12 +348,74 @@ class Project07HttpServerTests(unittest.TestCase):
             "currency": "KRW",
         })
         self.assertEqual(response["result"]["status"], "no_results")
+        self.assertEqual(response["result"]["target_audience_analysis"]["status"], "no_results")
         self.assertEqual(response["result"]["margin_estimate"]["basis_price"], 129000)
         self.assertEqual(response["result"]["margin_estimate"]["currency"], "KRW")
         self.assertEqual(
             {item["field"] for item in response["result"]["missing_data"]},
             {"musinsa_prices", "fabric_costs", "customer_segments"},
         )
+
+    def test_review_image_reference_and_explicit_style_flag_are_validated(self):
+        image_ref = {
+            "object_key": "drafts/image.png",
+            "sha256": "a" * 64,
+            "media_type": "image/png",
+        }
+        request = {
+            "contract_version": "vogue-sales-market-review/0.1-proposal",
+            "request_id": "review-image-ref",
+            "input": {
+                "request_id": "review-image-ref",
+                "include_image_style_analysis": True,
+                "planning_draft": {
+                    "schema_version": "1.0", "draft_id": "draft-image-ref",
+                    "product": {"category": "Outerwear", "gender": "women"},
+                    "image_ref": image_ref,
+                },
+            },
+        }
+        request_id, draft, include_style = context_from_review_request(request)
+        self.assertEqual(request_id, "review-image-ref")
+        self.assertEqual(draft["image_ref"], image_ref)
+        self.assertTrue(include_style)
+
+        request["input"]["planning_draft"]["image_ref"]["sha256"] = "not-a-hash"
+        with self.assertRaises(RequestValidationError):
+            context_from_review_request(request)
+
+    def test_review_image_style_is_request_opt_in_and_uses_r2_hash_checked_artifact(self):
+        from hashlib import sha256
+
+        image_bytes = b"\x89PNG\r\n\x1a\nmock-image-content"
+        store = Mock()
+        store.get_bytes.return_value = image_bytes
+        request = {
+            "contract_version": "vogue-sales-market-review/0.1-proposal",
+            "request_id": "review-image-style",
+            "input": {
+                "request_id": "review-image-style",
+                "include_image_style_analysis": True,
+                "planning_draft": {
+                    "schema_version": "1.0", "draft_id": "draft-image-style",
+                    "product": {"category": "Outerwear", "gender": "women"},
+                    "image_ref": {"object_key": "drafts/mock.png", "sha256": sha256(image_bytes).hexdigest(),
+                                  "media_type": "image/png"},
+                },
+            },
+        }
+        style = {"style_label": "datewear", "visual_features": ["파스텔 색상"],
+                 "style_rationale": "부드러운 색감이 데이트 스타일에 어울립니다."}
+        with patch.dict(os.environ, {"VOGUE_IMAGE_LLM_TRANSFER_AUTHORIZED": "true"}, clear=False):
+            with patch.object(http_server.R2ObjectStore, "from_env", return_value=store):
+                with patch.object(http_server, "OpenAIResponsesClient", return_value=Mock()):
+                    with patch.object(http_server, "analyze_image_style", return_value=style) as analyze:
+                        status, response, _ = self.post(request, path="/v1/agents/sales-market-agent/reviews")
+        self.assertEqual(status, 200)
+        store.get_bytes.assert_called_once_with("drafts/mock.png", max_bytes=4_000_000)
+        analyze.assert_called_once()
+        self.assertEqual(response["result"]["target_audience_analysis"]["style_analysis"]["style_label"], "datewear")
+        self.assertIsNone(response["result"]["target_audience_analysis"]["target_sentence"])
 
     def test_planning_draft_review_rejects_unknown_fields_and_id_mismatch(self):
         request = {

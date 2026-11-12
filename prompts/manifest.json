@@ -47,6 +47,18 @@
           "evaluation_fixture": "tests/fixtures/market_analysis_prompt_injection/cases.json"
         }
       }
+    },
+    "target_audience": {
+      "current_version": "v1",
+      "status": "proposal",
+      "versions": {
+        "v1": {
+          "status": "proposal",
+          "rendered_system": "target_audience/v1/rendered_system.md",
+          "input_modality": "text plus one explicitly authorized image",
+          "output_contract": "local opt-in image-style JSON; age bands are computed deterministically outside the LLM"
+        }
+      }
     }
   }
 }

@@ -21,7 +21,7 @@
     "result": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "request_id", "draft_id", "producer_id", "status", "draft_context", "category_price_comparison", "material_cost_analysis", "customer_segment_analysis", "margin_estimate", "evidence", "missing_data", "errors", "limitations"],
+      "required": ["schema_version", "request_id", "draft_id", "producer_id", "status", "draft_context", "category_price_comparison", "material_cost_analysis", "customer_segment_analysis", "target_audience_analysis", "margin_estimate", "evidence", "missing_data", "errors", "limitations"],
       "properties": {
         "schema_version": {"const": "sales-market-review/0.1-internal"},
         "request_id": {"type": "string"},
@@ -32,6 +32,7 @@
         "category_price_comparison": {"type": "array"},
         "material_cost_analysis": {"type": "array"},
         "customer_segment_analysis": {"type": "array"},
+        "target_audience_analysis": {"type": "object"},
         "margin_estimate": {"type": "object"},
         "evidence": {"type": "array"},
         "missing_data": {"type": "array"},

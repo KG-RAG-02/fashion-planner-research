@@ -115,6 +115,8 @@ Canonical endpoint는 `POST http://127.0.0.1:8766/v1/agents/sales-market-agent/r
 
 Review 요청에 전체 원가 시트가 있는 경우 [`apparel-costing-input-1.0-proposal.schema.json`](contracts/schemas/proposals/apparel-costing-input-1.0-proposal.schema.json)에 따라 BOM(원단/부자재 단가·소비량·폐기율), SAM/working-minute cost/효율, 공장 부대비와 markup, 운임·보험·관세·내륙 물류비, 할인·반품율을 모두 입력해야 결정론 gross margin 계산이 실행됩니다. 구성 비용이 모르면 생략하지 말고 실제 0만 출처 참조와 함께 명시합니다. 계산 공식 버전은 `apparel-bom-sam-landed-gm/1.0`이며 임의의 업계 평균·환율은 쓰지 않습니다. 결과는 입력 출처 참조를 보존하지만 그 원천 문서의 진위나 권한을 P07이 검증했다고 주장하지 않습니다. 공식과 근거는 [post-planning review design](docs/design/post-planning-sales-market-review.md)에 기록되어 있습니다.
 
+신제품 review proposal에서 비상업적 H&M 연구 설정(`VOGUE_HM_RESEARCH_NONCOMMERCIAL=true`)이 켜져 있으면 R2의 고객·상품·거래 자료를 DuckDB로 집계해 카테고리별 연령대를 반환합니다. 응답에는 `non_commercial_research_only`와 `operational_eligible=false`가 포함됩니다. 이미지 스타일 분석은 요청의 `include_image_style_analysis=true`, R2 `image_ref`(object key·SHA-256·media type), `VOGUE_IMAGE_LLM_TRANSFER_AUTHORIZED=true`, `OPENAI_API_KEY`, `OPENAI_MODEL`이 모두 있을 때만 실행합니다. LLM은 이미지 스타일만 설명하고 연령대는 결정론적 집계로 계산합니다. 자세한 내용은 [customer age and image style analysis 설계](docs/design/customer-age-image-target-analysis.md)를 참고하세요.
+
 다른 터미널에서 합성 입력 fixture를 보낼 수 있습니다.
 
 ```bash

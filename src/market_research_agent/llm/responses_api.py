@@ -40,11 +40,34 @@ class OpenAIResponsesClient:
             raise ValueError("timeout_seconds must be positive")
 
     def create_json_response(self, *, instructions: str, input_text: str) -> dict[str, Any]:
+        return self._create_json_response(instructions=instructions, input_payload=input_text)
+
+    def create_json_response_with_image(
+        self, *, instructions: str, input_text: str, image_data_uri: str, detail: str = "high",
+    ) -> dict[str, Any]:
+        """Send one caller-provided image using the Responses API vision input format."""
+        if not image_data_uri.startswith(("data:image/jpeg;base64,", "data:image/png;base64,",
+                                          "data:image/webp;base64,")):
+            raise LlmCallError("Image input must be a supported base64 data URL.")
+        if detail not in {"low", "high", "auto"}:
+            raise LlmCallError("Image detail setting is unsupported.")
+        return self._create_json_response(
+            instructions=instructions,
+            input_payload=[{
+                "role": "user",
+                "content": [
+                    {"type": "input_text", "text": input_text},
+                    {"type": "input_image", "image_url": image_data_uri, "detail": detail},
+                ],
+            }],
+        )
+
+    def _create_json_response(self, *, instructions: str, input_payload: Any) -> dict[str, Any]:
         body = json.dumps(
             {
                 "model": self.model,
                 "instructions": instructions,
-                "input": input_text,
+                "input": input_payload,
                 "store": False,
                 "max_output_tokens": 1800,
                 "text": {"format": {"type": "json_object"}},

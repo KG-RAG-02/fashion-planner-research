@@ -14,6 +14,34 @@ from tests.test_apparel_costing import costing_input
 
 
 class SalesMarketReviewAdapterTests(unittest.TestCase):
+    def test_target_sentence_uses_computed_age_cohort_and_llm_style_label(self):
+        result = MarketResearchAgent().run(
+            MarketResearchContext(request_id="review-target-profile", planning_request={})
+        )
+        profile = {
+            "source_id": "hm-kaggle-personalized-fashion-recommendations",
+            "permission_status": "non_commercial_research_only",
+            "operational_eligible": False,
+            "target_age_cohort": {"age_band": "20_39", "suppressed": False,
+                                  "share_of_customers_with_known_age": 0.59},
+            "age_bands": [{"age_band": "20_29", "unique_customer_count": 100},
+                          {"age_band": "30_39", "unique_customer_count": 80}],
+        }
+        style = {"style_label": "datewear", "visual_features": ["파스텔 톤"],
+                 "style_rationale": "밝은 색감과 부드러운 실루엣입니다."}
+        review = build_sales_market_review(
+            result,
+            planning_draft={"draft_id": "target-001", "product": {"category": "Outerwear", "gender": "women"}},
+            customer_age_profile=profile,
+            image_style_analysis=style,
+        ).to_dict()
+        target = review["target_audience_analysis"]["target_sentence"]
+        self.assertIn("20~30대", target)
+        self.assertIn("여성용 데이트룩", target)
+        self.assertIn("비상업적 연구 가설", target)
+        self.assertEqual(review["customer_segment_analysis"][0]["permission_status"], "non_commercial_research_only")
+        self.assertFalse(review["customer_segment_analysis"][0]["operational_eligible"])
+
     def test_review_reads_explicit_musinsa_and_public_fabric_snapshots(self):
         with tempfile.TemporaryDirectory() as directory:
             musinsa_path = Path(directory) / "musinsa.csv"

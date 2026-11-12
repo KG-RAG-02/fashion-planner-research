@@ -7,6 +7,7 @@ remains a development adapter, not a production deployment or retry policy.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import hmac
 import json
 import math
@@ -21,6 +22,8 @@ from urllib.parse import unquote, urlsplit
 from .domain.models import MarketResearchContext, MarketResearchResult, ResultStatus, normalize_no_results_payload
 from .domain.apparel_costing import CostingInputError, validate_apparel_costing
 from .domain.sales_market_review import REVIEW_SCHEMA_VERSION, build_sales_market_review
+from .llm.image_style import ImageStyleInputError, analyze_image_style
+from .llm.responses_api import LlmCallError, OpenAIResponsesClient
 from .sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
 from .sources.market.synthetic_r2 import SyntheticR2FixtureBundleStore
 from .sources.sales.hm_kaggle.hm_sales_adapter import HmHistoricalSalesSource
@@ -28,6 +31,8 @@ from .sources.sales.hm_kaggle.hm_r2_sales_source import R2HmHistoricalSalesSourc
 from .sources.sales.hm_kaggle.hm_r2_duckdb_source import R2DuckDBHmHistoricalSalesSource
 from .sources.shared.composite import CompositeMarketResearchSource
 from .sources.shared.noop import NoConfiguredSources
+from .sources.shared.r2_object_store import R2ObjectError, R2ObjectStore
+from .sources.sales.hm_kaggle.hm_customer_age_source import CustomerAgeSourceError, HmCustomerAgeResearchSource
 from .workflows.market_research import MarketResearchAgent
 from .query_interpretation import interpret_query, scope_conflicts, unresolved_ambiguities
 from .orchestration_request import CanonicalRequestError, context_from_canonical_request
@@ -107,7 +112,7 @@ class RequestValidationError(ValueError):
         self.http_status = http_status
 
 
-def context_from_review_request(value: Any) -> tuple[str, dict[str, Any]]:
+def context_from_review_request(value: Any) -> tuple[str, dict[str, Any], bool]:
     """Validate the local PlanningDraft review proposal input.
 
     This contract is intentionally separate from the shared v0.1 research run.
@@ -120,12 +125,14 @@ def context_from_review_request(value: Any) -> tuple[str, dict[str, Any]]:
     if not isinstance(request_id, str) or not request_id.strip() or _safe_error_request_id(request_id) != request_id:
         raise RequestValidationError("INVALID_REQUEST_ID", "request_id is invalid.")
     payload = value.get("input")
-    if not isinstance(payload, dict) or set(payload) != {"request_id", "planning_draft"}:
-        raise RequestValidationError("INVALID_INPUT", "Review input must contain request_id and planning_draft only.")
+    if (not isinstance(payload, dict)
+            or set(payload) - {"request_id", "planning_draft", "include_image_style_analysis"}
+            or not {"request_id", "planning_draft"}.issubset(payload)):
+        raise RequestValidationError("INVALID_INPUT", "Review input contains unsupported fields.")
     if payload.get("request_id") != request_id:
         raise RequestValidationError("REQUEST_ID_MISMATCH", "Envelope and input request_id must match.")
     draft = payload.get("planning_draft")
-    if not isinstance(draft, dict) or set(draft) - {"schema_version", "draft_id", "product", "costing"} or not {
+    if not isinstance(draft, dict) or set(draft) - {"schema_version", "draft_id", "product", "costing", "image_ref"} or not {
         "schema_version", "draft_id", "product"
     }.issubset(draft):
         raise RequestValidationError("INVALID_PLANNING_DRAFT", "planning_draft fields do not match schema 1.0.")
@@ -165,8 +172,37 @@ def context_from_review_request(value: Any) -> tuple[str, dict[str, Any]]:
             validate_apparel_costing(draft["costing"])
         except CostingInputError as exc:
             raise RequestValidationError("INVALID_COSTING_INPUT", str(exc)) from None
+    if "image_ref" in draft:
+        image_ref = draft["image_ref"]
+        if (not isinstance(image_ref, dict) or set(image_ref) != {"object_key", "sha256", "media_type"}
+                or not isinstance(image_ref.get("object_key"), str)
+                or not image_ref["object_key"].strip() or len(image_ref["object_key"]) > 1024
+                or image_ref["object_key"].startswith("/") or ".." in image_ref["object_key"].split("/")
+                or not isinstance(image_ref.get("sha256"), str)
+                or re.fullmatch(r"[0-9a-fA-F]{64}", image_ref["sha256"]) is None
+                or image_ref.get("media_type") not in {"image/jpeg", "image/png", "image/webp"}):
+            raise RequestValidationError("INVALID_IMAGE_REFERENCE", "planning_draft.image_ref is invalid.")
+    image_style_requested = payload.get("include_image_style_analysis", False)
+    if not isinstance(image_style_requested, bool):
+        raise RequestValidationError("INVALID_INPUT", "include_image_style_analysis must be a boolean.")
     _validate_json_tree(draft, "planning_draft")
-    return request_id, draft
+    return request_id, draft, image_style_requested
+
+
+def _load_review_image(image_ref: dict[str, Any]) -> tuple[bytes, str]:
+    """Fetch a bounded R2 artifact and verify declared MIME and content hash."""
+    content = R2ObjectStore.from_env().get_bytes(image_ref["object_key"], max_bytes=4_000_000)
+    if not hmac.compare_digest(hashlib.sha256(content).hexdigest(), image_ref["sha256"].casefold()):
+        raise ImageStyleInputError("Image artifact hash does not match the planning draft reference.")
+    signatures = {
+        "image/jpeg": content.startswith(b"\xff\xd8\xff"),
+        "image/png": content.startswith(b"\x89PNG\r\n\x1a\n"),
+        "image/webp": (len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP"
+                       and b"ANIM" not in content and b"ANMF" not in content),
+    }
+    if not signatures.get(image_ref["media_type"], False):
+        raise ImageStyleInputError("Image artifact content does not match its declared media type.")
+    return content, image_ref["media_type"]
 
 
 def _reject_json_constant(value: str) -> None:
@@ -510,7 +546,7 @@ def make_handler(
                     raise RequestValidationError("INCOMPLETE_BODY", "Request body was incomplete.", 400)
                 body = json.loads(raw_body, parse_constant=_reject_json_constant)
                 if is_review:
-                    request_id, planning_draft = context_from_review_request(body)
+                    request_id, planning_draft, image_style_requested = context_from_review_request(body)
                     context = MarketResearchContext(request_id=request_id, planning_request={})
                 elif suffix == "/structured-runs":
                     try:
@@ -530,17 +566,48 @@ def make_handler(
                 return
             try:
                 if is_review:
-                    # Keep the review path isolated from historical Kaggle and synthetic
-                    # sources until approved category-review providers are configured.
                     result = MarketResearchResult(
                         schema_version="1.0",
                         request_id=context.request_id,
                         agent_id=AGENT_ID,
                         status=ResultStatus.NO_RESULTS,
-                        summary="No approved post-planning review sources are configured.",
-                        limitations=("No connected Musinsa price, fabric-cost, or approved customer aggregate source is available.",),
+                        summary="Post-planning review is based only on connected, explicitly configured sources.",
+                        limitations=(),
                     )
-                    review = build_sales_market_review(result, planning_draft=planning_draft).to_dict()
+                    product = planning_draft.get("product", {})
+                    customer_profile = None
+                    customer_error = None
+                    if os.getenv("VOGUE_HM_RESEARCH_NONCOMMERCIAL", "").strip().casefold() in {"1", "true", "yes"}:
+                        try:
+                            customer_profile = HmCustomerAgeResearchSource().profile(
+                                product.get("category", ""), gender=product.get("gender"),
+                            )
+                        except CustomerAgeSourceError as exc:
+                            customer_error = str(exc)
+                    image_style = None
+                    image_style_error = None
+                    if image_style_requested:
+                        if os.getenv("VOGUE_IMAGE_LLM_TRANSFER_AUTHORIZED", "").strip().casefold() not in {"1", "true", "yes"}:
+                            image_style_error = "Image transfer to the LLM is disabled; set VOGUE_IMAGE_LLM_TRANSFER_AUTHORIZED=true after approving this data flow."
+                        elif not isinstance(planning_draft.get("image_ref"), dict):
+                            image_style_error = "PlanningDraft image_ref is required for requested image style analysis."
+                        else:
+                            try:
+                                image_bytes, media_type = _load_review_image(planning_draft["image_ref"])
+                                image_style = analyze_image_style(
+                                    image_bytes=image_bytes, media_type=media_type,
+                                    product_context=product, client=OpenAIResponsesClient(),
+                                )
+                            except (R2ObjectError, ImageStyleInputError, LlmCallError, ValueError) as exc:
+                                image_style_error = str(exc)
+                    review = build_sales_market_review(
+                        result, planning_draft=planning_draft,
+                        customer_age_profile=customer_profile,
+                        customer_age_error=customer_error,
+                        image_style_analysis=image_style,
+                        image_style_error=image_style_error,
+                        image_style_requested=image_style_requested,
+                    ).to_dict()
                     if (
                         review.get("schema_version") != REVIEW_SCHEMA_VERSION
                         or review.get("request_id") != context.request_id
@@ -642,7 +709,7 @@ def configured_agent() -> MarketResearchAgent:
 
 
 def _load_project_r2_env() -> None:
-    """Load only R2 settings from this checkout's .env when the shell omitted them."""
+    """Load R2, H&M research, and image-egress feature settings from local .env."""
     if os.getenv("VOGUE_PROJECT07_DISABLE_DOTENV", "").casefold() in {"1", "true", "yes"}:
         return
     env_path = Path(__file__).resolve().parents[2] / ".env"
@@ -657,7 +724,10 @@ def _load_project_r2_env() -> None:
         key, separator, value = line.partition("=")
         key = key.strip()
         if not separator or not (key.startswith("R2_") or key.startswith("VOGUE_HM_")
-                                 or key.startswith("PROJECT07_HM_R2_")
+                                 or key.startswith("PROJECT07_HM_")
+                                 or key == "VOGUE_IMAGE_LLM_TRANSFER_AUTHORIZED"
+                                 or key == "OPENAI_MODEL"
+                                 or key == "VOGUE_DUCKDB_EXTENSION_DIRECTORY"
                                  or key.startswith("PROJECT07_SYNTHETIC_R2_")):
             continue
         value = value.strip()
@@ -677,6 +747,7 @@ def serve(
     synthetic_source_backend: str = "r2",
 ) -> None:
     """Start the local proposal server on loopback; run routes require the shared bearer token."""
+    _load_project_r2_env()
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("The local proposal server may only bind to loopback.")
     if synthetic_demo and enable_synthetic_simulation:
