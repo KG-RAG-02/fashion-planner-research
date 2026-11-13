@@ -86,7 +86,7 @@ Notion 합의에서 구현 순서와 미결정 사항까지 연결한 전체 방
 
 ```text
 repository-root/
-├── contracts/schemas/             # MarketResearchResult 스키마 초안
+├── contracts/schemas/             # Active P07 review request/response/error schemas
 ├── data/                           # Git 제외 런타임 데이터 위치
 ├── Dockerfile                      # non-root Python runtime image
 ├── compose.yaml                    # 합성 데모 및 테스트 서비스

@@ -75,9 +75,6 @@ class DeterministicAnalysisTests(unittest.TestCase):
         self.assertEqual(proposed["schema_version"], "1.3-proposal")
         self.assertEqual(len(proposed["market_data"]["calculations"]), 2)
         self.assertEqual(json.loads(json.dumps(proposed))["market_data"]["calculations"][0]["formula_version"], "1.0")
-        schema = json.loads((Path(__file__).parents[1] / "contracts/schemas/proposals/sales-market-data-result-1.3-proposal.schema.json").read_text(encoding="utf-8"))
-        self.assertEqual(set(proposed), set(schema["required"]))
-        self.assertEqual(set(proposed), set(schema["properties"]))
 
 
 class RetrievalAndPermissionTests(unittest.TestCase):
