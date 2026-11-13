@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contracts.vogue.invalid/workflow/0.1/sales-market-review-request.schema.json",
   "title": "P08 → P07 full-Draft direct review",
-  "$comment": "PROPOSED workflow-contract/0.1.1: structural validation plus versioned semantic rules are required; see decisions/contract-baseline.json. Not service compatibility.",
+  "$comment": "PROPOSED workflow-contract/0.2.0: structural validation plus versioned semantic rules are required; see decisions/contract-baseline.json. Not service compatibility.",
   "type": "object",
   "additionalProperties": false,
   "required": [

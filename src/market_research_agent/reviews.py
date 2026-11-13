@@ -447,7 +447,9 @@ class SalesMarketReviewService:
                 errors.append({'code': 'SOURCE_UNAVAILABLE', 'message': 'A source domain reported an error; details are retained in its artifact.',
                                'stage': 'sales_market_review', 'fatal': True, 'retryable': True})
         has_results = bool(findings or any(m['value'] is not None for m in metrics))
-        status = 'error' if errors else ('partial' if has_results else 'no_results')
+        # Deliverable-based status (2026-11-13 decision): a review that produced findings or metrics is ok;
+        # data gaps (null metrics, historical/sample sources) stay in limitations and metric missing_reason.
+        status = 'error' if errors else ('ok' if has_results else 'no_results')
         if status == 'error': findings = []
         if not has_results: limitations.append('No usable source results; missing values are null, never inferred zero.')
         limitations = list(dict.fromkeys(limitations))

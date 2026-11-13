@@ -1,6 +1,6 @@
 {
   "state": "proposed",
-  "baseline_version": "workflow-contract/0.1.1",
+  "baseline_version": "workflow-contract/0.2.0",
   "proposed_transport_version": "vogue-workflow/0.1",
   "source_heads": {
     "trend-analysis-agent": "4e9a89bab81dd960f7003bb084fa7a55ae5db2b1",
@@ -124,7 +124,11 @@
       "current_pure_probe": "handoffs/coordinator/owner-boundary-probe.json",
       "runtime_verified": false,
       "contract_reference_validated": true,
-      "pure_parser_scope": "request25/25,response8/8,P06 serializer4 states pass at recorded source hashes"
+      "pure_parser_scope": "request25/25,response8/8,P06 serializer4 states pass at recorded source hashes",
+      "modes": {
+        "draft_only": "Draft text only; image_generation_calls 0 (as in 0.1.x).",
+        "draft_with_visuals": "0.2.0: P06 also returns draft.concept and draft.visuals{product, outfit} (P06-generated, artifact://p06/images/<sha>.png); image_generation_calls 0..2 = sum of visual provider_calls."
+      }
     },
     {
       "source": "P08 full PlanningDraft",
@@ -142,7 +146,7 @@
       "pure_parser_scope": "partial; mismatches present at recorded working-tree hashes; independent full boundary unvalidated"
     },
     {
-      "source": "P08 Draft+Review+post-review image",
+      "source": "P08 Draft(+P06 visuals)+Review+planning-sheet image",
       "consumer": "UI/MD",
       "endpoint": "/v1/orchestrations",
       "transport_version": "vogue-workflow/0.1",
@@ -167,5 +171,5 @@
   "execution_mode": "manual_independent_sessions",
   "implementation_gate": "No supervisor prerequisite for independent startup repair or unit implementation; cross-repository acceptance requires validated boundary evidence",
   "current_observation_scope": "legacy entrypoints plus targeted concurrent working-tree probes; not live APIs",
-  "semantic_version": "workflow-contract/0.1.1"
+  "semantic_version": "workflow-contract/0.2.0"
 }

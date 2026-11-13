@@ -293,10 +293,11 @@ class SyntheticReviewSourceTests(ReviewRouteTestCase):
                 patch.object(R2ObjectStore, 'from_env', side_effect=AssertionError('R2 is not allowed')):
             return call(self.handler, canonical(mint_p08(request, self.artifact_root)), env)
 
-    def test_valid_draft_yields_partial_review_with_synthetic_metrics(self):
+    def test_valid_draft_yields_ok_review_with_synthetic_metrics(self):
+        # Deliverable-based status: findings or metrics were produced, so the review is ok.
         request = mint_p08(fixture_request(), self.artifact_root)
         status, out = self.review(request, 'store-a')
-        self.assertEqual((status, out['status'], out['result']['status']), (200, 'partial', 'partial'), out)
+        self.assertEqual((status, out['status'], out['result']['status']), (200, 'ok', 'ok'), out)
         self.agent_factory.assert_not_called()  # the configured default sources are bypassed
         review = out['result']['review']
         valued = [m for m in review['metrics'] if m['value'] is not None]
@@ -334,7 +335,7 @@ class SyntheticReviewSourceTests(ReviewRouteTestCase):
         other = self.review(with_draft_scope(fixture_request(), category='아우터', season='2028FW',
                                              title='2028FW 아우터 기획 초안'), 'store-4')
         for status, out in (first, repeat, null_scope, other):
-            self.assertEqual((status, out['status']), (200, 'partial'), out)
+            self.assertEqual((status, out['status']), (200, 'ok'), out)
         self.assertEqual(values(first[1]), values(repeat[1]))
         self.assertEqual(values(first[1]), values(null_scope[1]))
         self.assertEqual(values(first[1]), values(other[1]))
@@ -406,7 +407,7 @@ class NonEmptyReviewRoundTripTests(ReviewRouteTestCase):
     def test_wire_bytes_round_trip_through_the_strict_parser(self):
         body = self.produce()
         document = parse_json(body)  # strict: unique keys, finite numbers, UTF-8
-        self.assertEqual(document['status'], 'partial')
+        self.assertEqual(document['status'], 'ok')
         review = document['result']['review']
         self.assertTrue(review['findings'] and all(f['evidence_refs'] for f in review['findings']))
         self.assertTrue(any(m['value'] is not None for m in review['metrics']))

@@ -2,7 +2,7 @@
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contracts.vogue.invalid/workflow/0.1/common.schema.json",
   "title": "Shared definitions; equality/hash/order require semantic validator",
-  "$comment": "PROPOSED workflow-contract/0.1.1: structural validation plus versioned semantic rules are required; see decisions/contract-baseline.json. Not service compatibility.",
+  "$comment": "PROPOSED workflow-contract/0.2.0: structural validation plus versioned semantic rules are required; see decisions/contract-baseline.json. Not service compatibility.",
   "$defs": {
     "id": {
       "type": "string",
@@ -578,6 +578,299 @@
         }
       }
     },
+    "concept_claim": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "value",
+        "kind",
+        "evidence_ids"
+      ],
+      "properties": {
+        "value": {
+          "type": "string",
+          "minLength": 1
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        }
+      }
+    },
+    "concept_attribute": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "name",
+        "value",
+        "kind",
+        "evidence_ids"
+      ],
+      "properties": {
+        "name": {
+          "type": "string",
+          "minLength": 1
+        },
+        "value": {
+          "type": [
+            "string",
+            "number",
+            "boolean"
+          ]
+        },
+        "kind": {
+          "type": "string",
+          "minLength": 1
+        },
+        "evidence_ids": {
+          "type": "array",
+          "items": {
+            "type": "string",
+            "minLength": 1
+          },
+          "minItems": 0
+        }
+      }
+    },
+    "concept": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "engine",
+        "product_definition",
+        "opportunity",
+        "target_customer",
+        "attributes",
+        "differentiation",
+        "risks",
+        "questions_for_validation"
+      ],
+      "properties": {
+        "engine": {
+          "type": "string",
+          "minLength": 1
+        },
+        "product_definition": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/concept_claim"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "opportunity": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/concept_claim"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "target_customer": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/concept_claim"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "attributes": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/concept_attribute"
+          },
+          "minItems": 0
+        },
+        "differentiation": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/concept_claim"
+          },
+          "minItems": 0
+        },
+        "risks": {
+          "type": "array",
+          "items": {
+            "$ref": "common.schema.json#/$defs/concept_claim"
+          },
+          "minItems": 0
+        },
+        "questions_for_validation": {
+          "$ref": "common.schema.json#/$defs/strings"
+        }
+      }
+    },
+    "visual": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "status",
+        "artifact",
+        "provider_calls",
+        "model",
+        "prompt_version",
+        "reason"
+      ],
+      "properties": {
+        "status": {
+          "enum": [
+            "generated",
+            "failed",
+            "skipped"
+          ]
+        },
+        "artifact": {
+          "anyOf": [
+            {
+              "$ref": "common.schema.json#/$defs/image_artifact"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "provider_calls": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1
+        },
+        "model": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "prompt_version": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "reason": {
+          "anyOf": [
+            {
+              "type": "string",
+              "minLength": 1
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      },
+      "allOf": [
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "generated"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "artifact": {
+                "$ref": "common.schema.json#/$defs/image_artifact"
+              },
+              "provider_calls": {
+                "const": 1
+              },
+              "reason": {
+                "type": "null"
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "enum": [
+                  "failed",
+                  "skipped"
+                ]
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "artifact": {
+                "type": "null"
+              },
+              "reason": {
+                "type": "string",
+                "minLength": 1
+              }
+            }
+          }
+        },
+        {
+          "if": {
+            "properties": {
+              "status": {
+                "const": "skipped"
+              }
+            },
+            "required": [
+              "status"
+            ]
+          },
+          "then": {
+            "properties": {
+              "provider_calls": {
+                "const": 0
+              }
+            }
+          }
+        }
+      ]
+    },
+    "draft_visuals": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "product",
+        "outfit"
+      ],
+      "properties": {
+        "product": {
+          "$ref": "common.schema.json#/$defs/visual"
+        },
+        "outfit": {
+          "$ref": "common.schema.json#/$defs/visual"
+        }
+      }
+    },
     "draft": {
       "type": "object",
       "additionalProperties": false,
@@ -638,6 +931,12 @@
         },
         "limitations": {
           "$ref": "common.schema.json#/$defs/strings"
+        },
+        "concept": {
+          "$ref": "common.schema.json#/$defs/concept"
+        },
+        "visuals": {
+          "$ref": "common.schema.json#/$defs/draft_visuals"
         }
       }
     },

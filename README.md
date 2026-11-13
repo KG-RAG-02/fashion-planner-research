@@ -246,7 +246,7 @@ repository-root/
 
 `POST /v1/agents/sales-market-agent/reviews` accepts the full retained
 PlanningDraft using the packaged `vogue-workflow/0.1` candidate schemas
-(workflow-contract/0.1.1). This is a separate parser, use case and serializer;
+(workflow-contract/0.2.0). This is a separate parser, use case and serializer;
 legacy `/runs` and its serializers remain available. The shared baseline is
 still proposed; this implementation alone does not establish service integration.
 
@@ -309,7 +309,7 @@ the default, never the working directory itself):
   - The source makes no network or R2 call.
   - Every valid Draft gets the same values, including a Draft with null
     category or season. The values are not filtered by the Draft. The Review is
-    `partial` (HTTP 200).
+    `ok` (HTTP 200); the synthetic nature is stated in the limitations.
   - Each valued metric and the Review `observation` carry `synthetic: true` and
     `data_nature: synthetic_fixture`. The limitations state that the values are
     synthetic and not scoped to the Draft.
@@ -350,7 +350,7 @@ Container image (`docker build -t vogue/sales-market:dev .`):
   | Route | Auth | Notes |
   |---|---|---|
   | `GET /api/health` | none | Liveness only. Body: `{"status":"ok","mode":"service"}` under `--service-mode` (the container default), otherwise `"mode":"local-development"`. With `--enable-synthetic-simulation` the synthetic markers are added, and the mode outside service mode is `synthetic_simulation` |
-  | `POST /v1/agents/sales-market-agent/reviews` (`vogue-workflow/0.1`) | `Authorization: Bearer` (`hmac.compare_digest`), checked before the body is read | Statuses: 200 (Review `partial`/`no_results`), 503 or 504 (Review `error` envelope); problem bodies for 400, 401, 409 (`DRAFT_REVISION_CONFLICT`: same `draft_id` and revision already reviewed with different content), 413, 415, 422 (other semantic violations), 502, 503, 504, 500 |
+  | `POST /v1/agents/sales-market-agent/reviews` (`vogue-workflow/0.1`) | `Authorization: Bearer` (`hmac.compare_digest`), checked before the body is read | Statuses: 200 (Review `ok`/`no_results`; `ok` once findings or metrics were produced, data gaps stay in limitations), 503 or 504 (Review `error` envelope); problem bodies for 400, 401, 409 (`DRAFT_REVISION_CONFLICT`: same `draft_id` and revision already reviewed with different content), 413, 415, 422 (other semantic violations), 502, 503, 504, 500 |
   | Legacy `POST /v1/agents/sales-market-agent/runs` (`vogue-handoff/0.1`), its deprecated alias `/v1/agents/market-research-agent/runs`, and `/structured-runs` | Bearer | Unchanged |
 
   On these four routes every other method (`GET`, `HEAD`, `PUT`, `DELETE`,
@@ -380,7 +380,7 @@ with `--check`. The vendored workflow schemas in
 copies of `vogue-orchestrator/contracts/workflow/` and are never edited here.
 Their raw-byte SHA-256 values are pinned by `snapshot.json` in the same folder.
 That file is a byte-identical copy of the coordinator's `snapshot.json` for
-`workflow-contract/0.1.1` (sha256 `cc4cf995…94d4fe`, the value recorded as the
+`workflow-contract/0.2.0` (sha256 `703548af…be3011f`, the value recorded as the
 baseline `snapshot_sha256`). Importing the review module fails closed with
 `SCHEMA_SNAPSHOT_CHANGED` when any schema file is changed, missing or unpinned.
 `scripts/sync_package_resources.py` (both modes) verifies the same pin and never

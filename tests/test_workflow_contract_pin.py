@@ -15,8 +15,8 @@ from market_research_agent.reviews import ReviewError, load_pinned_schemas
 ROOT = Path(__file__).resolve().parents[1]
 CONTRACT = resource_root('workflow_contract')
 # sha256 of vogue-orchestrator/contracts/workflow/snapshot.json for
-# workflow-contract/0.1.1 (equals baseline.json "snapshot_sha256").
-CONTRACT_PACKAGE_PIN_SHA256 = 'cc4cf99533b709efa78e7fa4f4834242c17227fa8c9a88cfbafaf5572b94d4fe'
+# workflow-contract/0.2.0 (equals baseline.json "snapshot_sha256").
+CONTRACT_PACKAGE_PIN_SHA256 = '703548af01c2f94492300922840f82536a26023a31393365f68d81cd4be3011f'
 PINNED = {
     'common.schema.json', 'integrated-result.schema.json',
     'planning-draft-request.schema.json', 'planning-draft-response.schema.json',
@@ -50,7 +50,7 @@ class WorkflowContractPinTests(unittest.TestCase):
         self.assertEqual(sha256(raw).hexdigest(), CONTRACT_PACKAGE_PIN_SHA256)
         pin = json.loads(raw)
         self.assertEqual((pin['contract_version'], pin['transport_version']),
-                         ('workflow-contract/0.1.1', 'vogue-workflow/0.1'))
+                         ('workflow-contract/0.2.0', 'vogue-workflow/0.1'))
         self.assertEqual(set(pin['files']), PINNED)
         for name, digest in pin['files'].items():
             self.assertEqual(sha256((CONTRACT / name).read_bytes()).hexdigest(), digest, name)

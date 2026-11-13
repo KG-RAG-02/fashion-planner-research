@@ -1,8 +1,8 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
   "$id": "https://contracts.vogue.invalid/workflow/0.1/planning-draft-request.schema.json",
-  "title": "P08 → P06 Draft-only request",
-  "$comment": "PROPOSED workflow-contract/0.1.1: structural validation plus versioned semantic rules are required; see decisions/contract-baseline.json. Not service compatibility.",
+  "title": "P08 → P06 Draft request (draft_only | draft_with_visuals)",
+  "$comment": "PROPOSED workflow-contract/0.2.0: structural validation plus versioned semantic rules are required; see decisions/contract-baseline.json. Not service compatibility.",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -30,7 +30,10 @@
       ],
       "properties": {
         "mode": {
-          "const": "draft_only"
+          "enum": [
+            "draft_only",
+            "draft_with_visuals"
+          ]
         },
         "user_input": {
           "$ref": "common.schema.json#/$defs/user_input"
