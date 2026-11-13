@@ -7,30 +7,23 @@ remains a development adapter, not a production deployment or retry policy.
 from __future__ import annotations
 
 import argparse
-import hashlib
 import hmac
 import json
-import math
 import os
-import re
 from pathlib import Path
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Any
 from urllib.parse import unquote, urlsplit
 
 from .domain.models import MarketResearchContext, MarketResearchResult, ResultStatus, normalize_no_results_payload
-from .domain.apparel_costing import CostingInputError, validate_apparel_costing
 from .domain.currency_conversion import CurrencyConversionError, convert_usd_to_krw, fetch_usd_krw_reference_rate
 from .domain.sales_market_review import REVIEW_SCHEMA_VERSION, build_sales_market_review
-from .llm.image_style import ImageStyleInputError, analyze_image_style
 from .llm.target_audience import propose_target_audience
 from .llm.responses_api import LlmCallError, OpenAIResponsesClient
-from .sources.shared.r2_object_store import R2ObjectError, R2ObjectStore
 from .sources.sales.hm_kaggle.hm_combined_research_source import HmCombinedResearchSource
-from .orchestration_request import CanonicalRequestError
 
 
-REVIEW_CONTRACT_VERSION = "vogue-sales-market-review/0.1-proposal"
+REVIEW_CONTRACT_VERSION = "vogue-sales-market-review/0.2-proposal"
 AGENT_ID = "sales-market-agent"
 CANONICAL_ROUTE_ID = "sales-market-agent"
 MAX_BODY_BYTES = 1_048_576
@@ -63,11 +56,8 @@ class RequestValidationError(ValueError):
         self.http_status = http_status
 
 
-def context_from_review_request(value: Any) -> tuple[str, dict[str, Any], bool]:
-    """Validate the local PlanningDraft review proposal input.
-
-    This contract is intentionally separate from the shared v0.1 research run.
-    """
+def context_from_review_request(value: Any) -> tuple[str, dict[str, Any]]:
+    """Validate and project the minimal product payload accepted from P06."""
     if not isinstance(value, dict) or set(value) != {"contract_version", "request_id", "input"}:
         raise RequestValidationError("INVALID_ENVELOPE", "Review request envelope is invalid.")
     if value.get("contract_version") != REVIEW_CONTRACT_VERSION:
@@ -77,83 +67,29 @@ def context_from_review_request(value: Any) -> tuple[str, dict[str, Any], bool]:
         raise RequestValidationError("INVALID_REQUEST_ID", "request_id is invalid.")
     payload = value.get("input")
     if (not isinstance(payload, dict)
-            or set(payload) - {"request_id", "planning_draft", "include_image_style_analysis"}
-            or not {"request_id", "planning_draft"}.issubset(payload)):
+            or set(payload) - {"request_id", "product"}
+            or not {"request_id", "product"}.issubset(payload)):
         raise RequestValidationError("INVALID_INPUT", "Review input contains unsupported fields.")
     if payload.get("request_id") != request_id:
         raise RequestValidationError("REQUEST_ID_MISMATCH", "Envelope and input request_id must match.")
-    draft = payload.get("planning_draft")
-    if not isinstance(draft, dict) or set(draft) - {"schema_version", "draft_id", "product", "costing", "image_ref"} or not {
-        "schema_version", "draft_id", "product"
-    }.issubset(draft):
-        raise RequestValidationError("INVALID_PLANNING_DRAFT", "planning_draft fields do not match schema 1.0.")
-    if draft.get("schema_version") != "1.0":
-        raise RequestValidationError("UNSUPPORTED_PRODUCER_SCHEMA", "planning_draft schema_version must be 1.0.")
-    draft_id = draft.get("draft_id")
-    if not isinstance(draft_id, str) or not draft_id.strip() or _safe_error_request_id(draft_id) != draft_id:
-        raise RequestValidationError("INVALID_PLANNING_DRAFT", "planning_draft.draft_id is invalid.")
-    product = draft.get("product")
-    allowed_product_fields = {
-        "category", "product_type", "gender", "season", "material", "proposed_price", "currency",
-    }
+    product = payload.get("product")
+    allowed_product_fields = {"category", "product_type", "gender", "season", "material"}
     if not isinstance(product, dict) or set(product) - allowed_product_fields:
-        raise RequestValidationError("INVALID_PLANNING_DRAFT", "planning_draft.product contains unsupported fields.")
+        raise RequestValidationError("INVALID_PRODUCT", "input.product contains unsupported fields.")
     category = product.get("category")
     if not isinstance(category, str) or not category.strip() or len(category) > 120:
-        raise RequestValidationError("INVALID_PLANNING_DRAFT", "planning_draft.product.category is required.")
+        raise RequestValidationError("INVALID_PRODUCT", "input.product.category is required.")
     for field in ("product_type", "gender", "season", "material"):
         item = product.get(field)
         if item is not None and (not isinstance(item, str) or not item.strip() or len(item) > 120):
-            raise RequestValidationError("INVALID_PLANNING_DRAFT", f"planning_draft.product.{field} is invalid.")
+            raise RequestValidationError("INVALID_PRODUCT", f"input.product.{field} is invalid.")
     gender = product.get("gender")
-    if gender is not None and gender.casefold() not in {"women", "men", "unisex", "unknown"}:
-        raise RequestValidationError("INVALID_PLANNING_DRAFT", "planning_draft.product.gender is unsupported.")
-    price = product.get("proposed_price")
-    currency = product.get("currency")
-    if price is not None and (
-        isinstance(price, bool) or not isinstance(price, (int, float)) or not math.isfinite(price) or price <= 0
-    ):
-        raise RequestValidationError("INVALID_PLANNING_DRAFT", "proposed_price must be a positive finite number.")
-    if price is not None and (not isinstance(currency, str) or re.fullmatch(r"[A-Za-z]{3}", currency) is None):
-        raise RequestValidationError("INVALID_PLANNING_DRAFT", "currency must be supplied as a three-letter code with proposed_price.")
-    if currency is not None and (not isinstance(currency, str) or re.fullmatch(r"[A-Za-z]{3}", currency) is None):
-        raise RequestValidationError("INVALID_PLANNING_DRAFT", "currency must be a three-letter code.")
-    if "costing" in draft:
-        try:
-            validate_apparel_costing(draft["costing"])
-        except CostingInputError as exc:
-            raise RequestValidationError("INVALID_COSTING_INPUT", str(exc)) from None
-    if "image_ref" in draft:
-        image_ref = draft["image_ref"]
-        if (not isinstance(image_ref, dict) or set(image_ref) != {"object_key", "sha256", "media_type"}
-                or not isinstance(image_ref.get("object_key"), str)
-                or not image_ref["object_key"].strip() or len(image_ref["object_key"]) > 1024
-                or image_ref["object_key"].startswith("/") or ".." in image_ref["object_key"].split("/")
-                or not isinstance(image_ref.get("sha256"), str)
-                or re.fullmatch(r"[0-9a-fA-F]{64}", image_ref["sha256"]) is None
-                or image_ref.get("media_type") not in {"image/jpeg", "image/png", "image/webp"}):
-            raise RequestValidationError("INVALID_IMAGE_REFERENCE", "planning_draft.image_ref is invalid.")
-    image_style_requested = payload.get("include_image_style_analysis", False)
-    if not isinstance(image_style_requested, bool):
-        raise RequestValidationError("INVALID_INPUT", "include_image_style_analysis must be a boolean.")
-    _validate_json_tree(draft, "planning_draft")
-    return request_id, draft, image_style_requested
-
-
-def _load_review_image(image_ref: dict[str, Any]) -> tuple[bytes, str]:
-    """Fetch a bounded R2 artifact and verify declared MIME and content hash."""
-    content = R2ObjectStore.from_env().get_bytes(image_ref["object_key"], max_bytes=4_000_000)
-    if not hmac.compare_digest(hashlib.sha256(content).hexdigest(), image_ref["sha256"].casefold()):
-        raise ImageStyleInputError("Image artifact hash does not match the planning draft reference.")
-    signatures = {
-        "image/jpeg": content.startswith(b"\xff\xd8\xff"),
-        "image/png": content.startswith(b"\x89PNG\r\n\x1a\n"),
-        "image/webp": (len(content) >= 12 and content[:4] == b"RIFF" and content[8:12] == b"WEBP"
-                       and b"ANIM" not in content and b"ANMF" not in content),
-    }
-    if not signatures.get(image_ref["media_type"], False):
-        raise ImageStyleInputError("Image artifact content does not match its declared media type.")
-    return content, image_ref["media_type"]
+    if gender is not None and gender not in {"women", "men", "unisex", "unknown"}:
+        raise RequestValidationError("INVALID_GENDER", "input.product.gender must be women, men, unisex, or unknown.")
+    _validate_json_tree(product, "input.product")
+    # The domain adapter still uses a product wrapper internally. Never pass
+    # through the producer's PlanningDraft or metadata beyond these fields.
+    return request_id, {"product": product}
 
 
 def _reject_json_constant(value: str) -> None:
@@ -240,7 +176,7 @@ def make_handler(
                 if len(raw_body) != length:
                     raise RequestValidationError("INCOMPLETE_BODY", "Request body was incomplete.", 400)
                 body = json.loads(raw_body, parse_constant=_reject_json_constant)
-                request_id, planning_draft, image_style_requested = context_from_review_request(body)
+                request_id, planning_draft = context_from_review_request(body)
                 context = MarketResearchContext(request_id=request_id, planning_request={})
             except RequestValidationError as exc:
                 request_id = _safe_error_request_id(body.get("request_id")) if "body" in locals() and isinstance(body, dict) else None
@@ -293,22 +229,6 @@ def make_handler(
                         )
                     except (LlmCallError, ValueError) as exc:
                         target_audience_error = str(exc)
-                image_style = None
-                image_style_error = None
-                if image_style_requested:
-                    if os.getenv("VOGUE_IMAGE_LLM_TRANSFER_AUTHORIZED", "").strip().casefold() not in {"1", "true", "yes"}:
-                        image_style_error = "Image transfer to the LLM is disabled; set VOGUE_IMAGE_LLM_TRANSFER_AUTHORIZED=true after approving this data flow."
-                    elif not isinstance(planning_draft.get("image_ref"), dict):
-                        image_style_error = "PlanningDraft image_ref is required for requested image style analysis."
-                    else:
-                        try:
-                            image_bytes, media_type = _load_review_image(planning_draft["image_ref"])
-                            image_style = analyze_image_style(
-                                image_bytes=image_bytes, media_type=media_type,
-                                product_context=product, client=OpenAIResponsesClient(),
-                            )
-                        except (R2ObjectError, ImageStyleInputError, LlmCallError, ValueError) as exc:
-                            image_style_error = str(exc)
                 review = build_sales_market_review(
                     result, planning_draft=planning_draft,
                     fabric_price_analysis=fabric_prices,
@@ -317,9 +237,6 @@ def make_handler(
                     historical_price_error=historical_price_error,
                     customer_age_profile=customer_profile,
                     customer_age_error=customer_error,
-                    image_style_analysis=image_style,
-                    image_style_error=image_style_error,
-                    image_style_requested=image_style_requested,
                     target_audience_proposal=target_audience_proposal,
                 ).to_dict()
                 review["target_audience"]["transfer_authorized"] = target_audience_authorized

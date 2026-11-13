@@ -1,12 +1,12 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:vogue:sales-market-review:0.1:proposal-response",
-  "title": "Project_07 internal PlanningDraft review proposal response",
+  "$id": "urn:vogue:sales-market-review:0.2:proposal-response",
+  "title": "Project_07 minimal product review proposal response",
   "type": "object",
   "additionalProperties": false,
   "required": ["contract_version", "request_id", "producer", "status", "result"],
   "properties": {
-    "contract_version": {"const": "vogue-sales-market-review/0.1-proposal"},
+    "contract_version": {"const": "vogue-sales-market-review/0.2-proposal"},
     "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
     "producer": {
       "type": "object",
@@ -21,7 +21,7 @@
     "result": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "request_id", "draft_id", "producer_id", "status", "draft_context", "category_price_comparison", "material_cost_analysis", "customer_segment_analysis", "target_audience_analysis", "margin_estimate", "evidence", "missing_data", "errors", "limitations", "decision_support", "price_analysis", "fabric_cost_analysis", "margin_analysis", "target_audience"],
+      "required": ["schema_version", "request_id", "draft_id", "producer_id", "status", "draft_context", "category_price_comparison", "material_cost_analysis", "customer_segment_analysis", "target_audience_analysis", "margin_estimate", "evidence", "missing_data", "errors", "limitations", "decision_support", "price_analysis", "fabric_cost_analysis", "margin_analysis", "margin_price_range_analysis", "target_audience"],
       "properties": {
         "schema_version": {"const": "sales-market-review/0.1-internal"},
         "request_id": {"type": "string"},
@@ -62,6 +62,7 @@
         "price_analysis": {"type": "object"},
         "fabric_cost_analysis": {"type": "object"},
         "margin_analysis": {"type": "object"},
+        "margin_price_range_analysis": {"type": ["object", "null"]},
         "target_audience": {"type": "object"}
       }
     }

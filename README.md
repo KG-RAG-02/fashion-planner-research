@@ -2,7 +2,7 @@
 
 공통 저장소 레이아웃과 HTTP 책임 경계는 [`docs/repository-boundaries.md`](docs/repository-boundaries.md)를 참고하세요.
 
-VOGUE 상품기획 흐름에서 `PlanningDraft`를 사후 검증하는 Project_07 에이전트입니다. `/reviews`는 가격·소재·원가·고객 근거를 검토해 `SalesMarketReview`를 반환합니다. 초안 작성과 MD의 최종 판단은 오케스트레이터/UI 책임입니다.
+Project_07은 P06 review bridge가 보낸 최소 상품 프로필을 바탕으로 시장 검토를 수행하고 `SalesMarketReview`를 반환합니다. P07은 P06의 `PlanningDraft` 전체를 받지 않습니다. 초안 생성과 MD의 최종 판단은 각각 P06 및 오케스트레이터/UI 책임입니다.
 
 실시간 사내 판매 원장과 실제 원단 원가 DB는 연결되어 있지 않습니다. H&M Kaggle 과거 자료는 비상업 연구 전용으로 분리되며 실제 시장 실적으로 제공하지 않습니다.
 
@@ -10,7 +10,7 @@ H&M 자료 adapter는 사후 검토에서 비상업적 historical reference 용�
 
 ## 현재 동작
 
-- 유일한 분석 HTTP 경로는 `POST /v1/agents/sales-market-agent/reviews`입니다. `PlanningDraft`의 허용된 상품 필드와 `request_id`를 검증합니다.
+- 유일한 분석 HTTP 경로는 `POST /v1/agents/sales-market-agent/reviews`입니다. P06 bridge가 전달하는 최소 상품 payload와 `request_id`를 검증합니다.
 - 응답은 Evidence, 누락 자료, 제한사항, 원가 기반 마진(완전한 원가 시트가 제공된 경우), 영역별 근거 충족 상태를 담은 `SalesMarketReview` proposal입니다.
 - 최종 채택·수정·보류 결정은 항상 MD가 합니다.
 - 과거 H&M 자료는 비상업 연구 데이터로, 원단 목록 가격은 공급자 검증 원가가 아닌 참고치로 표시합니다. 결측은 0으로 바꾸지 않습니다.
@@ -38,13 +38,13 @@ H&M Kaggle customer/price aggregates run only when `VOGUE_HM_RESEARCH_NONCOMMERC
 PYTHONPATH=src python3 -m market_research_agent.http_server --host 127.0.0.1 --port 8766
 ```
 
-기획 초안 사후 검토 proposal은 `POST /v1/agents/sales-market-agent/reviews`입니다. 요청 예시는 [`sales-market-review-0.1-proposal.request.json`](contracts/examples/sales-market-review-0.1-proposal.request.json), schema는 [`sales-market-review-0.1-proposal.schema.json`](contracts/schemas/proposals/sales-market-review-0.1-proposal.schema.json)입니다. 이 경로는 `vogue-sales-market-review/0.1-proposal` envelope와 Bearer 인증을 사용합니다. R2 H&M Kaggle의 과거 거래가격과 연령 집계는 비상업 연구 설정에서만 제공하며, 원단가 DB는 미연결 상태입니다. 완전한 원가 시트가 있으면 결정론 마진을 계산합니다. 호출 주체는 orchestrator이며 응답은 동기 방식입니다.
+상품 리뷰 proposal은 `POST /v1/agents/sales-market-agent/reviews`입니다. 최소 요청 예시는 [`sales-market-review-0.2-proposal.request.json`](contracts/examples/sales-market-review-0.2-proposal.request.json), schema는 [`sales-market-review-0.2-proposal.schema.json`](contracts/schemas/proposals/sales-market-review-0.2-proposal.schema.json)입니다. 이 경로는 `vogue-sales-market-review/0.2-proposal` envelope와 Bearer 인증을 사용합니다. 요청에는 필수 `category`와 선택 `product_type`, `gender`, `season`, `material`만 포함됩니다. P06 bridge가 P06 draft에서 이 필드만 추려 전달하며 P07은 draft 전체를 받지 않습니다. R2 H&M Kaggle의 과거 거래가격과 연령 집계는 비상업 연구 설정에서만 제공합니다. 호출 주체는 P06 review bridge이며 응답은 동기 방식입니다.
 
-Review 요청에 전체 원가 시트가 있는 경우 [`apparel-costing-input-1.0-proposal.schema.json`](contracts/schemas/proposals/apparel-costing-input-1.0-proposal.schema.json)에 따라 BOM(원단/부자재 단가·소비량·폐기율), SAM/working-minute cost/효율, 공장 부대비와 markup, 운임·보험·관세·내륙 물류비, 할인·반품율을 모두 입력해야 결정론 gross margin 계산이 실행됩니다. 구성 비용이 모르면 생략하지 말고 실제 0만 출처 참조와 함께 명시합니다. 계산 공식 버전은 `apparel-bom-sam-landed-gm/1.0`이며 임의의 업계 평균·환율은 쓰지 않습니다. 결과는 입력 출처 참조를 보존하지만 그 원천 문서의 진위나 권한을 P07이 검증했다고 주장하지 않습니다. 공식과 근거는 [post-planning review design](docs/design/post-planning-sales-market-review.md)에 기록되어 있습니다.
+P07 `/reviews` 입력은 상품 원가 시트, 제안가격/통화, 이미지 참조, P06 evidence 메타데이터를 받지 않습니다. 원가·가격 관련 분석은 연결 자료와 P07 내부 분석 기준으로 수행되며, P06 bridge는 데이터 전달과 P06 전용 검증을 담당합니다. P07은 그 bridge 책임을 중복하지 않습니다.
 
 비상업 H&M 연구 모드에서 고객 자료는 개인정보 행을 노출하지 않고 카테고리별 연령대로 집계합니다. 이미지 분석은 명시적 요청과 데이터 전송 설정이 있는 경우에만 실행합니다. 자세한 내용은 [customer age and image style analysis 설계](docs/design/customer-age-image-target-analysis.md)를 참고하세요.
 
-상품 초안 검토 응답에는 H&M 가격 통계, 원단 공개 listing 참고값, complete costing sheet가 있을 때의 코드 계산 마진률을 영역별로 반환합니다. H&M의 정규화 평균에 ×590을 적용해 USD 참고값으로 해석한 뒤, Frankfurter의 USD/KRW 기준환율과 Python 환산 함수로 원화 환산 참고값을 만듭니다. Kaggle이 ×590 USD 해석이나 통화를 공식 보증하지 않으므로 응답에 가정과 환율 기준일을 기록합니다. 상품 종류는 versioned mapping으로 H&M의 `product_type_name`이 속한 category에 매핑해 집계하며, 해당 자료에는 시즌 필드가 없어 시즌은 필터링되지 않습니다. Costing sheet가 없으면 NYU Stern의 미국 상장 Apparel 기업 35개 gross margin 평균(2026년 1월 기준) 56.88%를 benchmark estimate로 적용합니다. H&M 판매가격 P25–P75 구간의 하한·상한마다 총원가 허용액을 계산하고, 원단 KRW/m 참고 중앙값을 1m 기준으로 차감한 잔여 비원단 원가 허용액을 `margin_price_range_analysis`에 반환합니다. 이 값들은 업계 벤치마크 시나리오이며 상품별 실제 마진은 아닙니다. 텍스트 LLM 타겟 가설은 상품 정보의 외부 전송을 명시적으로 허용한 경우에만 `VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED=true`로 활성화됩니다. 연령대 근거는 H&M 비상업 연구 모드가 켜져 있고 집계 자료가 제공될 때만 포함됩니다.
+상품 리뷰 응답에는 H&M 가격 통계와 원단 공개 listing 참고값을 영역별로 반환합니다. H&M의 정규화 평균에 ×590을 적용해 USD 참고값으로 해석한 뒤, Frankfurter USD/KRW 기준환율과 Python 환산 함수로 원화 환산 참고값을 만듭니다. Kaggle이 ×590 USD 해석이나 통화를 공식 보증하지 않으므로 응답에 가정과 환율 기준일을 기록합니다. 상품 종류는 versioned mapping으로 H&M의 `product_type_name`이 속한 category에 매핑해 집계하며, 해당 자료에는 시즌 필드가 없어 시즌은 필터링되지 않습니다. 제안가와 원가 시트는 API 입력에 포함되지 않습니다. H&M P25–P75 구간은 업계 총마진 benchmark를 적용한 scenario로 `margin_price_range_analysis`에 반환하며, 상품별 실제 마진은 아닙니다. 텍스트 LLM 타겟 가설은 상품 정보의 외부 전송을 명시적으로 허용한 경우에만 `VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED=true`로 활성화됩니다. 연령대 근거는 H&M 비상업 연구 모드가 켜져 있고 집계 자료가 제공될 때만 포함됩니다.
 
 ## Docker
 
@@ -68,12 +68,12 @@ Docker 이미지에는 `.env`, `.venv`, 원본·처리 데이터가 포함되지
 
 ## 사용 예시
 
-Review 입력 예시는 [sales-market-review proposal request](contracts/examples/sales-market-review-0.1-proposal.request.json)를 참고하세요. API는 PlanningDraft를 수정하지 않고 검토 결과만 반환합니다.
+Review 입력 예시는 [sales-market-review 0.2 proposal request](contracts/examples/sales-market-review-0.2-proposal.request.json)를 참고하세요. 최소 입력은 `{"category":"Outerwear"}`이며, 선택 필드는 생략하거나 `null`로 보낼 수 있습니다. API는 초안을 수정하지 않고 검토 결과만 반환합니다.
 
 ## 남은 통합 항목
 
 - `PlanningDraft`와 `SalesMarketReview` 공통 schema/version 승인
-- 오케스트레이터의 `/reviews` 호출 연결과 timeout/error 전달 정책
+- P06 review bridge의 `/reviews` 호출 연결과 timeout/error 전달 정책
 - 상업 이용 가능한 판매·원단 원가 자료원의 owner·권한·단위 확인
 
 실제 자료를 받기 전 합성 fixture로 검색·분석 RAG를 개발하는 제안은 [`docs/design/synthetic-fixture-rag-analysis-design.md`](docs/design/synthetic-fixture-rag-analysis-design.md)에 정리되어 있습니다. 이 설계는 합성 결과를 실제 시장 근거로 취급하지 않습니다.
