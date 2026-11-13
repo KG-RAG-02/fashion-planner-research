@@ -11,6 +11,7 @@ import json
 import re
 import calendar
 from contextlib import contextmanager
+from dataclasses import replace
 from datetime import date, timedelta
 from pathlib import Path
 from typing import Mapping
@@ -23,6 +24,21 @@ DEFAULT_PROCESSED_DIR = Path("data/processed/hm-personalized-fashion-recommendat
 
 class HmSourceReadError(ValueError):
     """A safe H&M source read or validation error."""
+
+
+# Korean garment labels used upstream (Trend/Stock taxonomy, e.g. the Draft category "스커트")
+# mapped to the canonical targets of hm-category-map.v1.json. Only unambiguous labels are listed;
+# anything else keeps the exact-match behaviour (no_results when no mapping targets it).
+CATEGORY_ALIASES_VERSION = "ko-category-aliases/1.0"
+KOREAN_CATEGORY_ALIASES = {
+    "상의": "Tops", "탑": "Tops", "블라우스": "Tops", "티셔츠": "Tops", "셔츠": "Tops", "후드티": "Tops",
+    "니트웨어": "Knitwear", "니트": "Knitwear", "스웨터": "Knitwear", "가디건": "Knitwear",
+    "하의": "Bottoms", "팬츠": "Bottoms", "청바지": "Bottoms", "스커트": "Bottoms", "레깅스": "Bottoms",
+    "조거팬츠": "Bottoms", "반바지": "Bottoms",
+    "아우터": "Outerwear", "코트": "Outerwear", "재킷": "Outerwear", "자켓": "Outerwear", "점퍼": "Outerwear",
+    "패딩": "Outerwear", "블레이저": "Outerwear",
+    "드레스": "Dresses", "원피스": "Dresses", "점프수트": "One-piece",
+}
 
 
 class HmHistoricalSalesSource:
@@ -38,6 +54,17 @@ class HmHistoricalSalesSource:
         self.usage_authorized = True
 
     def research(self, context: MarketResearchContext) -> SourceReport:
+        requested = (context.requested_category or "").strip()
+        targets = {target.casefold() for target in self.category_map.values()} if self.category_map else set()
+        alias = KOREAN_CATEGORY_ALIASES.get(requested)
+        if requested and requested.casefold() not in targets and alias and alias.casefold() in targets:
+            report = self._research(replace(context, requested_category=alias))
+            note = (f"요청 카테고리 '{requested}'에 직접 대응하는 H&M 분류가 없어 상위 분류 '{alias}'의 과거 자료를 "
+                    f"사용했습니다({CATEGORY_ALIASES_VERSION}). '{requested}' 단독 수치가 아닙니다.")
+            return replace(report, limitations=(note, *report.limitations))
+        return self._research(context)
+
+    def _research(self, context: MarketResearchContext) -> SourceReport:
         if context.query_intent in {"synthetic_test", "mapping_lookup", "definition_lookup", "unsupported"}:
             message = f"The H&M structured sales adapter does not serve {context.query_intent} requests."
             return SourceReport(
