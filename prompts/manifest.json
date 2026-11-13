@@ -1,7 +1,7 @@
 {
   "schema_version": "local-prompt-registry/1.0",
-  "runtime_active": false,
-  "runtime_owner": null,
+  "runtime_active": true,
+  "runtime_owner": "src/market_research_agent/llm/target_audience.py",
   "prompts": {
     "sales_analysis": {
       "current_version": "v1",
@@ -45,6 +45,33 @@
           "rendered_system": "sales_market_analysis/v1/rendered_system.md",
           "output_contract": "historical combined proposal; retained for traceability",
           "evaluation_fixture": "tests/fixtures/market_analysis_prompt_injection/cases.json"
+        }
+      }
+    },
+    "target_audience": {
+      "current_version": "v1",
+      "status": "proposal",
+      "versions": {
+        "v1": {
+          "status": "proposal",
+          "rendered_system": "target_audience/v1/rendered_system.md",
+          "input_modality": "text plus one explicitly authorized image",
+          "output_contract": "local opt-in image-style JSON; age bands are computed deterministically outside the LLM"
+        }
+      }
+    },
+    "target_audience_hypothesis": {
+      "current_version": "v1",
+      "status": "runtime_active",
+      "versions": {
+        "v1": {
+          "status": "runtime_active",
+          "system_template": "target_audience_hypothesis/v1/system_template.md",
+          "user_template": "target_audience_hypothesis/v1/user_template.md",
+          "examples": "target_audience_hypothesis/v1/examples.json",
+          "rendered_system": "target_audience_hypothesis/v1/rendered_system.md",
+          "input_modality": "opt-in text: product draft, historical customer aggregates, market price aggregates, fabric listing aggregates",
+          "output_contract": "validated fashion target profile, price positioning hypothesis, merchandising actions, and validation plan"
         }
       }
     }

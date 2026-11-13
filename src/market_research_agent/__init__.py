@@ -1,5 +1,7 @@
 """Public API for the VOGUE Market Research Agent."""
 
+from .domain.apparel_costing import (CostingInputError, calculate_apparel_margin,
+                                     calculate_benchmark_margin_estimate, validate_apparel_costing)
 from .domain.models import (
     AgentError,
     EvidenceRecord,
@@ -23,6 +25,7 @@ from .domain.sales import (
     compare_sales_to_market,
 )
 from .sources.shared.composite import CompositeMarketResearchSource
+from .domain.sales_market_review import SalesMarketReview, build_sales_market_review
 from .sources.shared.noop import NoConfiguredSources
 from .workflows.market_research import MarketResearchAgent
 from .orchestration_request import CanonicalRequestError, context_from_canonical_request
@@ -51,4 +54,10 @@ __all__ = [
     "MissingData",
     "UnitEconomicsCalculation",
     "UnitEconomicsResult",
+    "SalesMarketReview",
+    "build_sales_market_review",
+    "CostingInputError",
+    "calculate_apparel_margin",
+    "calculate_benchmark_margin_estimate",
+    "validate_apparel_costing",
 ]

@@ -10,6 +10,7 @@ RUN useradd --create-home --uid 10001 agent
 COPY --chown=agent:agent pyproject.toml README.md ./
 COPY --chown=agent:agent src/ ./src/
 COPY --chown=agent:agent contracts/ ./contracts/
+COPY --chown=agent:agent prompts/ ./prompts/
 COPY --chown=agent:agent examples/ ./examples/
 COPY --chown=agent:agent scripts/ ./scripts/
 COPY --chown=agent:agent tests/ ./tests/

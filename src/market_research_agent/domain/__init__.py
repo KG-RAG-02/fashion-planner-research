@@ -1,5 +1,7 @@
 """Contracts and pure domain records for market research."""
 
+from .apparel_costing import (CostingInputError, calculate_apparel_margin,
+                              calculate_benchmark_margin_estimate, validate_apparel_costing)
 from .models import (
     AgentError,
     EvidenceRecord,
@@ -22,6 +24,7 @@ from .sales import (
     UnitEconomicsResult,
     compare_sales_to_market,
 )
+from .sales_market_review import SalesMarketReview, build_sales_market_review
 
 __all__ = [
     "AgentError",
@@ -42,4 +45,10 @@ __all__ = [
     "MissingData",
     "UnitEconomicsCalculation",
     "UnitEconomicsResult",
+    "SalesMarketReview",
+    "build_sales_market_review",
+    "CostingInputError",
+    "calculate_apparel_margin",
+    "calculate_benchmark_margin_estimate",
+    "validate_apparel_costing",
 ]

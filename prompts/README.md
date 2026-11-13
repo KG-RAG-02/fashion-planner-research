@@ -1,14 +1,16 @@
 # Project_07 prompt registry
 
-이 폴더는 판매 분석가와 시장 분석가 프롬프트 원본을 각자 버전별로 관리합니다. 프롬프트 문장은 Python 코드에 넣지 않습니다.
+이 폴더는 판매 분석·시장 분석·이미지 스타일 프롬프트를 역할과 버전별로 관리합니다. 프롬프트 본문은 Python 코드에 넣지 않습니다.
 
 | Prompt | Version | Status | Runtime | Purpose |
 | --- | --- | --- | --- | --- |
 | `sales_analysis` | [v1](sales_analysis/v1/) | proposal | 미연결 | 판매 관측 분석과 판매 source 경계 |
 | `market_analysis` | [v1](market_analysis/v1/) | proposal | 미연결 | 승인된 시장 관측·시장 Evidence 분석 |
 | `sales_market_analysis` | [v1](sales_market_analysis/v1/) | superseded proposal | 미연결 | 분리 전 통합 초안, 추적성 보존용 |
+| `target_audience` | [v1](target_audience/v1/) | proposal | 명시적 요청 시 opt-in | 이미지의 의류 스타일만 해석. 연령대는 집계 코드가 결정 |
+| `target_audience_hypothesis` | [v1](target_audience_hypothesis/v1/) | runtime active | 상품 텍스트 LLM 전송 허가 시 opt-in | 패션 상품기획용 타깃 프로필, 가격 포지셔닝 가설, 머천다이징·검증안 |
 
-현재 Project_07에는 생성 모델과 프롬프트 실행 경로가 없습니다. `manifest.json`의 `runtime_active: false`는 이 사실을 기록합니다. 렌더링 파일은 검토용 산출물이며 활성 시스템 프롬프트가 아닙니다.
+판매/시장 분석 프롬프트는 HTTP 기본 경로에 연결되지 않았습니다. `target_audience` v1은 별도의 이미지 스타일 proposal 경로에만 연결되며, 요청의 `include_image_style_analysis=true`와 이미지 전송 설정이 모두 있을 때 실행됩니다. `target_audience_hypothesis` v1은 검증된 PlanningDraft, 집계 근거를 프롬프트 입력으로 사용하고 `VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED=true`일 때만 실행됩니다. 기본 리뷰 요청도 해당 허가가 설정된 경우에만 이 텍스트 LLM을 호출합니다. 각 항목은 manifest의 상태에 따라 별도로 활성화됩니다.
 
 ## 버전 폴더
 
@@ -16,6 +18,8 @@
 - `user_template.md`: 추후 모델 호출을 위해 제안하는 사용자 메시지 템플릿
 - `examples.json`: 합성 입력과 기대 동작의 설명 예시. 자동으로 모델에 주입하지 않음
 - `rendered_system.md`: system template을 복사해 생성한 검토용 렌더링 산출물
+- `target_audience/v1/rendered_system.md`: 이미지 스타일 분석용 system prompt. 나이, 성별, 고객 수치는 모델이 추정하지 못하도록 제한합니다.
+- `target_audience_hypothesis/v1/rendered_system.md`: 패션 머천다이징 타깃 분석 system prompt. 관측된 집계, 상품 적합성 가설, 가격 위치, 실행안과 검증 계획을 구분합니다.
 
 ## 새 버전 추가
 
