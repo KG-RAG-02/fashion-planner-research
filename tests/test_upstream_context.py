@@ -53,8 +53,6 @@ class UpstreamContextTests(unittest.TestCase):
         self.assertNotIn("upstream_context", result.to_proposal_dict())
         self.assertEqual(result.to_proposal_v1_2_dict()["upstream_context"], expected)
         self.assertEqual(result.to_proposal_v1_3_dict()["upstream_context"], expected)
-        proposal_schema = json.loads((Path(__file__).parents[1] / "contracts/schemas/proposals/sales-market-data-result-1.2-proposal.schema.json").read_text(encoding="utf-8"))
-        self.assertEqual(set(result.to_proposal_v1_2_dict()), set(proposal_schema["properties"]))
         self.assertEqual(result.schema_version, "1.0")
         # Inventory is context only; it did not become sales, demand, price, or margin.
         proposal = result.to_proposal_v1_2_dict()

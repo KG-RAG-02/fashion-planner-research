@@ -7,11 +7,10 @@ from market_research_agent import (
     MarketResearchContext,
     build_sales_market_review,
 )
-from tests.test_apparel_costing import costing_input
 
 
 class SalesMarketReviewAdapterTests(unittest.TestCase):
-    def test_target_sentence_uses_computed_age_cohort_and_llm_style_label(self):
+    def test_target_hypothesis_is_returned_with_age_evidence(self):
         result = MarketResearchAgent().run(
             MarketResearchContext(request_id="review-target-profile", planning_request={})
         )
@@ -24,18 +23,17 @@ class SalesMarketReviewAdapterTests(unittest.TestCase):
             "age_bands": [{"age_band": "20_29", "unique_customer_count": 100},
                           {"age_band": "30_39", "unique_customer_count": 80}],
         }
-        style = {"style_label": "datewear", "visual_features": ["파스텔 톤"],
-                 "style_rationale": "밝은 색감과 부드러운 실루엣입니다."}
+        proposal = {"primary_segment": {"description": "겨울 레이어링을 선호하는 고객 가설"}}
         review = build_sales_market_review(
             result,
-            planning_draft={"draft_id": "target-001", "product": {"category": "Outerwear", "gender": "women"}},
+            product_context={"category": "Outerwear", "gender": "women"},
             customer_age_profile=profile,
-            image_style_analysis=style,
+            target_audience_proposal=proposal,
         ).to_dict()
-        target = review["target_audience_analysis"]["target_sentence"]
-        self.assertIn("20~30대", target)
-        self.assertIn("여성용 데이트룩", target)
-        self.assertIn("비상업적 연구 가설", target)
+        target = review["target_audience_analysis"]
+        self.assertEqual(target["status"], "ok")
+        self.assertEqual(target["proposal"], proposal)
+        self.assertEqual(target["age_cohort"], profile["target_age_cohort"])
         self.assertEqual(review["customer_segment_analysis"][0]["permission_status"], "non_commercial_research_only")
         self.assertFalse(review["customer_segment_analysis"][0]["operational_eligible"])
 
@@ -62,10 +60,10 @@ class SalesMarketReviewAdapterTests(unittest.TestCase):
         },)
         review = build_sales_market_review(
             result,
-            planning_draft={"draft_id": "draft-snapshots", "product": {
+            product_context={
                 "category": "Outerwear", "product_type": "Jacket", "gender": "women",
-                "material": "linen", "proposed_price": 100000, "currency": "KRW",
-            }},
+                "material": "linen",
+            },
             historical_price_analysis=historical_prices,
             fabric_price_analysis=fabric_prices,
         ).to_dict()
@@ -84,50 +82,31 @@ class SalesMarketReviewAdapterTests(unittest.TestCase):
 
         review = build_sales_market_review(
             result,
-            planning_draft={
-                "draft_id": "draft-001",
+            product_context={
+                "category": "Outerwear",
                 "target_customer": "sensitive free text must not be copied",
                 "proposed_price": 42_000,
             },
         ).to_dict()
 
         self.assertEqual(review["request_id"], "review-001")
-        self.assertEqual(review["draft_id"], "draft-001")
-        self.assertEqual(review["status"], "no_results")
+        self.assertIsNone(review["draft_id"])
+        self.assertEqual(review["status"], "partial")
         self.assertEqual(review["category_price_comparison"], [])
         self.assertEqual(review["material_cost_analysis"], [])
         self.assertEqual(review["customer_segment_analysis"], [])
         missing_fields = {entry["field"] for entry in review["missing_data"]}
         self.assertEqual(missing_fields, {"historical_hm_transaction_prices", "fabric_costs", "customer_segments"})
-        self.assertEqual(review["margin_estimate"]["status"], "no_results")
+        self.assertEqual(review["margin_estimate"]["status"], "benchmark_only")
         self.assertNotIn("target_customer", str(review))
         self.assertNotIn("42_000", str(review))
 
-    def test_rejects_non_object_draft(self):
+    def test_rejects_non_object_product_context(self):
         result = MarketResearchAgent().run(
             MarketResearchContext(request_id="review-002", planning_request={})
         )
         with self.assertRaises(TypeError):
-            build_sales_market_review(result, planning_draft=[])  # type: ignore[arg-type]
-
-    def test_complete_cost_sheet_adds_a_partial_review_without_filling_other_sources(self):
-        result = MarketResearchAgent().run(
-            MarketResearchContext(request_id="review-003", planning_request={})
-        )
-        review = build_sales_market_review(
-            result,
-            planning_draft={
-                "draft_id": "draft-003",
-                "product": {"category": "Outerwear", "proposed_price": 10000, "currency": "KRW"},
-                "costing": costing_input(),
-            },
-        ).to_dict()
-        self.assertEqual(review["status"], "partial")
-        self.assertEqual(review["margin_estimate"]["status"], "ok")
-        self.assertEqual(review["margin_estimate"]["calculation"]["landed_cost"], 5009)
-        self.assertEqual(review["category_price_comparison"], [])
-        self.assertEqual(review["material_cost_analysis"][0]["source_type"], "planning_draft_costing_input")
-        self.assertEqual(review["material_cost_analysis"][0]["source_verification"], "caller_supplied_not_independently_verified")
+            build_sales_market_review(result, product_context=[])  # type: ignore[arg-type]
 
 
 if __name__ == "__main__":

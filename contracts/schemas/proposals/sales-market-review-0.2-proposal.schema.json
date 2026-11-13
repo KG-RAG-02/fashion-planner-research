@@ -1,0 +1,35 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vogue:sales-market-review:0.2:proposal",
+  "title": "Project_07 minimal product review proposal request",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["contract_version", "request_id", "input"],
+  "properties": {
+    "contract_version": {"const": "vogue-sales-market-review/0.2-proposal"},
+    "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["request_id", "product"],
+      "properties": {
+        "request_id": {"type": "string", "minLength": 1, "maxLength": 128},
+        "product": {"$ref": "#/$defs/product"}
+      }
+    }
+  },
+  "$defs": {
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["category"],
+      "properties": {
+        "category": {"type": "string", "minLength": 1, "maxLength": 120, "pattern": ".*\\S.*"},
+        "product_type": {"type": ["string", "null"], "minLength": 1, "maxLength": 120, "pattern": ".*\\S.*"},
+        "gender": {"enum": ["women", "men", "unisex", "unknown", null]},
+        "season": {"type": ["string", "null"], "minLength": 1, "maxLength": 120, "pattern": ".*\\S.*"},
+        "material": {"type": ["string", "null"], "minLength": 1, "maxLength": 120, "pattern": ".*\\S.*"}
+      }
+    }
+  }
+}

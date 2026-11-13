@@ -1,0 +1,14 @@
+{
+  "contract_version": "vogue-sales-market-review/0.2-proposal",
+  "request_id": "review-001",
+  "input": {
+    "request_id": "review-001",
+    "product": {
+      "category": "Outerwear",
+      "product_type": "Jacket",
+      "gender": "women",
+      "season": "winter",
+      "material": "wool blend"
+    }
+  }
+}

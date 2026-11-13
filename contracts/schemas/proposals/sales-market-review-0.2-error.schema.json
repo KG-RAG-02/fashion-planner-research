@@ -1,13 +1,13 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:vogue:handoff:0.1:project-07:error",
-  "title": "VOGUE handoff v0.1 transport error",
+  "$id": "urn:vogue:sales-market-review:0.2:error",
+  "title": "Project_07 review proposal error response",
   "type": "object",
   "additionalProperties": false,
   "required": ["contract_version", "request_id", "error"],
   "properties": {
-    "contract_version": {"const": "vogue-handoff/0.1"},
-    "request_id": {"type": ["string", "null"]},
+    "contract_version": {"const": "vogue-sales-market-review/0.2-proposal"},
+    "request_id": {"type": ["string", "null"], "maxLength": 128},
     "error": {
       "type": "object",
       "additionalProperties": false,

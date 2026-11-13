@@ -12,7 +12,6 @@ from statistics import median
 from typing import Any
 
 from .apparel_costing import (
-    calculate_apparel_margin,
     calculate_benchmark_margin_estimate,
     calculate_price_range_margin_analysis,
 )
@@ -85,8 +84,7 @@ class SalesMarketReview:
             "evidence_areas": {
                 "category_price": bool(self.category_price_comparison),
                 "material_cost": any(
-                    row.get("source_type") != "planning_draft_costing_input"
-                    and row.get("verified_price_per_meter_available") is True
+                    row.get("verified_price_per_meter_available") is True
                     for row in self.material_cost_analysis
                 ),
                 "margin": self.margin_estimate.get("status") == "ok",
@@ -151,7 +149,7 @@ class SalesMarketReview:
             })
         margin_analysis = {
             "status": self.margin_estimate.get("status", "no_results"),
-            "basis": "complete_apparel_costing_sheet" if self.margin_estimate.get("status") == "ok" else self.margin_estimate.get("basis"),
+            "basis": self.margin_estimate.get("basis"),
             "formula": (
                 self.margin_estimate.get("formula", {}).get("gross_margin_rate")
                 if isinstance(self.margin_estimate.get("formula"), dict)
@@ -161,16 +159,14 @@ class SalesMarketReview:
                 if self.margin_estimate.get("status") in {"benchmark_estimate", "benchmark_only"}
                 else None
             ),
-            "selling_price": self.margin_estimate.get("basis_price", self.margin_estimate.get("selling_price")),
+            "selling_price": self.margin_estimate.get("selling_price"),
             "currency": self.margin_estimate.get("currency"),
             "margin_rate_percent": (
-                round(self.margin_estimate["calculation"]["gross_margin_rate"] * 100, 4)
-                if self.margin_estimate.get("status") == "ok" else
                 round(self.margin_estimate["benchmark_gross_margin_rate"] * 100, 2)
                 if self.margin_estimate.get("status") in {"benchmark_estimate", "benchmark_only"}
                 and isinstance(self.margin_estimate.get("benchmark_gross_margin_rate"), (int, float)) else None
             ),
-            "estimate_type": self.margin_estimate.get("estimate_type", "caller_supplied_cost_sheet"),
+            "estimate_type": self.margin_estimate.get("estimate_type"),
         }
         if self.margin_estimate.get("status") == "benchmark_estimate":
             margin_analysis.update({
@@ -232,18 +228,8 @@ class SalesMarketReview:
         }
 
 
-def _draft_id(draft: dict[str, Any]) -> str | None:
-    """Read only stable identifier aliases; never inspect or serialize draft PII."""
-    for field in ("draft_id", "planning_draft_id", "id"):
-        value = draft.get(field)
-        if isinstance(value, str) and value.strip():
-            return value.strip()
-    return None
-
-
-def _draft_context(draft: dict[str, Any]) -> dict[str, Any]:
-    """Return only the allowlisted non-personal product fields."""
-    product = draft.get("product")
+def _product_context(product: dict[str, Any]) -> dict[str, Any]:
+    """Keep only the P07 product attributes in the internal review result."""
     if not isinstance(product, dict):
         return {}
     allowed = ("category", "product_type", "gender", "season", "material")
@@ -254,75 +240,33 @@ def _draft_context(draft: dict[str, Any]) -> dict[str, Any]:
     }
     if isinstance(context.get("gender"), str):
         context["gender"] = context["gender"].casefold()
-    price = product.get("proposed_price")
-    currency = product.get("currency")
-    if isinstance(price, (int, float)) and not isinstance(price, bool):
-        context["proposed_price"] = price
-    if isinstance(currency, str) and currency.strip():
-        context["currency"] = currency.strip().upper()
     return context
-
-
-_AGE_LABELS_KO = {
-    "under_20": "20세 미만", "20_29": "20대", "30_39": "30대",
-    "40_49": "40대", "50_plus": "50대 이상",
-}
-_STYLE_LABELS_KO = {
-    "datewear": "데이트룩", "officewear": "오피스룩", "casualwear": "캐주얼룩",
-    "sportwear": "스포츠룩", "formalwear": "포멀룩", "occasionwear": "행사·파티룩",
-    "streetwear": "스트리트룩", "other": "기타 스타일", "uncertain": "판단이 불확실한 스타일",
-}
-
-
-def _target_sentence(profile: dict[str, Any], style: dict[str, Any], product: dict[str, Any]) -> str | None:
-    cohort = profile.get("target_age_cohort")
-    cohort_label = {"under_20": "20세 미만", "20_39": "20~30대", "40_plus": "40대 이상"}
-    if isinstance(cohort, dict) and cohort.get("age_band") in cohort_label and not cohort.get("suppressed"):
-        age_text = cohort_label[cohort["age_band"]]
-    else:
-        age_text = None
-    bands = [item for item in profile.get("age_bands", [])
-             if item.get("age_band") in _AGE_LABELS_KO and item.get("unique_customer_count") is not None]
-    bands.sort(key=lambda item: item["unique_customer_count"], reverse=True)
-    if not bands or not age_text:
-        return None
-    gender = {"women": "여성용", "men": "남성용"}.get(str(product.get("gender", "")).casefold(), "")
-    style_text = _STYLE_LABELS_KO.get(style.get("style_label"), "스타일")
-    target_phrase = " ".join(part for part in (age_text, gender, style_text) if part)
-    return (
-        f"H&M 과거 연구 자료에서 이 카테고리의 {age_text} 연령대 비중이 가장 높게 관측되었습니다. "
-        f"이미지 스타일 해석을 결합한 비상업적 연구 가설은 '{target_phrase}'입니다."
-    )
 
 
 def build_sales_market_review(
     result: MarketResearchResult,
     *,
-    planning_draft: dict[str, Any],
+    product_context: dict[str, Any],
     fabric_price_analysis: tuple[dict[str, Any], ...] = (),
     fabric_price_error: str | None = None,
     historical_price_analysis: dict[str, Any] | None = None,
     historical_price_error: str | None = None,
     customer_age_profile: dict[str, Any] | None = None,
     customer_age_error: str | None = None,
-    image_style_analysis: dict[str, Any] | None = None,
-    image_style_error: str | None = None,
-    image_style_requested: bool = False,
     target_audience_proposal: dict[str, Any] | None = None,
 ) -> SalesMarketReview:
     """Adapt an existing result into an internal review shape.
 
-    Product attributes are taken only from validated PlanningDraft fields.
+    Product attributes are restricted to the P06 bridge's five-field projection.
     Fabric and historical H&M price analyses are supplied by read-only R2 sources.
     """
-    if not isinstance(planning_draft, dict):
-        raise TypeError("planning_draft must be an object.")
+    if not isinstance(product_context, dict):
+        raise TypeError("product_context must be an object.")
     if not isinstance(result, MarketResearchResult):
         raise TypeError("result must be a MarketResearchResult.")
 
-    unit = result.unit_economics
-    draft_context = _draft_context(planning_draft)
-    product = planning_draft.get("product") if isinstance(planning_draft.get("product"), dict) else {}
+    safe_product_context = _product_context(product_context)
+    product = safe_product_context
     errors: list[dict[str, Any]] = [
         {"code": item.code, "message": item.message} for item in result.errors
     ]
@@ -332,8 +276,6 @@ def build_sales_market_review(
         errors.append({"code": "HM_HISTORICAL_PRICE_RESEARCH_FAILED", "message": historical_price_error})
     if fabric_price_error:
         errors.append({"code": "R2_FABRIC_PRICE_READ_FAILED", "message": fabric_price_error})
-    if image_style_error:
-        errors.append({"code": "IMAGE_STYLE_ANALYSIS_FAILED", "message": image_style_error})
     missing: list[dict[str, Any]] = []
     fabrics = list(fabric_price_analysis)
     if historical_price_analysis is None:
@@ -348,50 +290,25 @@ def build_sales_market_review(
         missing.append({"field": "customer_segments",
                         "reason": "source_error" if customer_age_error else "source_not_configured_or_disabled",
                         "message": customer_age_error or "Enable non-commercial H&M research mode and configure its R2 source."})
-    if image_style_requested and image_style_analysis is None:
-        missing.append({"field": "image_style_analysis",
-                        "reason": "analysis_error" if image_style_error else "not_requested_or_not_authorized",
-                        "message": image_style_error or "Request image style analysis explicitly and enable image egress authorization."})
-    costing = planning_draft.get("costing")
-    margin_price = draft_context.get("proposed_price")
-    margin_currency = draft_context.get("currency")
-    if margin_price is None and historical_price_analysis is not None:
-        conversion = historical_price_analysis.get("usd_krw_conversion", {})
-        margin_price = conversion.get("suggested_price_krw")
-        if margin_price is not None:
-            margin_currency = "KRW"
-    if costing is not None:
-        margin = calculate_apparel_margin(
-            proposed_price=margin_price,
-            price_currency=margin_currency,
-            costing=costing,
-        )
-    else:
-        fabric_unit_cost, fabric_unit, fabric_record_ids = _fabric_reference(tuple(fabrics))
-        margin = calculate_benchmark_margin_estimate(
-            selling_price=margin_price, currency=margin_currency,
-            fabric_unit_cost=fabric_unit_cost, fabric_unit=fabric_unit,
-        )
-        if fabric_record_ids:
-            margin["fabric_reference_record_ids"] = fabric_record_ids
-        if margin_price is None:
-            margin["status"] = "benchmark_only"
+    conversion = historical_price_analysis.get("usd_krw_conversion", {}) if historical_price_analysis else {}
+    margin_price = conversion.get("suggested_price_krw")
+    margin_currency = "KRW" if margin_price is not None else None
+    fabric_unit_cost, fabric_unit, fabric_record_ids = _fabric_reference(tuple(fabrics))
+    margin = calculate_benchmark_margin_estimate(
+        selling_price=margin_price, currency=margin_currency,
+        fabric_unit_cost=fabric_unit_cost, fabric_unit=fabric_unit,
+    )
+    if fabric_record_ids:
+        margin["fabric_reference_record_ids"] = fabric_record_ids
+    if margin_price is None:
+        margin["status"] = "benchmark_only"
     limitations = list(result.limitations)
     if result.status.value in {"ok", "partial"}:
         limitations.append(
             "This internal review adapter is not an approved shared SalesMarketReview contract."
         )
     review_status = result.status.value
-    if review_status in {"no_results", "error"} and margin.get("status") == "ok":
-        review_status = "partial"
-    material_rows = tuple(
-        {
-            **item,
-            "source_type": "planning_draft_costing_input",
-            "source_verification": "caller_supplied_not_independently_verified",
-        }
-        for item in margin.get("materials", [])
-    )
+    material_rows: tuple[dict[str, Any], ...] = ()
     if fabrics:
         material_rows += tuple(fabrics)
     if margin.get("status") in {"benchmark_estimate", "benchmark_only"}:
@@ -406,24 +323,18 @@ def build_sales_market_review(
     if customer_age_profile is not None:
         review_status = "partial"
         limitations.append("H&M age-band profiles are historical non-commercial research only; they are not current VOGUE customer behavior or demand.")
-    if image_style_analysis is not None and review_status in {"no_results", "error"}:
-        review_status = "partial"
-    target_sentence = (
-        _target_sentence(customer_age_profile, image_style_analysis, product)
-        if customer_age_profile is not None and image_style_analysis is not None else None
-    )
     target_audience_status = (
-        "ok" if customer_age_profile is not None and image_style_analysis is not None
-        else "partial" if customer_age_profile is not None or image_style_analysis is not None or target_audience_proposal is not None
+        "ok" if target_audience_proposal is not None
+        else "partial" if customer_age_profile is not None
         else "no_results"
     )
     return SalesMarketReview(
         schema_version=REVIEW_SCHEMA_VERSION,
         request_id=result.request_id,
-        draft_id=_draft_id(planning_draft),
+        draft_id=None,
         producer_id=result.agent_id,
         status=review_status,
-        draft_context=draft_context,
+        draft_context=safe_product_context,
         category_price_comparison=(historical_price_analysis,) if historical_price_analysis else (),
         material_cost_analysis=material_rows,
         customer_segment_analysis=(
@@ -433,11 +344,8 @@ def build_sales_market_review(
             "status": target_audience_status,
             "proposal": target_audience_proposal,
             "age_cohort": customer_age_profile.get("target_age_cohort") if customer_age_profile else None,
-            "style_analysis": image_style_analysis,
-            "target_sentence": target_sentence,
             "limitations": list(dict.fromkeys(
                 (["Age profile is unavailable or disabled."] if customer_age_profile is None else [])
-                + (["Image style analysis was not requested, authorized, or completed."] if image_style_analysis is None else [])
                 + (["LLM target hypothesis is unavailable or not authorized."] if target_audience_proposal is None else [])
             )),
         },
