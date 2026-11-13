@@ -10,3 +10,5 @@ Only schemas used by the active `POST /v1/agents/sales-market-agent/reviews` end
 The request accepts required `category` and optional `product_type`, `gender`, `season`, and `material`. The P06 review bridge extracts these fields from its validated product profile. P07 does not accept a full P06 draft, price/currency, costing, image references, or P06 evidence metadata. P08 receives P07's response through P06 and does not call P07 directly.
 
 The request/response envelope version is `vogue-sales-market-review/0.2-proposal`; the producer result schema remains `sales-market-review/0.1-internal`. The former `/runs`, `/structured-runs`, and synthetic simulation schemas were removed with their retired routes. Domain serializers and analysis code are not wire contracts for this HTTP API.
+
+For local P07 requests and the currently observed P06 bridge integration status, see [`P06 → P07 loopback check`](../docs/integration/p06-p07-review-loopback.md). The document records the P06 0.1-to-P07 0.2 mismatch found in the local sibling checkout; it does not claim that the bridge is already passing.

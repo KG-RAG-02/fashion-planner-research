@@ -1,4 +1,4 @@
-"""HTTP tests for the PlanningDraft post-review API."""
+"""HTTP tests for the minimal product review API."""
 
 from __future__ import annotations
 
@@ -72,6 +72,9 @@ class Project07ReviewHttpTests(unittest.TestCase):
         self.assertEqual(response["producer"]["schema_version"], "sales-market-review/0.1-internal")
         self.assertEqual(response["request_id"], "review-http-001")
         self.assertEqual(response["status"], response["result"]["status"])
+        self.assertEqual(response["result"]["request_id"], response["request_id"])
+        self.assertEqual(response["result"]["producer_id"], response["producer"]["agent_id"])
+        self.assertEqual(response["result"]["schema_version"], response["producer"]["schema_version"])
         self.assertEqual(response["result"]["draft_id"], None)
         self.assertEqual(response["result"]["draft_context"], {
             "category": "Outerwear", "product_type": "Jacket", "gender": "women",
