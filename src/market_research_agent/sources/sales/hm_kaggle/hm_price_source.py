@@ -12,6 +12,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ....sources.shared.r2_object_store import R2ObjectStore, R2Settings
+from ....sources.shared.r2_source_manifest import r2_source_key
 
 
 class HmPriceSourceError(RuntimeError):
@@ -47,7 +48,8 @@ class HmHistoricalPriceResearchSource:
         self.articles_key = articles_key
         self.transactions_key = transactions_key
 
-    def analyze(self, category: str, *, gender: str | None = None) -> dict[str, Any] | None:
+    def analyze(self, category: str, *, gender: str | None = None,
+                product_type: str | None = None, season: str | None = None) -> dict[str, Any] | None:
         if os.getenv("VOGUE_HM_RESEARCH_NONCOMMERCIAL", "").strip().casefold() not in {"1", "true", "yes"}:
             raise HmPriceSourceError(
                 "Set VOGUE_HM_RESEARCH_NONCOMMERCIAL=true only for non-commercial research use."
@@ -60,9 +62,15 @@ class HmHistoricalPriceResearchSource:
             raise HmPriceSourceError("H&M price research requires the optional duckdb dependency.") from None
         try:
             store = self.store or R2ObjectStore.from_env()
-            articles_key = _checked_key(self.articles_key or os.getenv("PROJECT07_HM_ARTICLES_R2_KEY", ""), "articles.parquet")
+            articles_key = _checked_key(self.articles_key or r2_source_key(
+                "hm_articles", default="articles.parquet",
+                legacy_envs=("PROJECT07_HM_ARTICLES_R2_KEY", "PROJECT07_HM_R2_ARTICLES_KEY"),
+            ), "articles.parquet")
             transactions_key = _checked_key(
-                self.transactions_key or os.getenv("PROJECT07_HM_TRANSACTIONS_R2_KEY", ""),
+                self.transactions_key or r2_source_key(
+                    "hm_transactions", default="transactions_train.parquet",
+                    legacy_envs=("PROJECT07_HM_TRANSACTIONS_R2_KEY", "PROJECT07_HM_R2_TRANSACTIONS_KEY"),
+                ),
                 "transactions_train.parquet",
             )
             client = store._get_client()
@@ -82,12 +90,13 @@ class HmHistoricalPriceResearchSource:
             versions = tuple(ref["version"] for ref in object_refs)
             cache_key = (store.settings.bucket, articles_key, transactions_key, *versions,
                          mapping["mapping_version"], mapping_digest,
-                         category.strip().casefold(), (gender or "").strip().casefold())
+                         category.strip().casefold(), (gender or "").strip().casefold(),
+                         (product_type or "").strip().casefold(), (season or "").strip().casefold())
             with _CACHE_LOCK:
                 if cache_key not in _CACHE:
                     _CACHE[cache_key] = self._query(
                         duckdb, store.settings, (articles_key, transactions_key), versions, mapping,
-                        mapping_digest, category.strip(), gender,
+                        mapping_digest, category.strip(), gender, product_type, season,
                     )
                 return _CACHE[cache_key]
         except HmPriceSourceError:
@@ -98,7 +107,7 @@ class HmHistoricalPriceResearchSource:
     @staticmethod
     def _query(duckdb: Any, settings: R2Settings, keys: tuple[str, str], versions: tuple[str, str],
                mapping: dict[str, Any], mapping_digest: str, requested_category: str,
-               gender: str | None) -> dict[str, Any] | None:
+               gender: str | None, product_type: str | None, season: str | None) -> dict[str, Any] | None:
         conn = duckdb.connect()
         try:
             extension_dir = os.getenv("VOGUE_DUCKDB_EXTENSION_DIRECTORY", "").strip()
@@ -122,12 +131,14 @@ class HmHistoricalPriceResearchSource:
             conn.executemany("INSERT INTO hm_category_map VALUES (?, ?, ?)", map_rows)
             articles_uri = _sql_string(f"s3://{settings.bucket}/{keys[0]}")
             transactions_uri = _sql_string(f"s3://{settings.bucket}/{keys[1]}")
+            mapped_product_type = mapping.get("product_type_name", {}).get(product_type or "")
+            query_category = mapped_product_type or requested_category
             expected_segment = {"women": "ladieswear", "men": "menswear"}.get(
                 (gender or "").strip().casefold()
             )
             row = conn.execute(f"""
                 WITH mapped_articles AS (
-                    SELECT a.article_id, a.index_group_name,
+                    SELECT a.article_id, a.index_group_name, a.product_type_name,
                            COALESCE(type_map.mapped_category, group_map.mapped_category) AS category
                     FROM read_parquet({articles_uri}) AS a
                     LEFT JOIN hm_category_map AS type_map
@@ -151,7 +162,7 @@ class HmHistoricalPriceResearchSource:
                   AND lower(a.category) = lower(?)
                   AND (? IS NULL OR lower(COALESCE(a.index_group_name, '')) = lower(?))
                 GROUP BY 1
-            """, [requested_category, expected_segment, expected_segment]).fetchone()
+            """, [query_category, expected_segment, expected_segment]).fetchone()
             if row is None:
                 return None
             transaction_rows = int(row[1])
@@ -162,6 +173,10 @@ class HmHistoricalPriceResearchSource:
                 "permission_status": "non_commercial_research_only",
                 "operational_eligible": False,
                 "category": requested_category,
+                "mapped_product_type_category": query_category if mapped_product_type else None,
+                "product_type_filter": None,
+                "requested_product_type_context": product_type,
+                "season_filter": None,
                 "category_mapping": {
                     "mapping_id": mapping["mapping_id"],
                     "mapping_version": mapping["mapping_version"],
@@ -181,8 +196,20 @@ class HmHistoricalPriceResearchSource:
                     "maximum": float(row[7]),
                     "mean": float(row[8]),
                     "currency": None,
-                    "unit": "normalized_source_price; currency and conversion factor are not asserted",
+                    "unit": "normalized_source_price; currency not provided",
                     "statistic": "transaction_price_distribution; unweighted transaction rows",
+                },
+                "scaled_price_statistics": {
+                    "scale_factor": 590,
+                    "minimum": float(row[3]) * 590,
+                    "p25": float(row[4]) * 590,
+                    "median": float(row[5]) * 590,
+                    "p75": float(row[6]) * 590,
+                    "maximum": float(row[7]) * 590,
+                    "mean": float(row[8]) * 590,
+                    "currency": "USD",
+                    "unit": "USD/transaction (×590 scaling convention; not an H&M-published currency label)",
+                    "method_source": "user-selected USD interpretation of ×590 scaling convention cited by published research",
                 },
                 "sources": [
                     {"object_key": key, "version": version}
@@ -190,7 +217,8 @@ class HmHistoricalPriceResearchSource:
                 ],
                 "limitations": [
                     "Historical H&M Kaggle competition data; non-commercial research only, not current market pricing.",
-                    "The Kaggle source price is treated as a normalized numeric value; currency and conversion factor are not asserted.",
+                    "The source price is normalized/anonymized. USD is assigned to the ×590 scale per user instruction; Kaggle does not publish this currency mapping as official metadata.",
+                    "The source has no season field; requested season is retained as context but is not used as a data filter.",
                     "This is a transaction-price distribution, not a current listing price, regular price, or sale-price comparison.",
                     "Source sales channel IDs remain codes and are not assigned online/store meanings.",
                     "Product taxonomy mapping is an approximate crosswalk; unmapped source categories are excluded.",

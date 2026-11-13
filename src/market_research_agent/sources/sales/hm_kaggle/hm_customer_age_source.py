@@ -17,6 +17,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from ....sources.shared.r2_object_store import R2ObjectStore, R2Settings
+from ....sources.shared.r2_source_manifest import r2_source_key
 
 
 class CustomerAgeSourceError(RuntimeError):
@@ -162,9 +163,18 @@ class HmCustomerAgeResearchSource:
             store = self.store or R2ObjectStore.from_env()
         except Exception:
             raise CustomerAgeSourceError("R2 research access is not configured safely.") from None
-        customers_key = _checked_key(self.customers_key or os.getenv("PROJECT07_HM_CUSTOMERS_R2_KEY", ""), "customers.csv")
-        articles_key = _checked_key(self.articles_key or os.getenv("PROJECT07_HM_ARTICLES_R2_KEY", ""), "articles.parquet")
-        transactions_key = _checked_key(self.transactions_key or os.getenv("PROJECT07_HM_TRANSACTIONS_R2_KEY", ""), "transactions_train.parquet")
+        customers_key = _checked_key(self.customers_key or r2_source_key(
+            "hm_customers", default="customers.csv",
+            legacy_envs=("PROJECT07_HM_CUSTOMERS_R2_KEY", "PROJECT07_HM_R2_CUSTOMERS_KEY"),
+        ), "customers.csv")
+        articles_key = _checked_key(self.articles_key or r2_source_key(
+            "hm_articles", default="articles.parquet",
+            legacy_envs=("PROJECT07_HM_ARTICLES_R2_KEY", "PROJECT07_HM_R2_ARTICLES_KEY"),
+        ), "articles.parquet")
+        transactions_key = _checked_key(self.transactions_key or r2_source_key(
+            "hm_transactions", default="transactions_train.parquet",
+            legacy_envs=("PROJECT07_HM_TRANSACTIONS_R2_KEY", "PROJECT07_HM_R2_TRANSACTIONS_KEY"),
+        ), "transactions_train.parquet")
         keys = (customers_key, articles_key, transactions_key)
         try:
             client = store._get_client()
@@ -187,7 +197,14 @@ class HmCustomerAgeResearchSource:
                     aggregate_map = self._query_aggregates(duckdb, store.settings, keys, mapping, tuple(versions))
                     _CACHE[cache_key] = aggregate_map
             gender_key = "" if (gender or "").casefold() in {"", "unknown", "unisex"} else gender.casefold()
-            profile = aggregate_map.get((category.strip().casefold(), gender_key))
+            category_key = category.strip().casefold()
+            profile = aggregate_map.get((category_key, gender_key))
+            if profile is None:
+                mapped_category = mapping.get("product_type_name", {}).get(category.strip())
+                if mapped_category:
+                    profile = aggregate_map.get((mapped_category.casefold(), gender_key))
+                    if profile is not None:
+                        profile = {**profile, "requested_product_type_context": category.strip()}
             if profile is None:
                 return None
             return profile
@@ -275,6 +292,24 @@ class HmCustomerAgeResearchSource:
                     )
                     if profile is not None:
                         aggregate_map[(category.casefold(), gender_key)] = profile
+            # VOGUE PlanningDraft category names may be broader than H&M's
+            # mapped merchandise labels. Add exact H&M product-type aliases to
+            # the same aggregate without counting customers twice.
+            for product_type, mapped_category in mapping["product_type_name"].items():
+                source_rows = [row for row in rows if str(row[0]).strip().casefold() == mapped_category.casefold()]
+                if not source_rows:
+                    continue
+                for gender_key, _segment, gender in genders:
+                    profile = _build_profiles(
+                        rows, requested_category=mapped_category, gender=gender,
+                        mapping_id=mapping["mapping_id"], mapping_version=mapping["mapping_version"],
+                        source_refs=tuple({"object_key": key, "version": version}
+                                          for key, version in zip(keys, versions, strict=True)),
+                    )
+                    if profile is not None:
+                        aggregate_map[(product_type.casefold(), gender_key)] = {
+                            **profile, "requested_product_type_context": product_type,
+                        }
             return aggregate_map
         finally:
             conn.close()

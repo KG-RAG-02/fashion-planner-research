@@ -1,25 +1,16 @@
 services:
-  market-research-agent:
+  sales-market-review-agent:
     build:
       context: .
-    image: vogue-market-research-agent:local
+    image: vogue-sales-market-review-agent:local
     network_mode: none
     init: true
     restart: unless-stopped
 
-  market-research-agent-demo:
+  sales-market-review-agent-tests:
     build:
       context: .
-    image: vogue-market-research-agent:local
-    command: ["python", "examples/synthetic_demo.py"]
-    network_mode: none
-    profiles: ["tools"]
-    restart: "no"
-
-  market-research-agent-tests:
-    build:
-      context: .
-    image: vogue-market-research-agent:local
+    image: vogue-sales-market-review-agent:local
     command: ["python", "-m", "unittest", "discover", "-s", "tests", "-v"]
     network_mode: none
     profiles: ["test"]

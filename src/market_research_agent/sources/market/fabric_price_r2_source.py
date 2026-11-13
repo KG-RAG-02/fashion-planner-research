@@ -13,6 +13,7 @@ from statistics import median
 from typing import Any
 
 from ..shared.r2_object_store import R2ObjectError, R2ObjectStore
+from ..shared.r2_source_manifest import r2_source_key
 
 
 DEFAULT_FABRIC_PRICE_KEY = "example/fabric-prices/fabric_price_list.csv"
@@ -20,7 +21,7 @@ _MAX_BYTES = 1_000_000
 _REQUIRED_COLUMNS = {
     "record_id", "product_name", "category", "composition", "construction_or_finish",
     "weight_g_per_cut", "width_cm", "color", "original_unit", "price_amount", "currency",
-    "unit_price_krw_per_meter", "supplier", "shipping_terms", "source_url", "observed_at",
+    "supplier", "shipping_terms", "source_url", "observed_at",
     "price_history_status", "source_page_type", "estimated_sales_unit",
     "estimated_length_m",
     "unit_price_estimation_status", "unit_price_estimation_method",
@@ -30,8 +31,14 @@ _MATERIAL_ALIASES = {
     "linen": ("린넨",), "cotton": ("면",), "denim": ("데님",),
     "nylon": ("나일론",), "polyester": ("폴리",),
     "spandex": ("스판",), "elastane": ("스판",),
+    "wool": ("울", "모직"), "cashmere": ("캐시미어",),
+    "viscose": ("레이온", "인견"), "rayon": ("레이온", "인견"),
+    "acrylic": ("아크릴",), "modal": ("모달",), "lyocell": ("텐셀", "리오셀"),
+    "tencel": ("텐셀", "리오셀"), "silk": ("실크", "명주"),
+    "leather": ("레더", "가죽"), "polyurethane": ("폴리우레탄", "우레탄"),
 }
 _CACHE: dict[tuple[str, str, str, str], tuple[dict[str, Any], ...]] = {}
+_OBJECT_CACHE: dict[tuple[str, str, str], tuple[bytes, str]] = {}
 _CACHE_LOCK = threading.Lock()
 
 
@@ -65,8 +72,10 @@ class R2FabricPriceSource:
 
     def __init__(self, store: R2ObjectStore | None = None, *, object_key: str | None = None) -> None:
         self.store = store
-        self.object_key = (object_key or os.getenv("PROJECT07_FABRIC_PRICE_R2_KEY", "").strip()
-                           or DEFAULT_FABRIC_PRICE_KEY)
+        self.object_key = object_key or r2_source_key(
+            "fabric_prices", default=DEFAULT_FABRIC_PRICE_KEY,
+            legacy_envs=("PROJECT07_FABRIC_PRICE_R2_KEY",),
+        )
 
     def analyze(self, product: dict[str, Any]) -> tuple[dict[str, Any], ...]:
         material = product.get("material") if isinstance(product, dict) else None
@@ -82,15 +91,21 @@ class R2FabricPriceSource:
             cache_key = (store.settings.bucket, self.object_key, version, _normalize(material))
             with _CACHE_LOCK:
                 if cache_key not in _CACHE:
-                    content, metadata = store.get_bytes_and_metadata(self.object_key, max_bytes=_MAX_BYTES)
-                    after = store._get_client().head_object(Bucket=store.settings.bucket, Key=self.object_key)
-                    after_version = str(after.get("VersionId") or after.get("ETag", "")).strip('"')
-                    if after_version != version:
-                        raise FabricPriceSourceError("The R2 fabric price snapshot changed during the read.")
-                    expected_hash = metadata.get("sha256")
-                    actual_hash = hashlib.sha256(content).hexdigest()
-                    if expected_hash and expected_hash.casefold() != actual_hash:
-                        raise FabricPriceSourceError("The R2 fabric price object's SHA-256 metadata does not match.")
+                    object_cache_key = (store.settings.bucket, self.object_key, version)
+                    cached_object = _OBJECT_CACHE.get(object_cache_key)
+                    if cached_object is None:
+                        content, metadata = store.get_bytes_and_metadata(self.object_key, max_bytes=_MAX_BYTES)
+                        after = store._get_client().head_object(Bucket=store.settings.bucket, Key=self.object_key)
+                        after_version = str(after.get("VersionId") or after.get("ETag", "")).strip('"')
+                        if after_version != version:
+                            raise FabricPriceSourceError("The R2 fabric price snapshot changed during the read.")
+                        expected_hash = metadata.get("sha256")
+                        actual_hash = hashlib.sha256(content).hexdigest()
+                        if expected_hash and expected_hash.casefold() != actual_hash:
+                            raise FabricPriceSourceError("The R2 fabric price object's SHA-256 metadata does not match.")
+                        _OBJECT_CACHE[object_cache_key] = (content, actual_hash)
+                    else:
+                        content, actual_hash = cached_object
                     _CACHE[cache_key] = self._analyze_csv(
                         content, material.strip(), version=version,
                         sha256=actual_hash, object_key=self.object_key,

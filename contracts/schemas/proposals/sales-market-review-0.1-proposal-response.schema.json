@@ -21,7 +21,7 @@
     "result": {
       "type": "object",
       "additionalProperties": false,
-      "required": ["schema_version", "request_id", "draft_id", "producer_id", "status", "draft_context", "category_price_comparison", "material_cost_analysis", "customer_segment_analysis", "target_audience_analysis", "margin_estimate", "evidence", "missing_data", "errors", "limitations"],
+      "required": ["schema_version", "request_id", "draft_id", "producer_id", "status", "draft_context", "category_price_comparison", "material_cost_analysis", "customer_segment_analysis", "target_audience_analysis", "margin_estimate", "evidence", "missing_data", "errors", "limitations", "decision_support", "price_analysis", "fabric_cost_analysis", "margin_analysis", "target_audience"],
       "properties": {
         "schema_version": {"const": "sales-market-review/0.1-internal"},
         "request_id": {"type": "string"},
@@ -37,7 +37,32 @@
         "evidence": {"type": "array"},
         "missing_data": {"type": "array"},
         "errors": {"type": "array"},
-        "limitations": {"type": "array", "items": {"type": "string"}}
+        "limitations": {"type": "array", "items": {"type": "string"}},
+        "decision_support": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["recommendation", "ready_for_human_decision", "evidence_areas", "human_decision_required"],
+          "properties": {
+            "recommendation": {"const": "review_required"},
+            "ready_for_human_decision": {"type": "boolean"},
+            "evidence_areas": {
+              "type": "object",
+              "additionalProperties": false,
+              "required": ["category_price", "material_cost", "margin", "customer_segments"],
+              "properties": {
+                "category_price": {"type": "boolean"},
+                "material_cost": {"type": "boolean"},
+                "margin": {"type": "boolean"},
+                "customer_segments": {"type": "boolean"}
+              }
+            },
+            "human_decision_required": {"const": true}
+          }
+        },
+        "price_analysis": {"type": "object"},
+        "fabric_cost_analysis": {"type": "object"},
+        "margin_analysis": {"type": "object"},
+        "target_audience": {"type": "object"}
       }
     }
   }
