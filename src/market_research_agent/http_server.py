@@ -1,4 +1,4 @@
-"""Loopback development HTTP adapter for PlanningDraft sales-market reviews.
+"""Loopback development HTTP adapter for P06 bridge product reviews.
 
 It supports explicit local source configuration from process environment. It
 remains a development adapter, not a production deployment or retry policy.
@@ -87,9 +87,7 @@ def context_from_review_request(value: Any) -> tuple[str, dict[str, Any]]:
     if gender is not None and gender not in {"women", "men", "unisex", "unknown"}:
         raise RequestValidationError("INVALID_GENDER", "input.product.gender must be women, men, unisex, or unknown.")
     _validate_json_tree(product, "input.product")
-    # The domain adapter still uses a product wrapper internally. Never pass
-    # through the producer's PlanningDraft or metadata beyond these fields.
-    return request_id, {"product": product}
+    return request_id, product
 
 
 def _reject_json_constant(value: str) -> None:
@@ -105,7 +103,7 @@ def _validate_json_tree(value: Any, field: str) -> None:
 
 def make_handler(
 ) -> type[BaseHTTPRequestHandler]:
-    """Create a handler dedicated to PlanningDraft post-review."""
+    """Create a handler for the minimal P06 bridge review contract."""
 
     class Project07Handler(BaseHTTPRequestHandler):
         server_version = "Project07Local/0.1"
@@ -176,7 +174,7 @@ def make_handler(
                 if len(raw_body) != length:
                     raise RequestValidationError("INCOMPLETE_BODY", "Request body was incomplete.", 400)
                 body = json.loads(raw_body, parse_constant=_reject_json_constant)
-                request_id, planning_draft = context_from_review_request(body)
+                request_id, product = context_from_review_request(body)
                 context = MarketResearchContext(request_id=request_id, planning_request={})
             except RequestValidationError as exc:
                 request_id = _safe_error_request_id(body.get("request_id")) if "body" in locals() and isinstance(body, dict) else None
@@ -197,7 +195,6 @@ def make_handler(
                     summary="Post-planning review is based only on connected, explicitly configured sources.",
                     limitations=(),
                 )
-                product = planning_draft.get("product", {})
                 research_bundle = HmCombinedResearchSource().analyze(product)
                 fabric_prices = research_bundle["fabric_prices"]
                 fabric_price_error = research_bundle["fabric_price_error"]
@@ -230,7 +227,7 @@ def make_handler(
                     except (LlmCallError, ValueError) as exc:
                         target_audience_error = str(exc)
                 review = build_sales_market_review(
-                    result, planning_draft=planning_draft,
+                    result, product_context=product,
                     fabric_price_analysis=fabric_prices,
                     fabric_price_error=fabric_price_error,
                     historical_price_analysis=historical_price,
@@ -270,7 +267,7 @@ def make_handler(
 
 
 def _load_project_r2_env() -> None:
-    """Load R2, H&M research, and image-egress feature settings from local .env."""
+    """Load R2, H&M research, and target-LLM settings from local .env."""
     if os.getenv("VOGUE_PROJECT07_DISABLE_DOTENV", "").casefold() in {"1", "true", "yes"}:
         return
     env_path = Path(__file__).resolve().parents[2] / ".env"
@@ -287,7 +284,6 @@ def _load_project_r2_env() -> None:
         if not separator or not (key.startswith("R2_") or key.startswith("VOGUE_HM_")
                                  or key.startswith("PROJECT07_HM_")
                                  or key == "PROJECT07_R2_SOURCE_MANIFEST"
-                                 or key == "VOGUE_IMAGE_LLM_TRANSFER_AUTHORIZED"
                                  or key == "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED"
                                  or key == "VOGUE_USD_KRW_FALLBACK_RATE"
                                  or key == "VOGUE_USD_KRW_FALLBACK_DATE"
@@ -309,7 +305,7 @@ def serve(
     host: str = "127.0.0.1",
     port: int = 8766,
 ) -> None:
-    """Start the loopback PlanningDraft review server."""
+    """Start the loopback P06 bridge review server."""
     _load_project_r2_env()
     if host not in {"127.0.0.1", "localhost"}:
         raise ValueError("The local proposal server may only bind to loopback.")
