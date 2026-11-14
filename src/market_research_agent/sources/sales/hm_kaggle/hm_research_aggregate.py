@@ -22,6 +22,7 @@ from urllib.parse import urlsplit
 from ...market.fabric_price_r2_source import DEFAULT_FABRIC_PRICE_KEY, R2FabricPriceSource
 from ....sources.shared.r2_object_store import R2ObjectError, R2ObjectStore, R2Settings
 from ....sources.shared.r2_source_manifest import r2_source_key
+from ....runtime_settings import hm_research_noncommercial_enabled
 from .duckdb_http import configure_httpfs
 from .hm_customer_age_source import (
     _CSV_COLUMNS, _MAPPING_PATH, _build_profiles, _checked_key, _mapped_requested_category,
@@ -30,6 +31,7 @@ from .hm_price_source import _sql_string
 
 
 SCHEMA_VERSION = "hm-sales-market-aggregate/1.1"
+_AGGREGATION_VERSION = "p07-hm-aggregate/2"
 _MAX_SOURCE_BYTES = {
     "hm_customers": 300_000_000,
     "hm_articles": 50_000_000,
@@ -48,6 +50,20 @@ _CACHE_MAX_SNAPSHOTS = 4
 def _mapping_digest(mapping: dict[str, Any]) -> str:
     return hashlib.sha256(
         json.dumps(mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
+def _snapshot_identifier(snapshot: dict[str, Any]) -> str:
+    """Hash all snapshot content, keeping compatibility with pre-v2 IDs."""
+    if "aggregation_version" in snapshot:
+        identity = {key: value for key, value in snapshot.items() if key != "snapshot_id"}
+    else:
+        # Existing 1.1 snapshots used source identity only; keep them readable.
+        identity = {key: snapshot[key] for key in (
+            "schema_version", "source_objects", "mapping_version", "mapping_fingerprint",
+        )}
+    return hashlib.sha256(
+        json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
 
 
@@ -190,6 +206,7 @@ def build_snapshot_payload(
     mapping: dict[str, Any], mapping_fingerprint: str,
     fabric_source_ref: dict[str, str] | None = None,
     fabric_listing_csv: str | None = None,
+    aggregation_version: str = _AGGREGATION_VERSION,
 ) -> dict[str, Any]:
     """Convert one combined DuckDB result into suppressed, category-level JSON."""
     age_rows = [
@@ -228,18 +245,16 @@ def build_snapshot_payload(
         "schema_version": SCHEMA_VERSION,
         "source_objects": source_objects, "mapping_version": mapping["mapping_version"],
         "mapping_fingerprint": mapping_fingerprint,
+        "aggregation_version": aggregation_version,
     }
-    snapshot_id = hashlib.sha256(
-        json.dumps(source_identity, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
     snapshot = {
-        "snapshot_id": snapshot_id,
         **source_identity,
         "profiles": profiles,
     }
     if fabric_source_ref is not None and fabric_listing_csv is not None:
         snapshot["fabric_source"] = fabric_source_ref
         snapshot["fabric_listing_csv"] = fabric_listing_csv
+    snapshot["snapshot_id"] = _snapshot_identifier(snapshot)
     return snapshot
 
 
@@ -273,18 +288,37 @@ def upload_snapshot(store: R2ObjectStore, *, key: str, payload: bytes, digest: s
         if isinstance(metadata, dict) and metadata.get("sha256") == digest:
             return False
         raise FileExistsError("A different object already exists at the immutable snapshot key.")
-    client.put_object(
-        Bucket=store.settings.bucket, Key=key, Body=payload,
-        ContentType="application/json",
-        Metadata={"sha256": digest, "snapshot-id": snapshot_id, "schema-version": SCHEMA_VERSION},
-    )
+    try:
+        client.put_object(
+            Bucket=store.settings.bucket, Key=key, Body=payload,
+            ContentType="application/json",
+            Metadata={"sha256": digest, "snapshot-id": snapshot_id, "schema-version": SCHEMA_VERSION},
+            IfNoneMatch="*",
+        )
+    except Exception as exc:
+        response = getattr(exc, "response", {})
+        error = response.get("Error", {}) if isinstance(response, dict) else {}
+        code = error.get("Code") if isinstance(error, dict) else None
+        status = response.get("ResponseMetadata", {}).get("HTTPStatusCode") if isinstance(response, dict) else None
+        if code not in {"PreconditionFailed", "412"} and status != 412:
+            raise RuntimeError(f"Failed to publish immutable snapshot ({type(exc).__name__}).") from None
+        try:
+            existing = client.head_object(Bucket=store.settings.bucket, Key=key)
+        except Exception as verify_exc:
+            raise RuntimeError(
+                f"Could not verify a concurrent snapshot publish ({type(verify_exc).__name__})."
+            ) from None
+        metadata = existing.get("Metadata", {})
+        if isinstance(metadata, dict) and metadata.get("sha256") == digest:
+            return False
+        raise FileExistsError("A different object already exists at the immutable snapshot key.") from None
     return True
 
 
 def prepare_snapshot(store: R2ObjectStore | None = None) -> tuple[dict[str, Any], bytes, str, str]:
     """Build one request snapshot from one DuckDB query and the bounded fabric CSV."""
-    if os.getenv("VOGUE_HM_RESEARCH_NONCOMMERCIAL", "").strip().casefold() not in {"1", "true", "yes"}:
-        raise PermissionError("Set VOGUE_HM_RESEARCH_NONCOMMERCIAL=true for the research snapshot job.")
+    if not hm_research_noncommercial_enabled():
+        raise PermissionError("P07 H&M snapshot generation is disabled by runtime settings.")
     try:
         import duckdb
     except ImportError:
@@ -343,7 +377,8 @@ def prepare_snapshot(store: R2ObjectStore | None = None) -> tuple[dict[str, Any]
     snapshot = build_snapshot_payload(rows, source_refs=tuple(refs), mapping=mapping,
                                       mapping_fingerprint=mapping_fingerprint,
                                       fabric_source_ref=fabric_source_ref,
-                                      fabric_listing_csv=fabric_text)
+                                      fabric_listing_csv=fabric_text,
+                                      aggregation_version=f"{_AGGREGATION_VERSION};duckdb/{duckdb.__version__}")
     payload, digest = serialize_snapshot(snapshot)
     return snapshot, payload, digest, output_key(snapshot["snapshot_id"])
 
@@ -421,6 +456,8 @@ class HmResearchAggregateSource:
                 "customer_age_source_status": "error",
                 "historical_price": None, "historical_price_error": message,
                 "historical_price_source_status": "error",
+                "fabric_prices": (), "fabric_price_error": message,
+                "fabric_price_source_status": "error",
             }
 
     @staticmethod
@@ -439,6 +476,8 @@ class HmResearchAggregateSource:
         if not all(isinstance(row, dict) and isinstance(row.get("category"), str)
                    and isinstance(row.get("segment"), str) for row in value["profiles"]):
             raise ValueError("Aggregate snapshot profile rows are invalid.")
+        if _snapshot_identifier(value) != value["snapshot_id"]:
+            raise ValueError("Aggregate snapshot ID does not match its content.")
 
     @staticmethod
     def _select(snapshot: dict[str, Any], product: dict[str, Any]) -> dict[str, Any]:

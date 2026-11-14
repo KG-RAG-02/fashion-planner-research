@@ -11,6 +11,8 @@ from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
 
+from ..runtime_settings import usd_krw_fallback
+
 
 FRANKFURTER_RATE_URL = "https://api.frankfurter.dev/v2/rate/usd/krw"
 
@@ -85,25 +87,22 @@ def fetch_usd_krw_reference_rate(*, timeout_seconds: float = 8) -> dict[str, Any
 
 
 def _configured_fallback_rate() -> dict[str, Any]:
-    """Use a dated, explicitly configured reference rate when the provider is down."""
-    import os
-
-    raw_rate = os.getenv("VOGUE_USD_KRW_FALLBACK_RATE", "").strip()
-    rate_date = os.getenv("VOGUE_USD_KRW_FALLBACK_DATE", "").strip()
+    """Use P07's dated reference fallback when the provider is unavailable."""
+    raw_rate, rate_date = usd_krw_fallback()
     try:
         rate = float(raw_rate)
         observed = date.fromisoformat(rate_date)
     except (TypeError, ValueError):
-        raise CurrencyConversionError("FX provider could not be reached and no valid dated fallback rate is configured.") from None
+        raise CurrencyConversionError("FX provider could not be reached and the dated fallback rate is invalid.") from None
     if not math.isfinite(rate) or rate <= 0 or observed > date.today():
-        raise CurrencyConversionError("The configured dated USD/KRW fallback rate is invalid.")
+        raise CurrencyConversionError("The dated USD/KRW fallback rate is invalid.")
     age_days = (date.today() - observed).days
     return {
         "base_currency": "USD",
         "quote_currency": "KRW",
         "rate": rate,
         "rate_date": observed.isoformat(),
-        "provider": "configured dated fallback; Frankfurter reference observation",
+        "provider": "P07 dated fallback; Frankfurter reference observation",
         "source_url": FRANKFURTER_RATE_URL,
         "rate_type": "reference_rate_not_live_quote",
         "fallback_used": True,

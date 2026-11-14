@@ -30,15 +30,15 @@ class OpenAIResponsesClient:
         timeout_seconds: float = 60,
         max_output_tokens: int = 1800,
     ) -> None:
-        self.api_key = api_key if api_key is not None else os.environ.get("OPENAI_API_KEY", "")
-        configured_model = os.environ.get("OPENAI_MODEL", "").strip()
+        self.api_key = api_key if api_key is not None else os.environ.get("LLM_API_KEY", "")
+        configured_model = os.environ.get("LLM_MODEL", "").strip()
         self.model = model if model is not None else configured_model
         self.timeout_seconds = timeout_seconds
         self.max_output_tokens = max_output_tokens
         if not self.api_key:
-            raise LlmCallError("OPENAI_API_KEY is required; no request was sent.")
+            raise LlmCallError("LLM_API_KEY is required; no request was sent.")
         if not self.model:
-            raise LlmCallError("OPENAI_MODEL is required; no request was sent.")
+            raise LlmCallError("LLM_MODEL is required; no request was sent.")
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
         if isinstance(max_output_tokens, bool) or not isinstance(max_output_tokens, int) or max_output_tokens <= 0:

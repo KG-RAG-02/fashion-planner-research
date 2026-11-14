@@ -14,7 +14,7 @@ from unittest.mock import patch
 from market_research_agent.sources.sales.hm_kaggle import hm_customer_age_source as age_module
 from market_research_agent.sources.sales.hm_kaggle.duckdb_http import configure_httpfs
 from market_research_agent.sources.sales.hm_kaggle.hm_research_aggregate import (
-    HmResearchAggregateSource, _mapping_digest, _run_aggregate_query,
+    HmResearchAggregateSource, _mapping_digest, _run_aggregate_query, _snapshot_identifier,
     build_snapshot_payload, serialize_snapshot, upload_snapshot,
 )
 from market_research_agent.sources.sales.hm_kaggle.hm_customer_age_source import (
@@ -104,6 +104,7 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
         self.assertEqual(len(client.puts), 1)
         self.assertEqual(client.puts[0]["ContentType"], "application/json")
         self.assertEqual(client.puts[0]["Metadata"]["snapshot-id"], "snapshot")
+        self.assertEqual(client.puts[0]["IfNoneMatch"], "*")
 
     def test_existing_matching_snapshot_is_not_rewritten(self):
         client = FakeUploadClient({"sha256": "digest"})
@@ -121,6 +122,42 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
         )
         self.assertFalse(uploaded)
         self.assertEqual(client.puts, [])
+
+    def test_concurrent_different_publish_is_not_overwritten(self):
+        class RacingClient(FakeUploadClient):
+            def __init__(self):
+                super().__init__()
+                self.head_calls = 0
+
+            def head_object(self, **_kwargs):
+                self.head_calls += 1
+                if self.head_calls == 1:
+                    error = RuntimeError("missing object")
+                    error.response = {"Error": {"Code": "NoSuchKey"}, "ResponseMetadata": {"HTTPStatusCode": 404}}
+                    raise error
+                return {"Metadata": {"sha256": "different-content"}}
+
+            def put_object(self, **kwargs):
+                self.puts.append(kwargs)
+                error = RuntimeError("conditional conflict")
+                error.response = {"Error": {"Code": "PreconditionFailed"}, "ResponseMetadata": {"HTTPStatusCode": 412}}
+                raise error
+
+        client = RacingClient()
+
+        class Store:
+            @staticmethod
+            def _get_client():
+                return client
+
+            settings = type("Settings", (), {"bucket": "synthetic-bucket"})()
+
+        with self.assertRaises(FileExistsError):
+            upload_snapshot(
+                Store(), key="derived/research-aggregate-snapshots/synthetic.json",
+                payload=b'{"aggregate":true}', digest="our-content", snapshot_id="snapshot",
+            )
+        self.assertEqual(client.puts[0]["IfNoneMatch"], "*")
 
     def test_runtime_reads_one_snapshot_once_and_uses_its_versioned_profile(self):
         from market_research_agent.sources.sales.hm_kaggle.hm_research_aggregate import (
@@ -148,7 +185,7 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
         }
         fabric_csv = ",".join(sorted(_REQUIRED_COLUMNS)) + "\n"
         snapshot = {
-            "schema_version": SCHEMA_VERSION, "snapshot_id": "a" * 64,
+            "schema_version": SCHEMA_VERSION, "snapshot_id": "",
             "source_objects": [], "mapping_version": mapping["mapping_version"],
             "mapping_fingerprint": _mapping_digest(mapping),
             "fabric_source": {"object_key": "fabric.csv", "version": "fixture-v1",
@@ -157,6 +194,7 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
             "profiles": [{"category": "Outerwear", "segment": "ladieswear",
                           "customer_age_profile": age, "historical_price_aggregate": price}],
         }
+        snapshot["snapshot_id"] = _snapshot_identifier(snapshot)
         payload = json.dumps(snapshot).encode()
         client = FakeSnapshotClient(payload)
         store = R2ObjectStore(R2Settings("account", "bucket", "key-id", "secret"), client=client)
@@ -443,11 +481,29 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
             self.assertEqual(profile["sources"][0]["object_key"], "customers.csv")
             self.assertNotIn("synthetic-0", json.dumps(profile))
             refs = tuple({"object_key": key, "version": version} for key, version in zip(keys, ("c1", "a1", "t1"), strict=True))
+            fabric_csv = ",".join(sorted(_REQUIRED_COLUMNS)) + "\n"
+            fabric_source_ref = {
+                "object_key": "fabric.csv", "version": "fixture-v1",
+                "sha256": hashlib.sha256(fabric_csv.encode()).hexdigest(),
+            }
             snapshot = build_snapshot_payload(
                 aggregate_rows, source_refs=refs, mapping=mapping,
                 mapping_fingerprint=_mapping_digest(mapping),
+                fabric_source_ref=fabric_source_ref, fabric_listing_csv=fabric_csv,
             )
+            rebuilt_snapshot = build_snapshot_payload(
+                aggregate_rows, source_refs=refs, mapping=mapping,
+                mapping_fingerprint=_mapping_digest(mapping),
+                aggregation_version="p07-hm-aggregate/next",
+                fabric_source_ref=fabric_source_ref, fabric_listing_csv=fabric_csv,
+            )
+            self.assertNotEqual(snapshot["snapshot_id"], rebuilt_snapshot["snapshot_id"])
             payload, _digest = serialize_snapshot(snapshot)
+            HmResearchAggregateSource._validate_snapshot(snapshot)
+            corrupted_snapshot = json.loads(payload)
+            corrupted_snapshot["profiles"][0]["category"] += "-changed"
+            with self.assertRaisesRegex(ValueError, "snapshot ID"):
+                HmResearchAggregateSource._validate_snapshot(corrupted_snapshot)
             stored_profile = next(
                 row for row in snapshot["profiles"]
                 if row["category"].casefold() == mapping["product_type_name"]["Coat"].casefold()

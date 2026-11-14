@@ -86,18 +86,20 @@ class HmCombinedResearchParallelTests(unittest.TestCase):
         self.assertIsNone(result["customer_age_error"])
         self.assertIsNone(result["historical_price_error"])
 
-    def test_failed_aggregate_snapshot_falls_back_only_for_fabric(self):
+    def test_failed_aggregate_snapshot_does_not_read_other_r2_objects(self):
         with patch.dict(os.environ, {
             "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true",
             "VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY": "derived/research-aggregate-snapshots/broken.json",
         }), \
-             patch("market_research_agent.sources.sales.hm_kaggle.hm_combined_research_source.R2FabricPriceSource.analyze", return_value=({"material": "cotton"},)), \
+             patch("market_research_agent.sources.sales.hm_kaggle.hm_combined_research_source.R2FabricPriceSource.analyze", side_effect=AssertionError("standalone R2 read must not be attempted")) as fabric_read, \
              patch("market_research_agent.sources.sales.hm_kaggle.hm_combined_research_source.HmResearchAggregateSource.analyze", side_effect=ValueError("invalid snapshot")):
             result = HmCombinedResearchSource().analyze({"category": "Outerwear", "material": "cotton"})
         self.assertEqual(result["customer_age_source_status"], "error")
         self.assertEqual(result["historical_price_source_status"], "error")
-        self.assertEqual(result["fabric_prices"], ({"material": "cotton"},))
-        self.assertEqual(result["fabric_price_source_status"], "available")
+        self.assertEqual(result["fabric_prices"], ())
+        self.assertEqual(result["fabric_price_source_status"], "error")
+        self.assertIsNotNone(result["fabric_price_error"])
+        fabric_read.assert_not_called()
 
 
 if __name__ == "__main__":

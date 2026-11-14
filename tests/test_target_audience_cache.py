@@ -39,6 +39,26 @@ class TargetAudienceCacheTests(unittest.TestCase):
         target_audience._LLM_CACHE.clear()
         target_audience._LLM_CACHE_INFLIGHT.clear()
 
+    def test_client_reads_llm_api_key_environment_variable(self):
+        with patch.dict("os.environ", {"LLM_API_KEY": "synthetic-env-key", "LLM_MODEL": "synthetic-model"}, clear=True):
+            client = OpenAIResponsesClient()
+        self.assertEqual(client.api_key, "synthetic-env-key")
+        self.assertEqual(client.model, "synthetic-model")
+
+    def test_client_reports_missing_llm_api_key_without_sending_request(self):
+        from market_research_agent.llm.responses_api import LlmCallError
+
+        with patch.dict("os.environ", {"LLM_MODEL": "synthetic-model"}, clear=True):
+            with self.assertRaisesRegex(LlmCallError, "LLM_API_KEY is required"):
+                OpenAIResponsesClient()
+
+    def test_client_reports_missing_llm_model(self):
+        from market_research_agent.llm.responses_api import LlmCallError
+
+        with patch.dict("os.environ", {"LLM_API_KEY": "synthetic-env-key"}, clear=True):
+            with self.assertRaisesRegex(LlmCallError, "LLM_MODEL is required"):
+                OpenAIResponsesClient()
+
     def test_exact_prompt_and_model_reuses_validated_output(self):
         client = OpenAIResponsesClient(api_key="synthetic-key", model="synthetic-model")
         with patch.object(client, "create_json_response", side_effect=lambda **_kwargs: {"output": deepcopy(VALID_OUTPUT)}) as call:

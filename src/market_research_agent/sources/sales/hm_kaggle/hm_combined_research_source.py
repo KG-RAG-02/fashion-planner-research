@@ -9,6 +9,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 from ...market.fabric_price_r2_source import FabricPriceSourceError, R2FabricPriceSource
+from ....runtime_settings import hm_research_noncommercial_enabled
 from .hm_customer_age_source import CustomerAgeSourceError, HmCustomerAgeResearchSource
 from .hm_price_source import HmHistoricalPriceResearchSource, HmPriceSourceError
 from .hm_research_aggregate import HmResearchAggregateSource
@@ -36,7 +37,7 @@ class HmCombinedResearchSource:
         )
         if any(os.getenv(name, "").strip() for name in fabric_settings):
             result["fabric_price_source_status"] = "configured"
-        research_enabled = os.getenv("VOGUE_HM_RESEARCH_NONCOMMERCIAL", "").strip().casefold() in {"1", "true", "yes"}
+        research_enabled = hm_research_noncommercial_enabled()
         if research_enabled:
             result["customer_age_source_status"] = "configured"
             result["historical_price_source_status"] = "configured"
@@ -91,11 +92,10 @@ class HmCombinedResearchSource:
                 message = f"H&M aggregate snapshot failed ({type(exc).__name__})."
                 result["customer_age_error"] = message
                 result["historical_price_error"] = message
+                result["fabric_price_error"] = message
                 result["customer_age_source_status"] = "error"
                 result["historical_price_source_status"] = "error"
-                # Preserve the independent fabric result if the combined
-                # snapshot itself cannot be read or validated.
-                apply_fabric_result()
+                result["fabric_price_source_status"] = "error"
             _LOGGER.info("P07 combined research completed in %.3fs", time.perf_counter() - started_at)
             return result
 

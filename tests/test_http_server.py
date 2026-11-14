@@ -9,16 +9,16 @@ import unittest
 from email.message import Message
 from unittest.mock import patch
 
-from market_research_agent.http_server import REVIEW_CONTRACT_VERSION, _validate_review_result, make_handler
+from market_research_agent.http_server import REVIEW_CONTRACT_VERSION, _validate_review_result, make_handler, serve
 
 
 class Project07ReviewHttpTests(unittest.TestCase):
     def request(
         self, method: str, path: str, payload=None, *, token="test-token",
         research_bundle=None, env_overrides=None, fx_reference=None, llm_proposal=None,
-        llm_failure=None,
+        llm_failure=None, service_mode=False,
     ):
-        handler_type = make_handler()
+        handler_type = make_handler(service_mode=service_mode)
         handler = object.__new__(handler_type)
         handler.path = path
         handler.command = method
@@ -73,6 +73,36 @@ class Project07ReviewHttpTests(unittest.TestCase):
 
         handler.wfile = DisconnectedWriter()
         handler._send_json(200, {"status": "ok"})
+
+    def test_health_reports_local_and_container_service_modes(self):
+        local_status, local_body = self.request("GET", "/api/health")
+        service_status, service_body = self.request(
+            "GET", "/api/health", service_mode=True,
+        )
+        self.assertEqual((local_status, local_body), (200, {"status": "ok", "mode": "local-development"}))
+        self.assertEqual((service_status, service_body), (200, {"status": "ok", "mode": "container-service"}))
+
+    def test_serve_restricts_bind_and_requires_auth_for_service_mode(self):
+        with patch.dict(os.environ, {"VOGUE_PROJECT07_DISABLE_DOTENV": "true"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "Non-loopback bind"):
+                serve("0.0.0.0", 8766)
+            with self.assertRaisesRegex(ValueError, "Bearer authentication"):
+                serve("0.0.0.0", 8766, service_mode=True)
+
+    def test_service_mode_binds_all_interfaces_with_bearer_configured(self):
+        server = unittest.mock.Mock()
+        server.serve_forever.side_effect = KeyboardInterrupt
+        with (
+            patch.dict(os.environ, {
+                "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
+                "VOGUE_AGENT_SERVICE_BEARER_TOKEN": "synthetic-service-token",
+            }, clear=True),
+            patch("market_research_agent.http_server.ThreadingHTTPServer", return_value=server) as server_type,
+        ):
+            serve("0.0.0.0", 8766, service_mode=True)
+        self.assertEqual(server_type.call_args.args[0], ("0.0.0.0", 8766))
+        self.assertEqual(server_type.call_args.args[1].__name__, "Project07Handler")
+        server.server_close.assert_called_once_with()
 
     def valid_review(self):
         product = {
@@ -235,8 +265,8 @@ class Project07ReviewHttpTests(unittest.TestCase):
                     env_overrides={
                         "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true",
                         "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED": "true",
-                        "OPENAI_API_KEY": "synthetic-test-key",
-                        "OPENAI_MODEL": "synthetic-test-model",
+                        "LLM_API_KEY": "synthetic-test-key",
+                        "LLM_MODEL": "synthetic-test-model",
                     },
                     fx_reference=fx,
                     llm_proposal=proposal,
@@ -323,8 +353,8 @@ class Project07ReviewHttpTests(unittest.TestCase):
             env_overrides={
                 "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true",
                 "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED": "true",
-                "OPENAI_API_KEY": "synthetic-test-key",
-                "OPENAI_MODEL": "synthetic-test-model",
+                "LLM_API_KEY": "synthetic-test-key",
+                "LLM_MODEL": "synthetic-test-model",
             },
             fx_reference={
                 "base_currency": "USD", "quote_currency": "KRW", "rate": 1400.0,
