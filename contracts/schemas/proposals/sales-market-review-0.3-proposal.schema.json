@@ -1,0 +1,156 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:vogue:sales-market-review:0.3:proposal",
+  "title": "Project_07 product review request with per-field provenance",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "contract_version",
+    "request_id",
+    "input"
+  ],
+  "properties": {
+    "contract_version": {
+      "const": "vogue-sales-market-review/0.3-proposal"
+    },
+    "request_id": {
+      "type": "string",
+      "minLength": 1,
+      "maxLength": 128
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "request_id",
+        "product",
+        "product_evidence"
+      ],
+      "properties": {
+        "request_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 128
+        },
+        "product": {
+          "$ref": "#/$defs/product"
+        },
+        "product_evidence": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": [
+            "category"
+          ],
+          "properties": {
+            "category": {
+              "$ref": "#/$defs/field_evidence"
+            },
+            "product_type": {
+              "$ref": "#/$defs/field_evidence"
+            },
+            "gender": {
+              "$ref": "#/$defs/field_evidence"
+            },
+            "season": {
+              "$ref": "#/$defs/field_evidence"
+            },
+            "material": {
+              "$ref": "#/$defs/field_evidence"
+            }
+          }
+        }
+      }
+    }
+  },
+  "$defs": {
+    "product": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "category"
+      ],
+      "properties": {
+        "category": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": ".*\\S.*"
+        },
+        "product_type": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": ".*\\S.*"
+        },
+        "gender": {
+          "enum": [
+            "women",
+            "men",
+            "unisex",
+            "unknown",
+            null
+          ]
+        },
+        "season": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": ".*\\S.*"
+        },
+        "material": {
+          "type": [
+            "string",
+            "null"
+          ],
+          "minLength": 1,
+          "maxLength": 120,
+          "pattern": ".*\\S.*"
+        }
+      }
+    },
+    "field_evidence": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "kind",
+        "source_ref",
+        "evidence_ids"
+      ],
+      "properties": {
+        "kind": {
+          "enum": [
+            "user_requested",
+            "evidence_observation",
+            "proposal",
+            "hypothesis",
+            "to_validate",
+            "unknown"
+          ]
+        },
+        "source_ref": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 200,
+          "pattern": ".*\\S.*"
+        },
+        "evidence_ids": {
+          "type": "array",
+          "maxItems": 100,
+          "uniqueItems": true,
+          "items": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 256,
+            "pattern": ".*\\S.*"
+          }
+        }
+      }
+    }
+  }
+}

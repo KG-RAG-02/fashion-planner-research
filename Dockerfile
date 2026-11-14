@@ -1,7 +1,10 @@
 FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
-    PYTHONUNBUFFERED=1
+    PYTHONUNBUFFERED=1 \
+    PROJECT07_PROMPTS_DIR=/app/prompts \
+    PROJECT07_CONFIGS_DIR=/app/configs \
+    VOGUE_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
 
 WORKDIR /app
 
@@ -11,12 +14,16 @@ COPY --chown=agent:agent pyproject.toml README.md ./
 COPY --chown=agent:agent src/ ./src/
 COPY --chown=agent:agent contracts/ ./contracts/
 COPY --chown=agent:agent prompts/ ./prompts/
-COPY --chown=agent:agent examples/ ./examples/
-COPY --chown=agent:agent scripts/ ./scripts/
+COPY --chown=agent:agent configs/ ./configs/
 COPY --chown=agent:agent tests/ ./tests/
 
-RUN pip install --no-cache-dir .
+RUN pip install --no-cache-dir '.[r2]' \
+    && mkdir -p /opt/duckdb/extensions \
+    && python -c "import duckdb; c=duckdb.connect(); c.execute(\"SET extension_directory='/opt/duckdb/extensions'\"); c.execute('INSTALL httpfs'); c.execute('LOAD httpfs'); print(duckdb.__version__, c.execute(\"SELECT extension_name, installed, loaded FROM duckdb_extensions() WHERE extension_name='httpfs'\").fetchone()); c.close()" \
+    && chown -R agent:agent /opt/duckdb
 
 USER agent
+
+RUN python -c "import duckdb; c=duckdb.connect(); c.execute(\"SET extension_directory='/opt/duckdb/extensions'\"); c.execute('LOAD httpfs'); assert c.execute(\"SELECT loaded FROM duckdb_extensions() WHERE extension_name='httpfs'\").fetchone()[0]; c.close()"
 
 CMD ["python", "-m", "market_research_agent.runtime"]

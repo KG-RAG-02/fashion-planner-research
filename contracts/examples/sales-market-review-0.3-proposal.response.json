@@ -1,0 +1,177 @@
+{
+  "contract_version": "vogue-sales-market-review/0.3-proposal",
+  "request_id": "review-http-001",
+  "producer": {
+    "agent_id": "sales-market-agent",
+    "schema_version": "sales-market-review/0.1-internal"
+  },
+  "status": "no_results",
+  "result": {
+    "schema_version": "sales-market-review/0.1-internal",
+    "request_id": "review-http-001",
+    "draft_id": null,
+    "producer_id": "sales-market-agent",
+    "status": "no_results",
+    "draft_context": {
+      "category": "Outerwear",
+      "product_type": "Jacket",
+      "gender": "women",
+      "season": "winter",
+      "material": "wool blend"
+    },
+    "category_price_comparison": [],
+    "material_cost_analysis": [],
+    "customer_segment_analysis": [],
+    "target_audience_analysis": {
+      "status": "no_results",
+      "proposal": null,
+      "age_cohort": null,
+      "limitations": [
+        "Age profile is unavailable or disabled.",
+        "LLM target hypothesis is unavailable or not authorized."
+      ],
+      "evidence_ids": [],
+      "transfer_authorized": false,
+      "llm_call_status": "not_authorized"
+    },
+    "margin_estimate": {
+      "status": "benchmark_only",
+      "estimate_type": "industry_average_gross_margin_benchmark",
+      "basis": "nyu_stern_us_apparel_gross_margin_january_2026",
+      "benchmark_gross_margin_rate": 0.5688,
+      "estimated_gross_margin_rate": 0.5688,
+      "benchmark_source": "NYU Stern Damodaran Margins by Sector (US), January 2026",
+      "benchmark_sample_size": 35,
+      "benchmark_region": "US",
+      "formula": {
+        "benchmark_implied_cost_allowance": "selling_price * (1 - apparel_industry_gross_margin_rate)",
+        "fabric_cost_per_garment": "fabric_unit_cost * fabric_consumption",
+        "remaining_cost_allowance": "benchmark_implied_cost_allowance - fabric_cost_per_garment"
+      },
+      "selling_price": null,
+      "currency": null,
+      "evidence_ids": [
+        "source:0734512f658ef4699fbaf75d"
+      ],
+      "limitations": [
+        "The 56.88% rate is an average for 35 US public apparel companies; it is not a Korea-specific or product-specific forecast.",
+        "A public fabric listing reference is not a verified purchasing cost.",
+        "This benchmark estimate represents US apparel sector economics; it is not a product-specific margin observation."
+      ]
+    },
+    "evidence": [
+      {
+        "evidence_id": "source:0734512f658ef4699fbaf75d",
+        "source_id": "nyu-stern-damodaran-us-apparel-margin-2026-01",
+        "source_type": "industry_gross_margin_benchmark",
+        "source_name": "NYU Stern Damodaran Margins by Sector (US), January 2026",
+        "locator": "https://pages.stern.nyu.edu/~adamodar/New_Home_Page/datafile/margin.html",
+        "observed_at": null,
+        "as_of": "2026-01",
+        "permission_status": "public_reference_data",
+        "supports_fields": [
+          "result.margin_estimate",
+          "result.margin_analysis"
+        ],
+        "analysis": {
+          "observed": {
+            "industry": "Apparel",
+            "gross_margin_rate": 0.5688,
+            "firm_count": 35,
+            "region": "US",
+            "period": "January 2026"
+          },
+          "interpretation": "Sector-level benchmark scenario, not this product's observed margin or a Korea-specific forecast."
+        }
+      }
+    ],
+    "missing_data": [
+      {
+        "field": "historical_hm_transaction_prices",
+        "reason": "source_not_configured_or_disabled",
+        "message": "Enable non-commercial H&M research mode and configure its R2 source."
+      },
+      {
+        "field": "fabric_costs",
+        "reason": "source_not_configured",
+        "message": "R2 fabric price source is not configured."
+      },
+      {
+        "field": "customer_segments",
+        "reason": "source_not_configured_or_disabled",
+        "message": "Enable non-commercial H&M research mode and configure its R2 source."
+      }
+    ],
+    "errors": [],
+    "limitations": [
+      "Margin analysis uses the US apparel industry gross-margin benchmark; it is not this product's actual gross margin."
+    ],
+    "decision_support": {
+      "recommendation": "review_required",
+      "ready_for_human_decision": false,
+      "evidence_areas": {
+        "category_price": false,
+        "material_cost": false,
+        "margin": false,
+        "customer_segments": false
+      },
+      "human_decision_required": true
+    },
+    "price_analysis": {
+      "status": "no_results",
+      "hm_average_price_usd": null,
+      "raw_normalized_mean": null,
+      "currency": null,
+      "source_currency": null,
+      "unit": null,
+      "scale_factor": null,
+      "converted_average_krw": null,
+      "exchange_rate": null,
+      "sample_size": null,
+      "period": null,
+      "proposed_price": null,
+      "method": "normalized source mean × 590 as USD; convert using dated USD/KRW reference rate; round suggested KRW price to nearest 1,000",
+      "proposal_reason": "No matching H&M price observations are available.",
+      "limitations": [],
+      "evidence_ids": []
+    },
+    "fabric_cost_analysis": {
+      "status": "no_results",
+      "unit_cost": null,
+      "unit": null,
+      "currency": null,
+      "matched_material": "wool blend",
+      "source_record_ids": [],
+      "price_references": [],
+      "limitations": [
+        "Fabric listing references are not verified purchase costs; no verified per-meter cost is asserted."
+      ],
+      "evidence_ids": []
+    },
+    "margin_analysis": {
+      "status": "benchmark_only",
+      "basis": "nyu_stern_us_apparel_gross_margin_january_2026",
+      "formula": "estimated_gross_margin_rate = NYU Stern US apparel gross margin benchmark",
+      "selling_price": null,
+      "currency": null,
+      "margin_rate_percent": 56.88,
+      "estimate_type": "industry_average_gross_margin_benchmark",
+      "evidence_ids": [
+        "source:0734512f658ef4699fbaf75d"
+      ]
+    },
+    "margin_price_range_analysis": null,
+    "target_audience": {
+      "status": "no_results",
+      "proposal": null,
+      "age_cohort": null,
+      "limitations": [
+        "Age profile is unavailable or disabled.",
+        "LLM target hypothesis is unavailable or not authorized."
+      ],
+      "evidence_ids": [],
+      "transfer_authorized": false,
+      "llm_call_status": "not_authorized"
+    }
+  }
+}

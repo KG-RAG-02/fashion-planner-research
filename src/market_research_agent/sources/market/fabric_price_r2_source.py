@@ -6,13 +6,18 @@ import csv
 from decimal import Decimal, InvalidOperation
 import hashlib
 import io
+import logging
 import os
 import threading
+import time
 import unicodedata
+from collections import OrderedDict
 from statistics import median
 from typing import Any
 
-from ..shared.r2_object_store import R2ObjectError, R2ObjectStore
+from ..shared.r2_object_store import (
+    R2ConfigurationError, R2ObjectError, R2ObjectStore, _safe_failure_code,
+)
 from ..shared.r2_source_manifest import r2_source_key
 
 
@@ -26,9 +31,10 @@ _REQUIRED_COLUMNS = {
     "estimated_length_m",
     "unit_price_estimation_status", "unit_price_estimation_method",
     "unit_price_estimation_confidence", "unit_price_estimation_evidence_urls",
+    "unit_price_krw_per_meter",
 }
 _MATERIAL_ALIASES = {
-    "linen": ("린넨",), "cotton": ("면",), "denim": ("데님",),
+    "linen": ("린넨", "리넨"), "cotton": ("면",), "denim": ("데님",),
     "nylon": ("나일론",), "polyester": ("폴리",),
     "spandex": ("스판",), "elastane": ("스판",),
     "wool": ("울", "모직"), "cashmere": ("캐시미어",),
@@ -36,10 +42,14 @@ _MATERIAL_ALIASES = {
     "acrylic": ("아크릴",), "modal": ("모달",), "lyocell": ("텐셀", "리오셀"),
     "tencel": ("텐셀", "리오셀"), "silk": ("실크", "명주"),
     "leather": ("레더", "가죽"), "polyurethane": ("폴리우레탄", "우레탄"),
+    "knit": ("니트", "편물", "knitted"),
 }
-_CACHE: dict[tuple[str, str, str, str], tuple[dict[str, Any], ...]] = {}
-_OBJECT_CACHE: dict[tuple[str, str, str], tuple[bytes, str]] = {}
+_CACHE: OrderedDict[tuple[str, str, str, str], tuple[dict[str, Any], ...]] = OrderedDict()
+_OBJECT_CACHE: OrderedDict[tuple[str, str, str], tuple[bytes, str]] = OrderedDict()
 _CACHE_LOCK = threading.Lock()
+_LOGGER = logging.getLogger(__name__)
+_CACHE_MAX_ANALYSES = 256
+_CACHE_MAX_OBJECTS = 4
 
 
 class FabricPriceSourceError(RuntimeError):
@@ -61,9 +71,14 @@ def _positive_decimal(value: str) -> Decimal | None:
 def _material_terms(material: str) -> tuple[str, ...]:
     query = _normalize(material)
     terms = [query] if query else []
+    # Korean ``모`` means wool, but substring matching it would also match
+    # unrelated words such as ``모달``. Treat it as a whole query alias only.
+    if query == "모":
+        terms.extend(("울", "wool", "모직"))
     for alias, values in _MATERIAL_ALIASES.items():
-        if alias in query:
+        if alias in query or any(_normalize(value) in query for value in values):
             terms.extend(_normalize(value) for value in values)
+            terms.append(_normalize(alias))
     return tuple(dict.fromkeys(terms))
 
 
@@ -72,28 +87,62 @@ class R2FabricPriceSource:
 
     def __init__(self, store: R2ObjectStore | None = None, *, object_key: str | None = None) -> None:
         self.store = store
-        self.object_key = object_key or r2_source_key(
-            "fabric_prices", default=DEFAULT_FABRIC_PRICE_KEY,
-            legacy_envs=("PROJECT07_FABRIC_PRICE_R2_KEY",),
-        )
+        try:
+            self.object_key = object_key or r2_source_key(
+                "fabric_prices", default=DEFAULT_FABRIC_PRICE_KEY,
+            )
+        except Exception:
+            raise FabricPriceSourceError(
+                "The Project_07 R2 fabric price source manifest is invalid or unreadable."
+            ) from None
 
     def analyze(self, product: dict[str, Any]) -> tuple[dict[str, Any], ...]:
+        analyze_started = time.perf_counter()
         material = product.get("material") if isinstance(product, dict) else None
         if not isinstance(material, str) or not material.strip():
             return ()
         try:
-            store = self.store or R2ObjectStore.from_env()
-            head = store._get_client().head_object(Bucket=store.settings.bucket, Key=self.object_key)
+            if (not self.object_key or self.object_key.startswith("/")
+                    or ".." in self.object_key.split("/")
+                    or not all(character.isascii() and (character.isalnum() or character in "-._/")
+                               for character in self.object_key)):
+                raise FabricPriceSourceError("The Project_07 R2 fabric price object key is invalid.")
+            if self.store is None:
+                required_settings = (
+                    "R2_ACCOUNT_ID", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
+                )
+                if not any(os.getenv(name, "").strip() for name in (*required_settings, "R2_ENDPOINT")):
+                    # Source integration is optional. Do not report an operational
+                    # failure when a local/stub environment intentionally has no R2.
+                    return ()
+                try:
+                    store = R2ObjectStore.from_env()
+                except R2ConfigurationError:
+                    raise FabricPriceSourceError(
+                        "R2 fabric price access is configured incompletely or unsafely."
+                    ) from None
+            else:
+                store = self.store
+            try:
+                metadata_started = time.perf_counter()
+                head = store._get_client().head_object(Bucket=store.settings.bucket, Key=self.object_key)
+            except Exception as exc:
+                raise FabricPriceSourceError(
+                    f"R2 fabric price snapshot metadata could not be read ({_safe_failure_code(exc)})."
+                ) from None
             size = int(head.get("ContentLength", 0))
             version = str(head.get("VersionId") or head.get("ETag", "")).strip('"')
             if size <= 0 or size > _MAX_BYTES or not version:
                 raise FabricPriceSourceError("The R2 fabric price object has invalid metadata or size.")
+            _LOGGER.info("Fabric price R2 metadata: declared_bytes=%d elapsed=%.3fs",
+                         size, time.perf_counter() - metadata_started)
             cache_key = (store.settings.bucket, self.object_key, version, _normalize(material))
             with _CACHE_LOCK:
                 if cache_key not in _CACHE:
                     object_cache_key = (store.settings.bucket, self.object_key, version)
                     cached_object = _OBJECT_CACHE.get(object_cache_key)
                     if cached_object is None:
+                        read_started = time.perf_counter()
                         content, metadata = store.get_bytes_and_metadata(self.object_key, max_bytes=_MAX_BYTES)
                         after = store._get_client().head_object(Bucket=store.settings.bucket, Key=self.object_key)
                         after_version = str(after.get("VersionId") or after.get("ETag", "")).strip('"')
@@ -104,17 +153,38 @@ class R2FabricPriceSource:
                         if expected_hash and expected_hash.casefold() != actual_hash:
                             raise FabricPriceSourceError("The R2 fabric price object's SHA-256 metadata does not match.")
                         _OBJECT_CACHE[object_cache_key] = (content, actual_hash)
+                        _OBJECT_CACHE.move_to_end(object_cache_key)
+                        while len(_OBJECT_CACHE) > _CACHE_MAX_OBJECTS:
+                            _OBJECT_CACHE.popitem(last=False)
+                        _LOGGER.info("Fabric price object read bytes=%d elapsed=%.3fs", len(content),
+                                     time.perf_counter() - read_started)
                     else:
                         content, actual_hash = cached_object
+                        _OBJECT_CACHE.move_to_end(object_cache_key)
+                        _LOGGER.info("Fabric price object cache hit bytes=%d", len(content))
+                    analysis_started = time.perf_counter()
                     _CACHE[cache_key] = self._analyze_csv(
                         content, material.strip(), version=version,
                         sha256=actual_hash, object_key=self.object_key,
                     )
+                    _CACHE.move_to_end(cache_key)
+                    while len(_CACHE) > _CACHE_MAX_ANALYSES:
+                        _CACHE.popitem(last=False)
+                    _LOGGER.info("Fabric price CSV analysis completed in %.3fs rows=%d",
+                                 time.perf_counter() - analysis_started, len(_CACHE[cache_key]))
+                else:
+                    _CACHE.move_to_end(cache_key)
+                    _LOGGER.info("Fabric price analysis cache hit")
+                _LOGGER.info("Fabric price source completed in %.3fs", time.perf_counter() - analyze_started)
                 return _CACHE[cache_key]
         except FabricPriceSourceError:
             raise
-        except R2ObjectError:
-            raise FabricPriceSourceError("The R2 fabric price snapshot could not be read safely.") from None
+        except R2ObjectError as exc:
+            raise FabricPriceSourceError(
+                f"The R2 fabric price snapshot could not be read safely ({exc.failure_code})."
+            ) from None
+        except R2ConfigurationError:
+            raise FabricPriceSourceError("R2 fabric price access is not configured correctly.") from None
         except Exception:
             raise FabricPriceSourceError("The R2 fabric price snapshot could not be analyzed safely.") from None
 
@@ -134,7 +204,10 @@ class R2FabricPriceSource:
         terms = _material_terms(material)
         selected = []
         for row in rows:
-            search_text = _normalize(" ".join((row.get("category", ""), row.get("composition", ""))))
+            search_text = _normalize(" ".join((
+                row.get("product_name", ""), row.get("category", ""), row.get("composition", ""),
+                row.get("construction_or_finish", ""),
+            )))
             if not any(term and term in search_text for term in terms):
                 continue
             amount = _positive_decimal(row.get("price_amount", ""))
@@ -207,7 +280,7 @@ class R2FabricPriceSource:
                     "median": float(median(amounts)),
                     "maximum": float(max(amounts)),
                     "currency": currency,
-                    "statistic": "unweighted_median_of_source_listing_rows; original sales unit is unverified",
+                "statistic": "unweighted_median_of_observed_source_listing_prices; units are preserved per row",
                 },
                 "price_per_meter_krw_statistics": ({
                     "sample_count": len(per_meter), "minimum": float(min(per_meter)),
@@ -222,8 +295,8 @@ class R2FabricPriceSource:
                 "cost_per_meter_operational_eligible": False,
                 "category_mapping": {
                     "mapping_id": "project07-fabric-material-terms",
-                    "mapping_version": "1.0",
-                    "matching": "normalized material term substring against source category and composition",
+                    "mapping_version": "1.1",
+                    "matching": "normalized material term substring against product name, category, composition, or construction",
                     "matched_source_categories": [category],
                     "matched_terms": list(terms),
                 },
@@ -237,8 +310,8 @@ class R2FabricPriceSource:
                 "operational_eligible": False,
                 "limitations": [
                     "This is a point-in-time public listing snapshot, not a supplier quote or verified purchase cost.",
-                    "Per-meter values are low-confidence estimates based on one listed-price unit being 1 Korean ma (90 cm); item-level units are not confirmed.",
-                    "Estimated per-meter prices are research references and are not automatically included in product margin costing.",
+                    "Listed prices are not converted to per-meter values unless a separately reviewed estimate is present in the source row.",
+                    "Public retail listing prices are not automatically included in product margin costing.",
                     "Material percentages and some textile specifications are missing or unverified.",
                     "Shipping terms are separate and must not be treated as included in the listed price.",
                     "The snapshot has no prior history, so price trends and changes cannot be calculated.",

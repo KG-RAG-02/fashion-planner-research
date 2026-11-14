@@ -1,7 +1,10 @@
 {
   "mapping_id": "project07-hm-product-taxonomy",
-  "mapping_version": "project07-hm-category-map/1.0",
-  "mapping_policy": "Exact product_type_name mappings take precedence over product_group_name fallback mappings. Unlisted type/group values are not mapped.",
+  "mapping_version": "project07-hm-category-map/1.1",
+  "mapping_policy": "Exact product_type_name mappings take precedence over product_group_name fallback mappings. Explicit requested_category_aliases normalize supported P06 category labels to H&M categories. Unlisted values are not mapped.",
+  "requested_category_aliases": {
+    "니트웨어": "Knitwear"
+  },
   "product_group_name": {
     "Accessories": "Accessories",
     "Bags": "Bags",
