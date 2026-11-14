@@ -1,1 +1,1 @@
-"""Adapters and retrieval ports for external market evidence."""
+"""Public fabric listing source for the post-planning review."""

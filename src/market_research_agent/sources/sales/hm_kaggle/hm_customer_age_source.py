@@ -13,11 +13,16 @@ import os
 from pathlib import Path
 import re
 import threading
+import logging
+import time
+from collections import OrderedDict
+from concurrent.futures import Future
 from typing import Any
 from urllib.parse import urlsplit
 
 from ....sources.shared.r2_object_store import R2ObjectStore, R2Settings
 from ....sources.shared.r2_source_manifest import r2_source_key
+from .duckdb_http import configure_httpfs
 
 
 class CustomerAgeSourceError(RuntimeError):
@@ -25,10 +30,14 @@ class CustomerAgeSourceError(RuntimeError):
 
 
 _ROOT = Path(__file__).resolve().parents[5]
-_MAPPING_PATH = _ROOT / "configs" / "hm-category-map.v1.json"
-_CACHE: dict[tuple[str, ...], dict[tuple[str, str], dict[str, Any]]] = {}
+_CONFIGS_DIR = Path(os.getenv("PROJECT07_CONFIGS_DIR", _ROOT / "configs"))
+_MAPPING_PATH = _CONFIGS_DIR / "hm-category-map.v1.json"
+_CACHE: OrderedDict[tuple[str, ...], dict[tuple[str, str], dict[str, Any]]] = OrderedDict()
 _CACHE_LOCK = threading.Lock()
+_CACHE_INFLIGHT: dict[tuple[str, ...], Future[dict[tuple[str, str], dict[str, Any]]]] = {}
+_LOGGER = logging.getLogger(__name__)
 _MIN_CELL_SIZE = 10
+_CACHE_MAX_SOURCE_VERSIONS = 4
 _CSV_COLUMNS = (
     "'customer_id': 'VARCHAR', 'FN': 'DOUBLE', 'Active': 'DOUBLE', "
     "'club_member_status': 'VARCHAR', 'fashion_news_frequency': 'VARCHAR', "
@@ -60,6 +69,73 @@ def _age_band(age: int | None) -> str:
     if age < 50:
         return "40_49"
     return "50_plus"
+
+
+def _mapped_requested_category(category: str, mapping: dict[str, Any]) -> str:
+    """Normalize an explicit P06 category alias to the H&M research taxonomy."""
+    key = category.strip().casefold()
+    for alias, mapped in mapping.get("requested_category_aliases", {}).items():
+        if isinstance(alias, str) and isinstance(mapped, str) and alias.strip().casefold() == key:
+            return mapped
+    for product_type, mapped in mapping.get("product_type_name", {}).items():
+        if isinstance(product_type, str) and isinstance(mapped, str) and product_type.strip().casefold() == key:
+            return mapped
+    return category.strip()
+
+
+def _safe_failure_category(exc: Exception) -> str:
+    """Map SDK/SQL failures to a small safe vocabulary without logging raw text."""
+    explicit_code = getattr(exc, "failure_code", None)
+    if explicit_code in {
+        "AccessDenied", "ObjectNotFound", "NetworkTimeout", "NetworkTimeoutOrThrottled",
+        "R2ServiceUnavailable", "R2ReadFailed", "ObjectSizeLimitExceeded", "ObjectSizeMismatch",
+    }:
+        return explicit_code
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        error = response.get("Error", {})
+        code = str(error.get("Code", "")) if isinstance(error, dict) else ""
+        metadata = response.get("ResponseMetadata", {})
+        status = metadata.get("HTTPStatusCode") if isinstance(metadata, dict) else None
+        if code in {"AccessDenied", "Forbidden", "InvalidAccessKeyId", "SignatureDoesNotMatch"} or status == 403:
+            return "AccessDenied"
+        if code in {"NoSuchKey", "NotFound", "404"} or status == 404:
+            return "ObjectNotFound"
+        if code in {"RequestTimeout", "RequestTimeoutException", "SlowDown"}:
+            return "NetworkTimeoutOrThrottled"
+    exception_name = type(exc).__name__
+    if exception_name in {"EndpointConnectionError", "ConnectionClosedError", "ProxyConnectionError", "SSLError"}:
+        return "NetworkConnectionError"
+    if exception_name in {"ConnectTimeoutError", "ReadTimeoutError"}:
+        return "NetworkTimeout"
+    if exception_name in {"NoCredentialsError", "PartialCredentialsError"}:
+        return "MissingCredentials"
+    message = str(exc).casefold()
+    if "exceeds its allowed size" in message or "size bound" in message:
+        return "ObjectSizeLimitExceeded"
+    if "invalid" in message and "key" in message:
+        return "InvalidObjectKey"
+    if "metadata" in message or "version" in message:
+        return "InvalidObjectMetadata"
+    if "manifest" in message or "mapping" in message:
+        return "InvalidSourceConfiguration"
+    if "timeout configuration" in message or "http timeout" in message:
+        return "DuckDBConfigurationError"
+    if "httpfs" in message or "extension" in message:
+        return "DuckDBExtensionUnavailable"
+    if any(term in message for term in ("schema", "parquet", "csv", "column", "magic bytes", "delimiter")):
+        return "InvalidFormatOrSchema"
+    if isinstance(exc, (TimeoutError, ConnectionError)) or any(term in message for term in ("timed out", "timeout", "connection reset", "connection refused")):
+        return "NetworkTimeout"
+    if any(term in message for term in ("httpfs", "extension not found", "extension installation", "autoload")):
+        return "DuckDBExtensionUnavailable"
+    if isinstance(exc, PermissionError) or any(term in message for term in ("access denied", "forbidden", "403")):
+        return "AccessDenied"
+    if any(term in message for term in ("no magic bytes", "parquet", "csv", "column", "schema", "delimiter")):
+        return "InvalidFormatOrSchema"
+    if any(term in message for term in ("no such key", "not found", "404")):
+        return "ObjectNotFound"
+    return type(exc).__name__
 
 
 def _build_profiles(
@@ -149,6 +225,7 @@ class HmCustomerAgeResearchSource:
     transactions_key: str = ""
 
     def profile(self, category: str, *, gender: str | None = None) -> dict[str, Any] | None:
+        profile_started = time.perf_counter()
         if os.getenv("VOGUE_HM_RESEARCH_NONCOMMERCIAL", "").strip().casefold() not in {"1", "true", "yes"}:
             raise CustomerAgeSourceError(
                 "Set VOGUE_HM_RESEARCH_NONCOMMERCIAL=true only for non-commercial research use."
@@ -162,69 +239,139 @@ class HmCustomerAgeResearchSource:
         try:
             store = self.store or R2ObjectStore.from_env()
         except Exception:
-            raise CustomerAgeSourceError("R2 research access is not configured safely.") from None
-        customers_key = _checked_key(self.customers_key or r2_source_key(
-            "hm_customers", default="customers.csv",
-            legacy_envs=("PROJECT07_HM_CUSTOMERS_R2_KEY", "PROJECT07_HM_R2_CUSTOMERS_KEY"),
-        ), "customers.csv")
-        articles_key = _checked_key(self.articles_key or r2_source_key(
-            "hm_articles", default="articles.parquet",
-            legacy_envs=("PROJECT07_HM_ARTICLES_R2_KEY", "PROJECT07_HM_R2_ARTICLES_KEY"),
-        ), "articles.parquet")
-        transactions_key = _checked_key(self.transactions_key or r2_source_key(
-            "hm_transactions", default="transactions_train.parquet",
-            legacy_envs=("PROJECT07_HM_TRANSACTIONS_R2_KEY", "PROJECT07_HM_R2_TRANSACTIONS_KEY"),
-        ), "transactions_train.parquet")
+            _LOGGER.warning("H&M customer age source failed: stage=r2_configuration category=R2ConfigurationError")
+            raise CustomerAgeSourceError(
+                "R2 research access is not configured safely (stage=r2_configuration; code=R2ConfigurationError)."
+            ) from None
+        stage = "source_manifest"
+        try:
+            customers_key = _checked_key(self.customers_key or r2_source_key(
+                "hm_customers", default="customers.csv",
+            ), "customers.csv")
+            articles_key = _checked_key(self.articles_key or r2_source_key(
+                "hm_articles", default="articles.parquet",
+            ), "articles.parquet")
+            transactions_key = _checked_key(self.transactions_key or r2_source_key(
+                "hm_transactions", default="transactions_train.parquet",
+            ), "transactions_train.parquet")
+        except Exception as exc:
+            category = _safe_failure_category(exc)
+            _LOGGER.warning("H&M customer age source failed: stage=%s category=%s", stage, category)
+            raise CustomerAgeSourceError(
+                f"H&M research source manifest could not be resolved safely (stage={stage}; code={category})."
+            ) from None
         keys = (customers_key, articles_key, transactions_key)
+        stage = "object_metadata"
         try:
             client = store._get_client()
             versions = []
+            object_sizes = []
             max_sizes = {customers_key: 300_000_000, articles_key: 50_000_000, transactions_key: 1_000_000_000}
+            metadata_started = time.perf_counter()
             for key in keys:
                 head = client.head_object(Bucket=store.settings.bucket, Key=key)
                 size = int(head.get("ContentLength", 0))
+                version = str(head.get("VersionId") or head.get("ETag", "")).strip('"')
                 if size <= 0 or size > max_sizes[key]:
                     raise CustomerAgeSourceError("An H&M research object exceeds its allowed size bound.")
-                versions.append(str(head.get("VersionId") or head.get("ETag", "")).strip('"'))
+                if not version:
+                    raise CustomerAgeSourceError("An H&M research object has invalid version metadata.")
+                object_sizes.append(size)
+                versions.append(version)
+            _LOGGER.info("H&M age R2 metadata: objects=3 declared_bytes=%d elapsed=%.3fs",
+                         sum(object_sizes), time.perf_counter() - metadata_started)
+            stage = "category_mapping"
             mapping = json.loads(_MAPPING_PATH.read_text(encoding="utf-8"))
             mapping_digest = hashlib.sha256(
                 json.dumps(mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
             ).hexdigest()
             cache_key = tuple((store.settings.bucket, *keys, *versions, mapping["mapping_version"], mapping_digest))
-            with _CACHE_LOCK:
-                aggregate_map = _CACHE.get(cache_key)
-                if aggregate_map is None:
-                    aggregate_map = self._query_aggregates(duckdb, store.settings, keys, mapping, tuple(versions))
-                    _CACHE[cache_key] = aggregate_map
+            while True:
+                with _CACHE_LOCK:
+                    if cache_key in _CACHE:
+                        aggregate_map = _CACHE[cache_key]
+                        _CACHE.move_to_end(cache_key)
+                        _LOGGER.info("H&M age aggregate cache hit")
+                        break
+                    pending = _CACHE_INFLIGHT.get(cache_key)
+                    if pending is None:
+                        pending = Future()
+                        _CACHE_INFLIGHT[cache_key] = pending
+                        owner = True
+                    else:
+                        owner = False
+                if owner:
+                    try:
+                        query_started = time.perf_counter()
+                        stage = "duckdb_httpfs_and_aggregate"
+                        aggregate_map = self._query_aggregates(
+                            duckdb, store.settings, keys, mapping, tuple(versions),
+                        )
+                        _LOGGER.info("H&M age DuckDB aggregate completed in %.3fs categories=%d",
+                                     time.perf_counter() - query_started, len(aggregate_map))
+                        with _CACHE_LOCK:
+                            _CACHE[cache_key] = aggregate_map
+                            _CACHE.move_to_end(cache_key)
+                            while len(_CACHE) > _CACHE_MAX_SOURCE_VERSIONS:
+                                _CACHE.popitem(last=False)
+                        pending.set_result(aggregate_map)
+                    except BaseException as exc:
+                        pending.set_exception(exc)
+                        raise
+                    finally:
+                        with _CACHE_LOCK:
+                            _CACHE_INFLIGHT.pop(cache_key, None)
+                    break
+                aggregate_map = pending.result()
+                break
             gender_key = "" if (gender or "").casefold() in {"", "unknown", "unisex"} else gender.casefold()
-            category_key = category.strip().casefold()
+            requested_category_key = category.strip().casefold()
+            mapped_category = _mapped_requested_category(category, mapping)
+            category_key = mapped_category.casefold()
             profile = aggregate_map.get((category_key, gender_key))
+            if profile is not None and mapped_category.casefold() != requested_category_key:
+                profile = {**profile, "requested_product_type_context": category.strip()}
             if profile is None:
-                mapped_category = mapping.get("product_type_name", {}).get(category.strip())
-                if mapped_category:
-                    profile = aggregate_map.get((mapped_category.casefold(), gender_key))
-                    if profile is not None:
-                        profile = {**profile, "requested_product_type_context": category.strip()}
-            if profile is None:
+                _LOGGER.info("H&M age profile completed with no mapped result in %.3fs",
+                             time.perf_counter() - profile_started)
                 return None
+            _LOGGER.info("H&M age profile completed in %.3fs", time.perf_counter() - profile_started)
             return profile
-        except CustomerAgeSourceError:
-            raise
-        except Exception:
-            raise CustomerAgeSourceError("H&M research aggregates could not be read safely from R2.") from None
+        except CustomerAgeSourceError as exc:
+            category = _safe_failure_category(exc)
+            _LOGGER.warning("H&M customer age source failed: stage=%s category=%s", stage, category)
+            raise CustomerAgeSourceError(
+                f"{exc} (stage={stage}; code={category})."
+            ) from None
+        except Exception as exc:
+            # Keep SDK/SQL detail out of logs and user responses; exception class
+            # distinguishes missing objects, access failures, timeouts and parser errors.
+            category = _safe_failure_category(exc)
+            _LOGGER.warning("H&M customer age source failed: stage=%s category=%s", stage, category)
+            raise CustomerAgeSourceError(
+                f"H&M research aggregates could not be read safely from R2 (stage={stage}; code={category})."
+            ) from None
 
     @staticmethod
     def _query_aggregates(duckdb: Any, settings: R2Settings, keys: tuple[str, ...], mapping: dict[str, Any], versions: tuple[str, ...]) -> dict[tuple[str, str], dict[str, Any]]:
         conn = duckdb.connect()
+        query_started = time.perf_counter()
         try:
             extension_dir = os.getenv("VOGUE_DUCKDB_EXTENSION_DIRECTORY", "").strip()
             if extension_dir:
                 conn.execute("SET extension_directory = " + _sql_string(extension_dir))
             try:
                 conn.execute("LOAD httpfs")
-            except Exception:
+            except Exception as exc:
+                _LOGGER.warning("DuckDB httpfs load failed: %s", _safe_failure_category(exc))
                 raise CustomerAgeSourceError(
-                    "DuckDB httpfs must be installed in the runtime before R2 age research can run."
+                    f"DuckDB httpfs must be installed in the runtime before R2 age research can run ({_safe_failure_category(exc)})."
+                ) from None
+            try:
+                configure_httpfs(conn)
+            except Exception as exc:
+                raise CustomerAgeSourceError(
+                    f"DuckDB HTTP timeout configuration failed ({type(exc).__name__})."
                 ) from None
             endpoint = urlsplit(settings.endpoint).netloc if settings.endpoint else f"{settings.account_id}.r2.cloudflarestorage.com"
             conn.execute(
@@ -279,6 +426,8 @@ class HmCustomerAgeResearchSource:
                 GROUP BY GROUPING SETS ((category, index_group_name, age_band), (category, age_band))
             """
             rows = conn.execute(sql).fetchall()
+            _LOGGER.info("H&M age SQL scan and aggregate completed in %.3fs output_rows=%d",
+                         time.perf_counter() - query_started, len(rows))
             aggregate_map: dict[tuple[str, str], dict[str, Any]] = {}
             categories = sorted({str(row[0]) for row in rows})
             genders = (("women", "Ladieswear", "women"), ("men", "Menswear", "men"), ("", "__all__", None))

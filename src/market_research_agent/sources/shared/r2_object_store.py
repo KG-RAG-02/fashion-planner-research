@@ -19,6 +19,40 @@ class R2ConfigurationError(ValueError):
 class R2ObjectError(ValueError):
     """An R2 object could not be safely read."""
 
+    def __init__(self, message: str, *, failure_code: str = "R2ReadFailed") -> None:
+        super().__init__(message)
+        self.failure_code = failure_code
+
+
+def _safe_failure_code(exc: Exception) -> str:
+    """Return an allowlisted storage failure category without SDK details."""
+    exception_name = type(exc).__name__
+    if exception_name in {"EndpointConnectionError", "ConnectionClosedError", "ProxyConnectionError", "SSLError"}:
+        return "NetworkConnectionError"
+    if exception_name in {"ConnectTimeoutError", "ReadTimeoutError"}:
+        return "NetworkTimeout"
+    if exception_name in {"NoCredentialsError", "PartialCredentialsError"}:
+        return "MissingCredentials"
+    response = getattr(exc, "response", None)
+    if isinstance(response, dict):
+        error = response.get("Error", {})
+        code = str(error.get("Code", "")) if isinstance(error, dict) else ""
+        metadata = response.get("ResponseMetadata", {})
+        status = metadata.get("HTTPStatusCode") if isinstance(metadata, dict) else None
+        if code in {"AccessDenied", "Forbidden", "InvalidAccessKeyId", "SignatureDoesNotMatch"} or status == 403:
+            return "AccessDenied"
+        if code in {"NoSuchKey", "NotFound", "404"} or status == 404:
+            return "ObjectNotFound"
+        if code in {"RequestTimeout", "RequestTimeoutException", "SlowDown"} or status == 429:
+            return "NetworkTimeoutOrThrottled"
+        if isinstance(status, int) and status >= 500:
+            return "R2ServiceUnavailable"
+    if isinstance(exc, (TimeoutError, ConnectionError)):
+        return "NetworkTimeout"
+    if isinstance(exc, PermissionError):
+        return "AccessDenied"
+    return "R2ReadFailed"
+
 
 @dataclass(frozen=True)
 class R2Settings:
@@ -97,14 +131,16 @@ class R2ObjectStore:
             response = self._get_client().get_object(Bucket=self.settings.bucket, Key=key)
             expected = response.get("ContentLength")
             if expected is not None and (expected < 0 or expected > max_bytes):
-                raise R2ObjectError("R2 object exceeds the configured read limit.")
+                raise R2ObjectError("R2 object exceeds the configured read limit.", failure_code="ObjectSizeLimitExceeded")
             body = response["Body"]
-            content = body.read(max_bytes + 1)
-            close = getattr(body, "close", None)
-            if callable(close):
-                close()
+            try:
+                content = body.read(max_bytes + 1)
+            finally:
+                close = getattr(body, "close", None)
+                if callable(close):
+                    close()
             if len(content) > max_bytes or (expected is not None and len(content) != expected):
-                raise R2ObjectError("R2 object size validation failed.")
+                raise R2ObjectError("R2 object size validation failed.", failure_code="ObjectSizeMismatch")
             metadata = response.get("Metadata", {})
             if not isinstance(metadata, dict):
                 raise R2ObjectError("R2 object metadata is invalid.")
@@ -113,7 +149,10 @@ class R2ObjectStore:
             raise
         except Exception as exc:
             # Do not include SDK exception text: it can contain internal endpoint or request data.
-            raise R2ObjectError(f"R2 object read failed ({type(exc).__name__}).") from None
+            raise R2ObjectError(
+                f"R2 object read failed ({_safe_failure_code(exc)}).",
+                failure_code=_safe_failure_code(exc),
+            ) from None
 
     def get_json(self, key: str, *, max_bytes: int = 8_000_000) -> dict[str, Any]:
         try:

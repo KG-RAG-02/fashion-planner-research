@@ -3,9 +3,26 @@ services:
     build:
       context: .
     image: vogue-sales-market-review-agent:local
-    network_mode: none
     init: true
     restart: unless-stopped
+    volumes:
+      - ${PROJECT07_R2_SOURCE_MANIFEST_FILE:-./configs/r2-source-manifest.v1.json}:/app/configs/r2-source-manifest.runtime.json:ro
+    environment:
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      R2_ENDPOINT: ${R2_ENDPOINT:-}
+      VOGUE_HM_RESEARCH_NONCOMMERCIAL: ${VOGUE_HM_RESEARCH_NONCOMMERCIAL:-false}
+      VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY: ${VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY:-}
+      VOGUE_HM_HTTP_TIMEOUT_SECONDS: ${VOGUE_HM_HTTP_TIMEOUT_SECONDS:-20}
+      VOGUE_HM_HTTP_RETRIES: ${VOGUE_HM_HTTP_RETRIES:-1}
+      VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED: ${VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED:-false}
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      OPENAI_MODEL: ${OPENAI_MODEL:-}
+      VOGUE_USD_KRW_FALLBACK_RATE: ${VOGUE_USD_KRW_FALLBACK_RATE:-}
+      VOGUE_USD_KRW_FALLBACK_DATE: ${VOGUE_USD_KRW_FALLBACK_DATE:-}
+      PROJECT07_R2_SOURCE_MANIFEST: /app/configs/r2-source-manifest.runtime.json
 
   sales-market-review-agent-tests:
     build:

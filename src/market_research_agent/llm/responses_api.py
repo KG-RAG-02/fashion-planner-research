@@ -30,9 +30,7 @@ class OpenAIResponsesClient:
         timeout_seconds: float = 60,
         max_output_tokens: int = 1800,
     ) -> None:
-        self.api_key = api_key if api_key is not None else (
-            os.environ.get("OPENAI_API_KEY", "") or os.environ.get("LLM_API_KEY", "")
-        )
+        self.api_key = api_key if api_key is not None else os.environ.get("OPENAI_API_KEY", "")
         configured_model = os.environ.get("OPENAI_MODEL", "").strip()
         self.model = model if model is not None else configured_model
         self.timeout_seconds = timeout_seconds
@@ -47,34 +45,14 @@ class OpenAIResponsesClient:
             raise ValueError("max_output_tokens must be a positive integer")
 
     def create_json_response(self, *, instructions: str, input_text: str) -> dict[str, Any]:
-        return self._create_json_response(instructions=instructions, input_payload=input_text)
+        return self._create_json_response(instructions=instructions, input_text=input_text)
 
-    def create_json_response_with_image(
-        self, *, instructions: str, input_text: str, image_data_uri: str, detail: str = "high",
-    ) -> dict[str, Any]:
-        """Send one caller-provided image using the Responses API vision input format."""
-        if not image_data_uri.startswith(("data:image/jpeg;base64,", "data:image/png;base64,",
-                                          "data:image/webp;base64,")):
-            raise LlmCallError("Image input must be a supported base64 data URL.")
-        if detail not in {"low", "high", "auto"}:
-            raise LlmCallError("Image detail setting is unsupported.")
-        return self._create_json_response(
-            instructions=instructions,
-            input_payload=[{
-                "role": "user",
-                "content": [
-                    {"type": "input_text", "text": input_text},
-                    {"type": "input_image", "image_url": image_data_uri, "detail": detail},
-                ],
-            }],
-        )
-
-    def _create_json_response(self, *, instructions: str, input_payload: Any) -> dict[str, Any]:
+    def _create_json_response(self, *, instructions: str, input_text: str) -> dict[str, Any]:
         body = json.dumps(
             {
                 "model": self.model,
                 "instructions": instructions,
-                "input": input_payload,
+                "input": input_text,
                 "store": False,
                 "max_output_tokens": self.max_output_tokens,
                 "text": {"format": {"type": "json_object"}},

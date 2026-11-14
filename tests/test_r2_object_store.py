@@ -24,6 +24,25 @@ class FakeR2Client:
         return {"ContentLength": len(self.body), "Body": io.BytesIO(self.body)}
 
 
+class ReadFailureBody:
+    def __init__(self):
+        self.closed = False
+
+    def read(self, _size):
+        raise OSError("simulated stream failure")
+
+    def close(self):
+        self.closed = True
+
+
+class ReadFailureClient:
+    def __init__(self, body):
+        self.body = body
+
+    def get_object(self, **_kwargs):
+        return {"ContentLength": 1, "Body": self.body}
+
+
 class R2ObjectStoreTests(unittest.TestCase):
     def settings(self, endpoint=""):
         return R2Settings("account", "bucket", "access-secret-id", "never-log-this-secret", endpoint)
@@ -58,6 +77,21 @@ class R2ObjectStoreTests(unittest.TestCase):
         }, clear=True):
             settings = R2Settings.from_env()
         self.assertEqual(settings.endpoint_url, "https://r2.example")
+
+    def test_stream_is_closed_when_body_read_fails(self):
+        body = ReadFailureBody()
+        store = R2ObjectStore(self.settings(), ReadFailureClient(body))
+        with self.assertRaises(R2ObjectError):
+            store.get_bytes("prefix/object")
+        self.assertTrue(body.closed)
+
+    def test_botocore_connection_failures_are_classified_without_details(self):
+        failure_type = type("EndpointConnectionError", (Exception,), {})
+        store = R2ObjectStore(self.settings(), FakeR2Client(failure_type("secret endpoint text")))
+        with self.assertRaises(R2ObjectError) as raised:
+            store.get_bytes("prefix/object")
+        self.assertEqual(raised.exception.failure_code, "NetworkConnectionError")
+        self.assertNotIn("secret endpoint text", str(raised.exception))
 
 
 if __name__ == "__main__":

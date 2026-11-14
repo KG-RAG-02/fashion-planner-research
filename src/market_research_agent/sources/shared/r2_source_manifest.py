@@ -9,11 +9,12 @@ from typing import Any
 
 
 _ROOT = Path(__file__).resolve().parents[4]
-_DEFAULT_MANIFEST = _ROOT / "configs" / "r2-source-manifest.v1.json"
+_CONFIGS_DIR = Path(os.getenv("PROJECT07_CONFIGS_DIR", _ROOT / "configs"))
+_DEFAULT_MANIFEST = _CONFIGS_DIR / "r2-source-manifest.v1.json"
 
 
-def r2_source_key(name: str, *, default: str, legacy_envs: tuple[str, ...] = ()) -> str:
-    """Resolve an R2 object key from the shared manifest, with legacy fallback."""
+def r2_source_key(name: str, *, default: str) -> str:
+    """Resolve an R2 object key from the shared manifest or its default."""
     manifest_value = os.getenv("PROJECT07_R2_SOURCE_MANIFEST", "").strip()
     manifest_path = Path(manifest_value) if manifest_value else _DEFAULT_MANIFEST
     if not manifest_path.is_absolute():
@@ -23,10 +24,12 @@ def r2_source_key(name: str, *, default: str, legacy_envs: tuple[str, ...] = ())
     try:
         payload: Any = json.loads(manifest_path.read_text(encoding="utf-8"))
     except FileNotFoundError:
-        payload = {}
+        if manifest_value:
+            raise ValueError("The configured Project_07 R2 source manifest does not exist.") from None
+        payload = None
     except (OSError, json.JSONDecodeError):
         raise ValueError("The configured Project_07 R2 source manifest is invalid or unreadable.") from None
-    if payload:
+    if payload is not None:
         if not isinstance(payload, dict) or payload.get("schema_version") != "project07-r2-source-manifest/1.0":
             raise ValueError("The configured Project_07 R2 source manifest has an unsupported schema.")
         objects = payload.get("objects")
@@ -37,8 +40,4 @@ def r2_source_key(name: str, *, default: str, legacy_envs: tuple[str, ...] = ())
             if not isinstance(value, str) or not value.strip():
                 raise ValueError(f"R2 manifest object key {name!r} must be a non-empty string.")
             return value.strip()
-    for env_name in legacy_envs:
-        value = os.getenv(env_name, "").strip()
-        if value:
-            return value
     return default
