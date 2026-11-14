@@ -235,8 +235,8 @@ class Project07ReviewHttpTests(unittest.TestCase):
                     env_overrides={
                         "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true",
                         "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED": "true",
-                        "OPENAI_API_KEY": "synthetic-test-key",
-                        "OPENAI_MODEL": "synthetic-test-model",
+                        "LLM_API_KEY": "synthetic-test-key",
+                        "LLM_MODEL": "synthetic-test-model",
                     },
                     fx_reference=fx,
                     llm_proposal=proposal,
@@ -323,8 +323,8 @@ class Project07ReviewHttpTests(unittest.TestCase):
             env_overrides={
                 "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true",
                 "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED": "true",
-                "OPENAI_API_KEY": "synthetic-test-key",
-                "OPENAI_MODEL": "synthetic-test-model",
+                "LLM_API_KEY": "synthetic-test-key",
+                "LLM_MODEL": "synthetic-test-model",
             },
             fx_reference={
                 "base_currency": "USD", "quote_currency": "KRW", "rate": 1400.0,

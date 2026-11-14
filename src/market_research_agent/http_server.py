@@ -379,8 +379,8 @@ def _load_project_r2_env() -> None:
                                  or key == "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED"
                                  or key == "VOGUE_USD_KRW_FALLBACK_RATE"
                                  or key == "VOGUE_USD_KRW_FALLBACK_DATE"
-                                 or key == "OPENAI_API_KEY"
-                                 or key == "OPENAI_MODEL"
+                                 or key == "LLM_API_KEY"
+                                 or key == "LLM_MODEL"
                                  or key == "VOGUE_DUCKDB_EXTENSION_DIRECTORY"
                                  ):
             continue
