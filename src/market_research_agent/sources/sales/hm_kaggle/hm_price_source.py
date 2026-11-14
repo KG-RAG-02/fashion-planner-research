@@ -17,6 +17,7 @@ from urllib.parse import urlsplit
 
 from ....sources.shared.r2_object_store import R2ObjectStore, R2Settings
 from ....sources.shared.r2_source_manifest import r2_source_key
+from ....runtime_settings import hm_research_noncommercial_enabled
 from .duckdb_http import configure_httpfs
 from .hm_customer_age_source import _mapped_requested_category, _safe_failure_category
 
@@ -62,10 +63,8 @@ class HmHistoricalPriceResearchSource:
                 product_type: str | None = None, season: str | None = None) -> dict[str, Any] | None:
         analyze_started = time.perf_counter()
         stage = "configuration"
-        if os.getenv("VOGUE_HM_RESEARCH_NONCOMMERCIAL", "").strip().casefold() not in {"1", "true", "yes"}:
-            raise HmPriceSourceError(
-                "Set VOGUE_HM_RESEARCH_NONCOMMERCIAL=true only for non-commercial research use."
-            )
+        if not hm_research_noncommercial_enabled():
+            raise HmPriceSourceError("H&M price research is disabled by Project_07 runtime settings.")
         if not isinstance(category, str) or not category.strip():
             raise HmPriceSourceError("A product category is required for historical price analysis.")
         try:

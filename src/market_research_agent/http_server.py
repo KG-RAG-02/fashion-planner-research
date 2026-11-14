@@ -1,7 +1,7 @@
-"""Authenticated HTTP adapter for the P07 Sales Market review endpoint.
+"""Authenticated HTTP service for the P07 Sales Market review endpoint.
 
-It supports explicit local source configuration from process environment. It
-remains a development adapter, not a production deployment or retry policy.
+Local mode is loopback-only. Container service mode binds all interfaces and
+requires bearer authentication; both modes expose the same review contract.
 """
 
 from __future__ import annotations
@@ -21,6 +21,7 @@ from .domain.currency_conversion import CurrencyConversionError, convert_usd_to_
 from .domain.sales_market_review import REVIEW_SCHEMA_VERSION, build_sales_market_review
 from .llm.target_audience import propose_target_audience
 from .llm.responses_api import LlmCallError, OpenAIResponsesClient
+from .runtime_settings import hm_research_noncommercial_enabled, target_llm_transfer_authorized
 from .sources.sales.hm_kaggle.hm_combined_research_source import HmCombinedResearchSource
 
 
@@ -176,8 +177,7 @@ def _validate_json_tree(value: Any, field: str) -> None:
         raise RequestValidationError("INVALID_INPUT", f"{field} must contain valid JSON values.") from None
 
 
-def make_handler(
-) -> type[BaseHTTPRequestHandler]:
+def make_handler(*, service_mode: bool = False) -> type[BaseHTTPRequestHandler]:
     """Create a handler for the current P07 review contract."""
 
     class Project07Handler(BaseHTTPRequestHandler):
@@ -220,7 +220,10 @@ def make_handler(
         def do_GET(self) -> None:
             path = urlsplit(self.path).path
             if path == "/api/health":
-                health = {"status": "ok", "mode": "local-development"}
+                health = {
+                    "status": "ok",
+                    "mode": "container-service" if service_mode else "local-development",
+                }
                 self._send_json(200, health)
             else:
                 self._send_json(404, _review_error_payload("NOT_FOUND", "Route not found."))
@@ -283,7 +286,7 @@ def make_handler(
                 target_audience_error = None
                 historical_price = research_bundle["historical_price"]
                 historical_price_error = research_bundle["historical_price_error"]
-                if os.getenv("VOGUE_HM_RESEARCH_NONCOMMERCIAL", "").strip().casefold() in {"1", "true", "yes"}:
+                if hm_research_noncommercial_enabled():
                     if historical_price is not None:
                         fx_started = time.perf_counter()
                         try:
@@ -298,7 +301,7 @@ def make_handler(
                         finally:
                             _LOGGER.info("P07 FX reference lookup and conversion completed in %.3fs",
                                          time.perf_counter() - fx_started)
-                target_audience_authorized = os.getenv("VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED", "").strip().casefold() in {"1", "true", "yes"}
+                target_audience_authorized = target_llm_transfer_authorized()
                 if target_audience_authorized:
                     llm_started = time.perf_counter()
                     try:
@@ -360,7 +363,7 @@ def make_handler(
 
 
 def _load_project_r2_env() -> None:
-    """Load R2, H&M research, and target-LLM settings from local .env."""
+    """Load storage credentials, service auth, and provider settings from local .env."""
     if os.getenv("VOGUE_PROJECT07_DISABLE_DOTENV", "").casefold() in {"1", "true", "yes"}:
         return
     env_path = Path(__file__).resolve().parents[2] / ".env"
@@ -374,14 +377,11 @@ def _load_project_r2_env() -> None:
             line = line[len("export "):].strip()
         key, separator, value = line.partition("=")
         key = key.strip()
-        if not separator or not (key.startswith("R2_") or key.startswith("VOGUE_HM_")
-                                 or key == "PROJECT07_R2_SOURCE_MANIFEST"
-                                 or key == "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED"
-                                 or key == "VOGUE_USD_KRW_FALLBACK_RATE"
-                                 or key == "VOGUE_USD_KRW_FALLBACK_DATE"
+        if not separator or not (key.startswith("R2_") or (key.startswith("VOGUE_HM_")
+                                 and key != "VOGUE_HM_RESEARCH_NONCOMMERCIAL")
+                                 or key == "VOGUE_AGENT_SERVICE_BEARER_TOKEN"
                                  or key == "LLM_API_KEY"
                                  or key == "LLM_MODEL"
-                                 or key == "VOGUE_DUCKDB_EXTENSION_DIRECTORY"
                                  ):
             continue
         value = value.strip()
@@ -395,13 +395,21 @@ def _load_project_r2_env() -> None:
 def serve(
     host: str = "127.0.0.1",
     port: int = 8766,
+    *,
+    service_mode: bool = False,
 ) -> None:
     """Start the P07 Sales Market review HTTP server."""
     _load_project_r2_env()
-    if host not in {"127.0.0.1", "localhost"}:
-        raise ValueError("The local proposal server may only bind to loopback.")
-    server = ThreadingHTTPServer((host, port), make_handler())
-    print(f"Project_07 sales-market review service: http://{host}:{port}")
+    if service_mode:
+        if host != "0.0.0.0":
+            raise ValueError("Container service mode must bind to 0.0.0.0.")
+        if not os.environ.get("VOGUE_AGENT_SERVICE_BEARER_TOKEN", "").strip():
+            raise ValueError("Bearer authentication is required in container service mode.")
+    elif host not in {"127.0.0.1", "localhost"}:
+        raise ValueError("Non-loopback bind requires container service mode.")
+    server = ThreadingHTTPServer((host, port), make_handler(service_mode=service_mode))
+    mode = "container-service" if service_mode else "local-development"
+    print(f"Project_07 sales-market review service mode={mode} bind={host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:
@@ -412,10 +420,12 @@ def serve(
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--host", default="127.0.0.1")
+    parser.add_argument("--service-mode", action="store_true", help="Enable container binding with required bearer authentication.")
+    parser.add_argument("--host")
     parser.add_argument("--port", type=int, default=8766)
     args = parser.parse_args(argv)
-    serve(args.host, args.port)
+    host = args.host or ("0.0.0.0" if args.service_mode else "127.0.0.1")
+    serve(host, args.port, service_mode=args.service_mode)
     return 0
 
 

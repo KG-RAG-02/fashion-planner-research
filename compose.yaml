@@ -5,24 +5,23 @@ services:
     image: vogue-sales-market-review-agent:local
     init: true
     restart: unless-stopped
-    volumes:
-      - ${PROJECT07_R2_SOURCE_MANIFEST_FILE:-./configs/r2-source-manifest.v1.json}:/app/configs/r2-source-manifest.runtime.json:ro
+    ports:
+      - "8766:8766"
     environment:
+      VOGUE_AGENT_SERVICE_BEARER_TOKEN: ${VOGUE_AGENT_SERVICE_BEARER_TOKEN:?VOGUE_AGENT_SERVICE_BEARER_TOKEN is required}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
       R2_BUCKET: ${R2_BUCKET:-}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
       R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
-      R2_ENDPOINT: ${R2_ENDPOINT:-}
-      VOGUE_HM_RESEARCH_NONCOMMERCIAL: ${VOGUE_HM_RESEARCH_NONCOMMERCIAL:-false}
       VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY: ${VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY:-}
-      VOGUE_HM_HTTP_TIMEOUT_SECONDS: ${VOGUE_HM_HTTP_TIMEOUT_SECONDS:-20}
-      VOGUE_HM_HTTP_RETRIES: ${VOGUE_HM_HTTP_RETRIES:-1}
-      VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED: ${VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED:-false}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}
-      VOGUE_USD_KRW_FALLBACK_RATE: ${VOGUE_USD_KRW_FALLBACK_RATE:-}
-      VOGUE_USD_KRW_FALLBACK_DATE: ${VOGUE_USD_KRW_FALLBACK_DATE:-}
-      PROJECT07_R2_SOURCE_MANIFEST: /app/configs/r2-source-manifest.runtime.json
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8766/api/health', timeout=2).read()"]
+      interval: 20s
+      timeout: 3s
+      retries: 3
+      start_period: 10s
 
   sales-market-review-agent-tests:
     build:

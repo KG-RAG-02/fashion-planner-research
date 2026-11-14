@@ -2,6 +2,7 @@ FROM python:3.14-slim
 
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
+    PORT=8766 \
     PROJECT07_PROMPTS_DIR=/app/prompts \
     PROJECT07_CONFIGS_DIR=/app/configs \
     VOGUE_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
@@ -24,6 +25,8 @@ RUN pip install --no-cache-dir '.[r2]' \
 
 USER agent
 
+EXPOSE 8766
+
 RUN python -c "import duckdb; c=duckdb.connect(); c.execute(\"SET extension_directory='/opt/duckdb/extensions'\"); c.execute('LOAD httpfs'); assert c.execute(\"SELECT loaded FROM duckdb_extensions() WHERE extension_name='httpfs'\").fetchone()[0]; c.close()"
 
-CMD ["python", "-m", "market_research_agent.runtime"]
+CMD ["python", "-m", "market_research_agent.http_server", "--service-mode", "--host", "0.0.0.0", "--port", "8766"]
