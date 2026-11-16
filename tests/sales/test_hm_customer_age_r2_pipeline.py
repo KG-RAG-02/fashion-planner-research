@@ -318,6 +318,59 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
         self.assertIsNone(selected["historical_price"])
         self.assertEqual(selected["historical_price_source_status"], "no_match")
 
+    def test_korean_tops_category_selects_real_tops_price_and_customer_aggregates(self):
+        from market_research_agent.sources.sales.hm_kaggle.hm_customer_age_source import (
+            _MAPPING_PATH, _mapped_requested_category,
+        )
+        mapping = json.loads(_MAPPING_PATH.read_text(encoding="utf-8"))
+        self.assertEqual(_mapped_requested_category("상의", mapping), "Tops")
+        from market_research_agent.sources.sales.hm_kaggle.hm_customer_age_source import (
+            _map_gender, _map_product_type, _map_requested_category,
+        )
+        fuzzy = _map_requested_category("Topswear", mapping)
+        self.assertEqual(fuzzy["mapped_category"], "Tops")
+        self.assertEqual(fuzzy["method"], "fuzzy_similarity")
+        low = _map_requested_category("zzqvxx", mapping)
+        self.assertEqual(low["method"], "below_threshold")
+        self.assertEqual(low["mapped_category"], "zzqvxx")
+        self.assertEqual(_map_gender("여성")["merchandise_segment"], "ladieswear")
+        self.assertEqual(_map_gender("남성복")["merchandise_segment"], "menswear")
+        self.assertEqual(_map_product_type("Blosue", mapping)["mapped"], "Blouse")
+        snapshot = {"profiles": [
+            {"category": "Tops", "segment": "__all__",
+             "customer_age_profile": {"category": "Tops", "unique_customer_denominator": 100},
+             "historical_price_aggregate": {"category": "Tops", "sample_count": 230,
+                  "price_statistics": {"minimum": 1, "p25": 2, "median": 3, "p75": 4,
+                                       "maximum": 5, "mean": 3}, "sources": [],
+                  "period": {}, "channel_codes": [], "article_count": 2,
+                  "category_mapping": {"mapping_id": "m", "mapping_version": "v"},
+                  "merchandise_segment": "__all__"}},
+            {"category": "Tops", "segment": "ladieswear",
+             "customer_age_profile": {"category": "Tops", "unique_customer_denominator": 60},
+             "historical_price_aggregate": {"category": "Tops", "sample_count": 130,
+                  "price_statistics": {"minimum": 1, "p25": 2, "median": 3, "p75": 4,
+                                       "maximum": 5, "mean": 3}, "sources": [],
+                  "period": {}, "channel_codes": [], "article_count": 1,
+                  "category_mapping": {"mapping_id": "m", "mapping_version": "v"},
+                  "merchandise_segment": "ladieswear"}},
+        ]}
+        selected = HmResearchAggregateSource._select(snapshot, {"category": "상의"})
+        self.assertEqual(selected["historical_price"]["sample_count"], 230)
+        self.assertEqual(selected["historical_price"]["category_mapping"]["mapped_category"], "Tops")
+        self.assertEqual(selected["customer_age_profile"]["unique_customer_denominator"], 100)
+        women = HmResearchAggregateSource._select(snapshot, {"category": "상의", "gender": "women"})
+        self.assertEqual(women["historical_price_source_status"], "available")
+        self.assertEqual(women["historical_price"]["sample_count"], 130)
+        self.assertTrue(women["historical_price"]["gender_filter_applied"])
+        self.assertEqual(women["customer_age_profile"]["unique_customer_denominator"], 60)
+        self.assertEqual(women["historical_price"]["season_filter_status"], "not_provided")
+        exact = HmResearchAggregateSource._select(
+            snapshot, {"category": "상의", "product_type": "Blouse", "gender": "여성", "season": "2027SS"},
+        )
+        self.assertEqual(exact["historical_price_source_status"], "available")
+        self.assertTrue(exact["historical_price"]["product_type_fallback_applied"])
+        self.assertFalse(exact["historical_price"]["product_type_filter_applied"])
+
     def test_empty_aggregate_result_is_cached(self):
         source = self._source(FakeR2Client())
         with patch.dict(sys.modules, {"duckdb": FakeDuckDB}), patch.object(

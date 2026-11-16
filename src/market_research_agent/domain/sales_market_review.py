@@ -107,6 +107,10 @@ def _review_evidence(
                 "age_bands": analysis.get("age_bands", []),
                 "unique_customer_denominator": analysis.get("unique_customer_denominator"),
                 "period": period,
+                "requested_gender": analysis.get("requested_gender"),
+                "gender_filter_applied": analysis.get("gender_filter_applied"),
+                "gender_fallback_applied": analysis.get("gender_fallback_applied"),
+                "gender_mapping": analysis.get("gender_mapping"),
             }
             interpretation = "Aggregated age-band counts only; this is historical research and not a current customer profile."
             evidence_supports = supports
@@ -116,6 +120,18 @@ def _review_evidence(
                 "price_statistics": analysis.get("price_statistics"),
                 "scaled_price_statistics": analysis.get("scaled_price_statistics"),
                 "period": period,
+                "requested_product_type": analysis.get("requested_product_type_context"),
+                "product_type_filter": analysis.get("product_type_filter"),
+                "product_type_filter_applied": analysis.get("product_type_filter_applied"),
+                "product_type_fallback_applied": analysis.get("product_type_fallback_applied"),
+                "product_type_mapping": (analysis.get("category_mapping") or {}).get("product_type_mapping"),
+                "requested_gender": analysis.get("requested_gender"),
+                "gender_filter_applied": analysis.get("gender_filter_applied"),
+                "gender_fallback_applied": analysis.get("gender_fallback_applied"),
+                "category_mapping": analysis.get("category_mapping"),
+                "gender_mapping": analysis.get("gender_mapping"),
+                "season_filter": analysis.get("season_filter"),
+                "season_filter_status": analysis.get("season_filter_status"),
             }
             interpretation = "Historical H&M transaction-price aggregate; the ×590 USD scale is a stated research assumption, not official currency metadata."
             evidence_supports = supports + ["result.margin_estimate", "result.margin_analysis"]
@@ -488,13 +504,15 @@ def build_sales_market_review(
     if not fabrics:
         reason = (
             "source_error" if fabric_price_error else
-            "material_not_specified" if not product.get("material") else
+            "material_not_specified" if fabric_price_source_status == "not_requested" or not product.get("material") else
             "source_not_configured" if fabric_price_source_status == "not_configured" else
             "no_match" if fabric_price_source_status == "no_match" else
             "source_not_configured_or_no_match"
         )
         if fabric_price_error:
             message = fabric_price_error
+        elif reason == "material_not_specified":
+            message = "Material was not supplied, so fabric prices were not queried."
         elif fabric_price_source_status == "not_configured":
             message = "R2 fabric price source is not configured."
         elif fabric_price_source_status == "no_match":
