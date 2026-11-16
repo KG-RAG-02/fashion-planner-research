@@ -7,8 +7,8 @@ import time
 
 def main() -> None:
     print(
-        "Market Research Agent development container is ready. "
-        "No API server or market provider is configured.",
+        "Sales Market Review Agent development container is ready. "
+        "Start the review API explicitly with market_research_agent.http_server.",
         flush=True,
     )
     while True:

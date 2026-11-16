@@ -8,6 +8,7 @@ from __future__ import annotations
 
 import json
 import os
+import ssl
 from typing import Any
 from urllib.error import HTTPError, URLError
 from urllib.request import Request, urlopen
@@ -27,26 +28,33 @@ class OpenAIResponsesClient:
         api_key: str | None = None,
         model: str | None = None,
         timeout_seconds: float = 60,
+        max_output_tokens: int = 1800,
     ) -> None:
-        self.api_key = api_key if api_key is not None else os.environ.get("OPENAI_API_KEY", "")
-        configured_model = os.environ.get("OPENAI_MODEL", "").strip()
+        self.api_key = api_key if api_key is not None else os.environ.get("LLM_API_KEY", "")
+        configured_model = os.environ.get("LLM_MODEL", "").strip()
         self.model = model if model is not None else configured_model
         self.timeout_seconds = timeout_seconds
+        self.max_output_tokens = max_output_tokens
         if not self.api_key:
-            raise LlmCallError("OPENAI_API_KEY is required; no request was sent.")
+            raise LlmCallError("LLM_API_KEY is required; no request was sent.")
         if not self.model:
-            raise LlmCallError("OPENAI_MODEL is required; no request was sent.")
+            raise LlmCallError("LLM_MODEL is required; no request was sent.")
         if timeout_seconds <= 0:
             raise ValueError("timeout_seconds must be positive")
+        if isinstance(max_output_tokens, bool) or not isinstance(max_output_tokens, int) or max_output_tokens <= 0:
+            raise ValueError("max_output_tokens must be a positive integer")
 
     def create_json_response(self, *, instructions: str, input_text: str) -> dict[str, Any]:
+        return self._create_json_response(instructions=instructions, input_text=input_text)
+
+    def _create_json_response(self, *, instructions: str, input_text: str) -> dict[str, Any]:
         body = json.dumps(
             {
                 "model": self.model,
                 "instructions": instructions,
                 "input": input_text,
                 "store": False,
-                "max_output_tokens": 1800,
+                "max_output_tokens": self.max_output_tokens,
                 "text": {"format": {"type": "json_object"}},
             },
             ensure_ascii=False,
@@ -61,7 +69,12 @@ class OpenAIResponsesClient:
             method="POST",
         )
         try:
-            with urlopen(request, timeout=self.timeout_seconds) as response:
+            try:
+                import certifi
+                tls_context = ssl.create_default_context(cafile=certifi.where())
+            except ImportError:
+                tls_context = ssl.create_default_context()
+            with urlopen(request, timeout=self.timeout_seconds, context=tls_context) as response:
                 payload = json.loads(response.read().decode("utf-8"))
         except HTTPError as exc:
             # Provider response bodies may echo request details. Never surface them.

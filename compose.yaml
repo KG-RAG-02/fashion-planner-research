@@ -1,58 +1,42 @@
 services:
-  market-research-agent:
+  sales-market-review-agent:
     build:
       context: .
-    image: vogue-market-research-agent:local
-    # The image default is now the bearer-protected HTTP service; keep the idle loop explicit.
-    command: ["python", "-m", "market_research_agent.runtime"]
-    network_mode: none
-    profiles: ["idle"]
-    init: true
-    restart: unless-stopped
-
-  market-research-agent-demo:
-    build:
-      context: .
-    image: vogue-market-research-agent:local
-    command: ["python", "examples/synthetic_demo.py"]
-    network_mode: none
-    profiles: ["tools"]
-    restart: "no"
-
-  market-research-agent-tests:
-    build:
-      context: .
-    image: vogue-market-research-agent:local
-    command: ["python", "scripts/run_tests.py"]
-    network_mode: none
-    profiles: ["test"]
-    restart: "no"
-
-  sales-market-agent-api:
-    build:
-      context: .
-    image: vogue-market-research-agent:local
-    profiles: ["api"]
-    command: ["vogue-market-research-http", "--service-mode", "--host", "0.0.0.0", "--port", "8766"]
+    image: vogue-sales-market-review-agent:local
     user: "10001:10001"
     read_only: true
     tmpfs:
       - /tmp:size=64m,mode=1777
-    environment:
-      VOGUE_AGENT_SERVICE_BEARER_TOKEN: ${VOGUE_AGENT_SERVICE_BEARER_TOKEN:-}
-      VOGUE_PROJECT07_DISABLE_DOTENV: "1"
-      VOGUE_P07_REVIEW_ARTIFACT_DIR: /data/reviews
-      # Optional offline Review source for the stub profile (empty = configured default).
-      VOGUE_P07_REVIEW_SOURCE: ${VOGUE_P07_REVIEW_SOURCE:-}
-      # /reviews verifies P08 raw artifacts from VOGUE_UPSTREAM_ARTIFACT_ROOT (a read-only
-      # mount of P08 blobs at <root>/p08/blobs); without it /reviews fails closed with 503.
-    volumes:
-      - review-artifacts:/data/reviews
-      # The H&M R2 DuckDB copy can reach VOGUE_R2_HM_DB_MAX_BYTES (2 GB); keep it off tmpfs.
-      - hm-cache:/data/hm-cache
+    init: true
+    restart: unless-stopped
     ports:
       - "127.0.0.1:8766:8766"
-    init: true
+    environment:
+      VOGUE_AGENT_SERVICE_BEARER_TOKEN: ${VOGUE_AGENT_SERVICE_BEARER_TOKEN:?VOGUE_AGENT_SERVICE_BEARER_TOKEN is required}
+      VOGUE_PROJECT07_DISABLE_DOTENV: "1"
+      VOGUE_P07_REVIEW_ARTIFACT_DIR: /data/reviews
+      VOGUE_P07_REVIEW_SOURCE: ${VOGUE_P07_REVIEW_SOURCE:-}
+      R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
+      R2_BUCKET: ${R2_BUCKET:-}
+      R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
+      R2_SECRET_ACCESS_KEY: ${R2_SECRET_ACCESS_KEY:-}
+      VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY: ${VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY:-}
+      LLM_API_KEY: ${LLM_API_KEY:-}
+      LLM_MODEL: ${LLM_MODEL:-}
+      # workflow/0.1 requires an upstream artifact mount; the orchestrator's
+      # deploy/compose.yaml supplies VOGUE_UPSTREAM_ARTIFACT_ROOT and that mount.
+    volumes:
+      - review-artifacts:/data/reviews
+      - hm-cache:/data/hm-cache
+
+  sales-market-review-agent-tests:
+    build:
+      context: .
+    image: vogue-sales-market-review-agent:local
+    command: ["python", "scripts/run_tests.py"]
+    network_mode: none
+    profiles: ["test"]
+    restart: "no"
 
 volumes:
   review-artifacts:

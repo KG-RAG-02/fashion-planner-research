@@ -1,26 +1,22 @@
-# Project_07 prompt registry
+# P07 target-audience prompt
 
-이 폴더는 판매 분석가와 시장 분석가 프롬프트 원본을 각자 버전별로 관리합니다. 프롬프트 문장은 Python 코드에 넣지 않습니다.
+`target_audience_hypothesis/v1/` supports one optional part of the active
+`POST /v1/agents/sales-market-agent/reviews` flow: generating a target-audience
+hypothesis. It is not the market-data analysis itself. P07 builds the prompt
+input from the allowlisted product fields and summarized customer-age,
+historical-price, and fabric-listing evidence. It does not include the full P06
+Draft or customer-level source rows.
 
-| Prompt | Version | Status | Runtime | Purpose |
-| --- | --- | --- | --- | --- |
-| `sales_analysis` | [v1](sales_analysis/v1/) | proposal | 미연결 | 판매 관측 분석과 판매 source 경계 |
-| `market_analysis` | [v1](market_analysis/v1/) | proposal | 미연결 | 승인된 시장 관측·시장 Evidence 분석 |
-| `sales_market_analysis` | [v1](sales_market_analysis/v1/) | superseded proposal | 미연결 | 분리 전 통합 초안, 추적성 보존용 |
+The code default allows this transfer. Set
+`VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED=false` in the process environment to turn
+it off. An enabled call needs `LLM_API_KEY`; missing credentials or a failed
+call is reported as a nonfatal target-audience error, while other review
+results are preserved. The generated output is a hypothesis, not an observed
+customer fact.
 
-현재 Project_07에는 생성 모델과 프롬프트 실행 경로가 없습니다. `manifest.json`의 `runtime_active: false`는 이 사실을 기록합니다. 렌더링 파일은 검토용 산출물이며 활성 시스템 프롬프트가 아닙니다.
+- `system_template.md`: editable source prompt
+- `rendered_system.md`: runtime system prompt loaded by `llm/target_audience.py`
+- `user_template.md`: human-readable input shape; runtime builds a reduced JSON payload directly
+- `examples.json`: synthetic behavior examples; not injected into model calls
 
-## 버전 폴더
-
-- `system_template.md`: 시스템 프롬프트 원본
-- `user_template.md`: 추후 모델 호출을 위해 제안하는 사용자 메시지 템플릿
-- `examples.json`: 합성 입력과 기대 동작의 설명 예시. 자동으로 모델에 주입하지 않음
-- `rendered_system.md`: system template을 복사해 생성한 검토용 렌더링 산출물
-
-## 새 버전 추가
-
-1. 해당 역할 폴더의 `v1/`을 새 버전 폴더로 복사합니다. 공개·활성화된 버전은 덮어쓰지 않고 새 버전을 만듭니다.
-2. 새 버전의 system/user 템플릿, 예시, 검토 상태를 수정하고 `manifest.json`에 등록합니다.
-3. `python3 scripts/render_market_analysis_prompt.py --prompt sales_analysis --version v2`처럼 prompt ID와 버전을 지정해 검토용 `rendered_system.md`를 생성합니다.
-4. 공격·정상 혼합 fixture와 output 계약 호환성을 담당자가 검토합니다.
-5. 실제 런타임 사용은 모델·보안·계약 담당자 승인 및 별도 구현 뒤에만 설정합니다. 이 저장소의 문서나 manifest만으로 런타임이 활성화되지는 않습니다.
+The prompt output is validated in `src/market_research_agent/llm/target_audience.py`. Keep its required fields synchronized with `_OUTPUT_FIELDS` and the prompt's JSON instructions.

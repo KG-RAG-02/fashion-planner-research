@@ -132,11 +132,11 @@ class ServiceHealthModeTests(LiveServerTestCase):
 
     def test_service_mode_is_reported_without_auth(self):
         status, _, body = self.request('GET', '/api/health')  # no Authorization header
-        self.assertEqual((status, json.loads(body)), (200, {'status': 'ok', 'mode': 'service'}))
+        self.assertEqual((status, json.loads(body)), (200, {'status': 'ok', 'mode': 'container-service'}))
 
     def test_serve_passes_the_real_mode_to_the_handler(self):
         for kwargs, env, expected in (
-                ({'host': '0.0.0.0', 'service_mode': True}, {'VOGUE_AGENT_SERVICE_BEARER_TOKEN': 'test-only'}, 'service'),
+                ({'host': '0.0.0.0', 'service_mode': True}, {'VOGUE_AGENT_SERVICE_BEARER_TOKEN': 'test-only'}, 'container-service'),
                 ({'host': '127.0.0.1'}, {}, 'local-development')):
             with self.subTest(expected=expected), patch.dict(os.environ, env, clear=True), \
                     patch('market_research_agent.http_server.ThreadingHTTPServer') as server_type, \
@@ -148,7 +148,7 @@ class ServiceHealthModeTests(LiveServerTestCase):
     def test_synthetic_simulation_keeps_its_labels(self):
         status, health = in_process_health(make_handler(service_mode=True, synthetic_simulation_enabled=True))
         self.assertEqual((status, health['mode'], health['synthetic'], health['data_nature'], health['operational_eligible']),
-                         (200, 'service', True, 'synthetic_test', False))
+                         (200, 'container-service', True, 'synthetic_test', False))
         status, health = in_process_health(make_handler(synthetic_simulation_enabled=True))
         self.assertEqual((status, health['mode'], health['synthetic']), (200, 'synthetic_simulation', True))
 

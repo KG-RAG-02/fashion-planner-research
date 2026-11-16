@@ -110,6 +110,32 @@ class ReviewRouteTestCase(unittest.TestCase):
 
 
 class ContractVersionDispatchTests(ReviewRouteTestCase):
+    def test_product_review_dispatch_does_not_require_workflow_artifacts(self):
+        request = json.loads((ROOT / 'contracts/examples/sales-market-review-0.3-proposal.request.json').read_text())
+        bundle = {'fabric_prices': (), 'fabric_price_error': None,
+                  'fabric_price_source_status': 'not_configured',
+                  'customer_age_profile': None, 'customer_age_error': None,
+                  'historical_price': None, 'historical_price_error': None}
+        with patch('market_research_agent.http_server.HmCombinedResearchSource.analyze', return_value=bundle) as source, \
+                patch('market_research_agent.http_server.SalesMarketReviewService') as workflow:
+            status, out = call(self.handler, canonical(request), self.env)
+        self.assertEqual((status, out['contract_version'], out['status']),
+                         (200, 'vogue-sales-market-review/0.3-proposal', 'no_results'), out)
+        source.assert_called_once_with(request['input']['product'])
+        workflow.assert_not_called()
+        self.agent_factory.assert_not_called()
+        self.assertFalse(self.store_dir.exists())
+
+    def test_retired_product_version_is_rejected_before_any_source_or_store(self):
+        request = fixture_request()
+        request['contract_version'] = 'vogue-sales-market-review/0.2-proposal'
+        with patch('market_research_agent.http_server.HmCombinedResearchSource.analyze') as source:
+            status, out = call(self.handler, canonical(request), self.env)
+        self.assertEqual((status, out['error']['code']), (422, 'UNSUPPORTED_CONTRACT_VERSION'))
+        source.assert_not_called()
+        self.agent_factory.assert_not_called()
+        self.assertFalse(self.store_dir.exists())
+
     def test_unsupported_versions_are_422_before_any_data_work(self):
         cases = {}
         for version in ('vogue-workflow/0.2', 'vogue-handoff/0.1', 'vogue-workflow/0.1 ', '', None, 1, ['vogue-workflow/0.1']):

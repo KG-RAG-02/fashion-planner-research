@@ -1,19 +1,56 @@
+# Python bytecode and interpreter caches
 __pycache__/
 *.py[cod]
+*$py.class
+
+# Virtual environments
 .venv/
 venv/
+env/
+
+# Local environment and secrets; keep checked-in examples/templates
 .env
-.DS_Store
+.env.*
+!.env.example
+!.env.*.example
+
+# Test, lint, and type-check output
 .pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.tox/
+.nox/
 .coverage
-dist/
+.coverage.*
+htmlcov/
+
+# Packaging and build output
 build/
+dist/
 *.egg-info/
-# Runtime data stays local and is never committed.
+pip-wheel-metadata/
+
+# Local logs and temporary files
+*.log
+*.tmp
+*.temp
+
+# Local databases and DuckDB spill files
+*.db
+*.sqlite
+*.sqlite3
+*.duckdb
+*.duckdb.wal
+
+# Runtime datasets, derived files, and machine-local state
 /data/raw/
 /data/interim/
 /data/processed/
 /data/local/
+
+# Operating system files
+.DS_Store
+Thumbs.db
 
 # Deterministic test outputs: python scripts/restore_test_fixtures.py
 /examples/query_coverage/generated/

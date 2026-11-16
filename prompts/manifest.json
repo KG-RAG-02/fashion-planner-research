@@ -1,50 +1,20 @@
 {
   "schema_version": "local-prompt-registry/1.0",
-  "runtime_active": false,
-  "runtime_owner": null,
+  "runtime_active": true,
+  "runtime_owner": "src/market_research_agent/llm/target_audience.py",
   "prompts": {
-    "sales_analysis": {
+    "target_audience_hypothesis": {
       "current_version": "v1",
-      "status": "proposal",
+      "status": "runtime_active",
       "versions": {
         "v1": {
-          "status": "proposal",
-          "system_template": "sales_analysis/v1/system_template.md",
-          "user_template": "sales_analysis/v1/user_template.md",
-          "examples": "sales_analysis/v1/examples.json",
-          "rendered_system": "sales_analysis/v1/rendered_system.md",
-          "output_contract": "local opt-in runtime appends the versioned JSON output contract; no shared generation contract",
-          "evaluation_fixture": "tests/fixtures/market_analysis_prompt_injection/cases.json"
-        }
-      }
-    },
-    "market_analysis": {
-      "current_version": "v1",
-      "status": "proposal",
-      "versions": {
-        "v1": {
-          "status": "proposal",
-          "system_template": "market_analysis/v1/system_template.md",
-          "user_template": "market_analysis/v1/user_template.md",
-          "examples": "market_analysis/v1/examples.json",
-          "rendered_system": "market_analysis/v1/rendered_system.md",
-          "output_contract": "local opt-in runtime appends the versioned JSON output contract; no shared generation contract",
-          "evaluation_fixture": "tests/fixtures/market_analysis_prompt_injection/cases.json"
-        }
-      }
-    },
-    "sales_market_analysis": {
-      "current_version": "v1",
-      "status": "superseded_proposal",
-      "versions": {
-        "v1": {
-          "status": "superseded_proposal",
-          "system_template": "sales_market_analysis/v1/system_template.md",
-          "user_template": "sales_market_analysis/v1/user_template.md",
-          "examples": "sales_market_analysis/v1/examples.json",
-          "rendered_system": "sales_market_analysis/v1/rendered_system.md",
-          "output_contract": "historical combined proposal; retained for traceability",
-          "evaluation_fixture": "tests/fixtures/market_analysis_prompt_injection/cases.json"
+          "status": "runtime_active",
+          "system_template": "target_audience_hypothesis/v1/system_template.md",
+          "user_template": "target_audience_hypothesis/v1/user_template.md",
+          "examples": "target_audience_hypothesis/v1/examples.json",
+          "rendered_system": "target_audience_hypothesis/v1/rendered_system.md",
+          "input_modality": "opt-in text: allowlisted product projection, historical customer aggregates, market price aggregates, fabric listing aggregates",
+          "output_contract": "validated fashion target profile, price positioning hypothesis, merchandising actions, and validation plan"
         }
       }
     }

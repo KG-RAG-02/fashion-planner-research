@@ -1,673 +1,673 @@
-"""Synthetic loopback tests for the Project_07 HTTP proposal adapter."""
+"""HTTP tests for the minimal product review API."""
 
 from __future__ import annotations
 
 import io
 import json
 import os
-from email.message import Message
-from pathlib import Path
 import unittest
-import tempfile
-from unittest.mock import Mock, patch
+from email.message import Message
+from unittest.mock import patch
 
-import market_research_agent.http_server as http_server
-from market_research_agent.http_server import (
-    MAX_BODY_BYTES,
-    RequestValidationError,
-    SYNTHETIC_SIMULATION_PATH,
-    SYNTHETIC_SIMULATION_UI_PATH,
-    AGENT_SIMULATION_PATH,
-    context_from_handoff_request,
-    make_handler,
-    configured_agent,
-)
-from market_research_agent.domain.models import ResultStatus
-from market_research_agent.query_interpretation import interpret_query
-from market_research_agent.sources.market.synthetic_query_coverage import SyntheticQueryCoverageSource
-from market_research_agent.workflows.market_research import MarketResearchAgent
+from market_research_agent.http_server import REVIEW_CONTRACT_VERSION, _validate_review_result, make_handler, serve
 
 
-REQUEST_ID = "synthetic-p07-http-001"
-ROOT = Path(__file__).resolve().parents[1]
-RESPONSE_FIELDS = {"contract_version", "request_id", "producer", "status", "result"}
-
-
-def valid_request() -> dict:
-    path = ROOT / "examples/fixtures/http_json_handoff/project-07-run.request.synthetic.json"
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def valid_demo_request() -> dict:
-    path = ROOT / "examples/fixtures/http_json_handoff/project-07-synthetic-demo.request.json"
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-def valid_structured_request() -> dict:
-    path = ROOT / "examples/fixtures/http_json_handoff/project-07-structured-request.synthetic.json"
-    return json.loads(path.read_text(encoding="utf-8"))
-
-
-class Project07HttpServerTests(unittest.TestCase):
-    def test_query_interpretation_extracts_only_clear_supported_terms(self):
-        parsed = interpret_query("한국 온라인 여성 아우터 시장 규모 2027년")
-        self.assertEqual(parsed["category"], "Outerwear")
-        self.assertEqual(parsed["metrics"], ("market_size",))
-        self.assertEqual(parsed["geography"], "KR")
-        self.assertEqual(parsed["channel"], "online")
-        self.assertEqual(parsed["period"], "2027")
-
-        ambiguous = interpret_query("아우터와 신발 시장 규모")
-        self.assertIsNone(ambiguous["category"])
-
-    def test_http_context_uses_query_hints_without_assuming_default_region_or_channel(self):
-        request = valid_request()
-        request["input"]["planning_request"]["query"] = "일본 오프라인 니트 판매 지수 2028"
-        for key in ("requested_category", "requested_geography", "requested_channel", "requested_metrics"):
-            request["input"].pop(key, None)
-        request["input"]["planning_request"].get("context", {}).pop("category", None)
-        context = context_from_handoff_request(request)
-        self.assertEqual(context.requested_category, "Knitwear")
-        self.assertEqual(context.requested_geography, "JP")
-        self.assertEqual(context.requested_channel, "offline")
-        self.assertEqual(context.requested_metrics, ("retail_sales_index",))
-        self.assertEqual(context.requested_period, "2028")
-        self.assertEqual(context.requested_query, "일본 오프라인 니트 판매 지수 2028")
-        self.assertEqual(context.inferred_scope["category"], "Knitwear")
-
-    def test_http_context_does_not_invent_missing_region_or_channel(self):
-        request = valid_request()
-        request["input"]["planning_request"]["query"] = "아우터 시장 규모"
-        for key in ("requested_category", "requested_geography", "requested_channel", "requested_metrics"):
-            request["input"].pop(key, None)
-        request["input"]["planning_request"].get("context", {}).pop("category", None)
-        context = context_from_handoff_request(request)
-        self.assertIsNone(context.requested_geography)
-        self.assertIsNone(context.requested_channel)
-
-    def test_explicit_scope_wins_and_conflict_is_retained_for_review(self):
-        request = valid_request()
-        request["input"]["planning_request"]["query"] = "outerwear purchase rows"
-        request["input"]["requested_category"] = "Footwear"
-        context = context_from_handoff_request(request)
-        self.assertEqual(context.requested_category, "Footwear")
-        self.assertEqual(context.inferred_scope["category"], "Outerwear")
-        self.assertIn("explicit_category_overrides_query_hint", context.query_ambiguities)
-
-    def test_http_configured_hm_source_reads_without_usage_flag(self):
-        with tempfile.TemporaryDirectory() as folder:
-            root = Path(folder)
-            settings = {
-                "VOGUE_HM_PROCESSED_DIR": str(root / "does-not-exist"),
-                "VOGUE_HM_CATEGORY_MAP": "Jacket=Outerwear", "VOGUE_HM_MAPPING_VERSION": "test-map-v1",
-                "VOGUE_HM_USAGE_AUTHORIZED": "", "R2_DB_KEY": "", "PROJECT07_HM_R2_DB_KEY": "",
-                "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
-            }
-            request = valid_request()
-            request["input"]["planning_request"]["query"] = "Outerwear purchase rows"
-            request["input"]["requested_category"] = "Outerwear"
-            request["input"]["requested_metrics"] = ["purchase_rows"]
-            request["input"].pop("requested_geography", None)
-            request["input"].pop("requested_channel", None)
-            with patch.dict(os.environ, settings, clear=True):
-                context = context_from_handoff_request(request)
-                result = configured_agent().run(context)
-            self.assertEqual(result.sales_data.status, "no_results")
-            self.assertEqual(result.sales_data.missing_data[0].reason, "source_not_configured")
-
-    def test_http_configured_hm_r2_source_fetches_manifest_without_usage_flag(self):
-        settings = {
-            "VOGUE_HM_CATEGORY_MAP": "Jacket=Outerwear",
-            "VOGUE_HM_MAPPING_VERSION": "test-map-v1",
-            "VOGUE_HM_USAGE_AUTHORIZED": "false",
-            "PROJECT07_HM_R2_PREFIX": "example/hm",
-            "PROJECT07_HM_R2_MANIFEST_KEY": "example/hm/bundle.json",
-            "R2_DB_KEY": "", "PROJECT07_HM_R2_DB_KEY": "",
-            "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
-        }
-        request = valid_request()
-        request["input"]["planning_request"]["query"] = "Outerwear purchase rows"
-        request["input"]["requested_category"] = "Outerwear"
-        request["input"]["requested_metrics"] = ["purchase_rows"]
-        request["input"].pop("requested_geography", None)
-        request["input"].pop("requested_channel", None)
-        with patch.dict(os.environ, settings, clear=True):
-            result = configured_agent().run(context_from_handoff_request(request))
-        self.assertEqual(result.status, ResultStatus.ERROR)
-        self.assertIsNone(result.sales_data)
-        self.assertTrue(result.errors)
-
-    def test_http_prefers_shared_duckdb_over_legacy_bundle_without_usage_flag(self):
-        from market_research_agent.sources.sales.hm_kaggle.hm_r2_duckdb_source import R2DuckDBHmHistoricalSalesSource
-        from market_research_agent.sources.shared.r2_object_store import R2ObjectStore
-
-        settings = {
-            "VOGUE_HM_CATEGORY_MAP": "Jacket=Outerwear",
-            "VOGUE_HM_MAPPING_VERSION": "test-map-v1",
-            "VOGUE_HM_USAGE_AUTHORIZED": "false",
-            "R2_DB_KEY": "shared.duckdb",
-            "PROJECT07_HM_R2_PREFIX": "example/hm",
-            "PROJECT07_HM_R2_MANIFEST_KEY": "example/hm/bundle.json",
-            "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
-        }
-        request = valid_request()
-        request["input"]["planning_request"]["query"] = "Outerwear purchase rows"
-        request["input"]["requested_category"] = "Outerwear"
-        request["input"]["requested_metrics"] = ["purchase_rows"]
-        request["input"].pop("requested_geography", None)
-        request["input"].pop("requested_channel", None)
-        with patch.dict(os.environ, settings, clear=True), \
-             patch("market_research_agent.http_server.R2DuckDBHmHistoricalSalesSource",
-                   wraps=R2DuckDBHmHistoricalSalesSource) as duckdb_source, \
-             patch("market_research_agent.http_server.R2HmHistoricalSalesSource") as csv_source, \
-             patch.object(R2ObjectStore, "from_env") as from_env:
-            agent = configured_agent()
-            result = agent.run(context_from_handoff_request(request))
-        self.assertEqual(result.sales_data.status, "error")
-        self.assertEqual(result.sales_data.missing_data[0].reason, "source_error")
-        duckdb_source.from_env.assert_called_once()
-        csv_source.assert_not_called()
-        from_env.assert_called_once()
-
-    def test_http_shared_r2_duckdb_source_reads_without_usage_flag(self):
-        from market_research_agent.sources.shared.r2_object_store import R2ObjectStore
-
-        settings = {
-            "VOGUE_HM_CATEGORY_MAP": "Jacket=Outerwear",
-            "VOGUE_HM_MAPPING_VERSION": "test-map-v1",
-            "VOGUE_HM_USAGE_AUTHORIZED": "false",
-            "R2_DB_KEY": "shared.duckdb",
-            "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
-        }
-        request = valid_request()
-        request["input"]["planning_request"]["query"] = "Outerwear purchase rows"
-        request["input"]["requested_category"] = "Outerwear"
-        request["input"]["requested_metrics"] = ["purchase_rows"]
-        request["input"].pop("requested_geography", None)
-        request["input"].pop("requested_channel", None)
-        with patch.dict(os.environ, settings, clear=True), patch.object(R2ObjectStore, "from_env") as from_env:
-            result = configured_agent().run(context_from_handoff_request(request))
-        self.assertEqual(result.sales_data.status, "error")
-        self.assertEqual(result.sales_data.missing_data[0].reason, "source_error")
-        from_env.assert_called_once()
-
-    def post(self, request_body: dict | bytes, *, path="/v1/agents/sales-market-agent/runs", content_type="application/json", agent_factory=None, token="test-agent-token", synthetic_simulation_enabled=False, synthetic_bundle_provider=None):
-        if agent_factory is None and synthetic_simulation_enabled:
-            agent_factory = lambda: MarketResearchAgent(SyntheticQueryCoverageSource())
-        handler_type = make_handler(agent_factory, synthetic_simulation_enabled=synthetic_simulation_enabled,
-                                    synthetic_bundle_provider=synthetic_bundle_provider)
+class Project07ReviewHttpTests(unittest.TestCase):
+    def request(
+        self, method: str, path: str, payload=None, *, token="test-token",
+        research_bundle=None, env_overrides=None, fx_reference=None, llm_proposal=None,
+        llm_failure=None, service_mode=False,
+    ):
+        handler_type = make_handler(service_mode=service_mode)
         handler = object.__new__(handler_type)
-        data = request_body if isinstance(request_body, bytes) else json.dumps(request_body).encode()
         handler.path = path
+        handler.command = method
         handler.headers = Message()
-        handler.headers["Content-Type"] = content_type
-        handler.headers["Content-Length"] = str(len(data))
-        if token is not None:
+        handler.headers["Content-Type"] = "application/json"
+        if token:
             handler.headers["Authorization"] = f"Bearer {token}"
-        handler.rfile = io.BytesIO(data)
+        body = json.dumps(payload).encode() if payload is not None else b""
+        handler.headers["Content-Length"] = str(len(body))
+        handler.rfile = io.BytesIO(body)
         handler.wfile = io.BytesIO()
         handler.response_status = None
         handler.response_headers = {}
         handler.send_response = lambda status, *args: setattr(handler, "response_status", status)
         handler.send_header = lambda name, value: handler.response_headers.__setitem__(name, value)
         handler.end_headers = lambda: None
-        with patch.dict(os.environ, {"VOGUE_AGENT_SERVICE_BEARER_TOKEN": "test-agent-token"}):
-            handler_type.do_POST(handler)
-        return handler.response_status, json.loads(handler.wfile.getvalue()), handler.response_headers
-
-    def get(self, *, path, synthetic_simulation_enabled=False):
-        handler_type = make_handler(synthetic_simulation_enabled=synthetic_simulation_enabled)
-        handler = object.__new__(handler_type)
-        handler.path = path
-        handler.headers = Message()
-        handler.wfile = io.BytesIO()
-        handler.response_status = None
-        handler.response_headers = {}
-        handler.send_response = lambda status, *args: setattr(handler, "response_status", status)
-        handler.send_header = lambda name, value: handler.response_headers.__setitem__(name, value)
-        handler.end_headers = lambda: None
-        handler_type.do_GET(handler)
-        return handler.response_status, handler.wfile.getvalue(), handler.response_headers
-
-    def test_canonical_routes_require_matching_shared_bearer_token(self):
-        for token in (None, "wrong-token"):
-            with self.subTest(token="missing" if token is None else "wrong"):
-                status, response, _ = self.post(valid_request(), token=token)
-                self.assertEqual(status, 401)
-                self.assertEqual(response["error"]["code"], "UNAUTHORIZED")
-
-    def test_contract_schema_and_mixed_version_fixture_match_v01(self):
-        fixture = json.loads((ROOT / "examples/fixtures/http_json_handoff/cases.json").read_text(encoding="utf-8"))
-        valid = next(item for item in fixture["cases"] if item["case_id"] == "ok_mixed_producer_versions")
-        context = context_from_handoff_request(valid["request"])
-        self.assertEqual(context.request_id, valid["request"]["request_id"])
-        self.assertEqual(context.trend_result["schema_version"], "1.1")
-
-        response_case = next(item for item in fixture["cases"] if item["case_id"] == "result_body_lineage_preserved")
-        response = response_case["response"]
-        self.assertEqual(set(response), RESPONSE_FIELDS)
-        self.assertEqual(response["contract_version"], "vogue-handoff/0.1")
-        self.assertEqual(response["producer"]["schema_version"], response["result"]["schema_version"])
-        self.assertEqual(response["status"], response["result"]["status"])
-
-        request_schema = json.loads((ROOT / "contracts/schemas/vogue-handoff-0.1-request.schema.json").read_text())
-        response_schema = json.loads((ROOT / "contracts/schemas/vogue-handoff-0.1-response.schema.json").read_text())
-        self.assertEqual(request_schema["required"], ["contract_version", "request_id", "input"])
-        self.assertEqual(response_schema["required"], ["contract_version", "request_id", "producer", "status", "result"])
-        invalid = next(item for item in fixture["cases"] if item["case_id"] == "transport_validation_error")
-        with self.assertRaises(RequestValidationError):
-            context_from_handoff_request(invalid["request"])
-
-    def test_valid_synthetic_run_returns_exact_v01_envelope_and_default_result(self):
-        status, response, _ = self.post(valid_request())
-        self.assertEqual(status, 200)
-        self.assertEqual(response["contract_version"], "vogue-handoff/0.1")
-        self.assertEqual(response["request_id"], REQUEST_ID)
-        self.assertEqual(response["producer"]["agent_id"], "sales-market-agent")
-        self.assertEqual(response["producer"]["schema_version"], "1.0")
-        self.assertEqual(response["status"], "partial")
-        self.assertEqual(response["result"]["status"], "partial")
-        self.assertEqual(response["result"]["request_id"], REQUEST_ID)
-        self.assertEqual(response["result"]["schema_version"], "1.0")
-        self.assertEqual(set(response), RESPONSE_FIELDS)
-
-    def test_structured_run_accepts_only_canonical_request_and_keeps_v01_response(self):
-        request = valid_structured_request()
-        received = {}
-
-        class FakeResult:
-            def to_dict(self):
-                return {
-                    "schema_version": "1.0", "request_id": request["request_id"],
-                    "agent_id": "sales-market-agent", "status": "no_results",
-                    "summary": "No configured source.", "findings": [], "evidence": [],
-                    "limitations": [], "errors": [],
-                }
-
-        class FakeAgent:
-            def run(self, context):
-                received["context"] = context
-                return FakeResult()
-
-        status, response, _ = self.post(
-            request, path="/v1/agents/sales-market-agent/structured-runs", agent_factory=FakeAgent,
-        )
-
-        self.assertEqual(status, 200)
-        self.assertEqual(set(response), RESPONSE_FIELDS)
-        self.assertEqual(response["contract_version"], "vogue-handoff/0.1")
-        context = received["context"]
-        self.assertEqual(context.request_id, request["request_id"])
-        self.assertEqual(context.requested_category, "Knitwear")
-        self.assertEqual(context.requested_period, "2027-06-01..2027-08-31")
-        self.assertIsNone(context.trend_result)
-        self.assertIsNone(context.inventory_product_result)
-
-    def test_structured_run_rejects_upstream_result_payloads(self):
-        request = valid_structured_request()
-        request["trend_result"] = {"request_id": request["request_id"], "status": "ok"}
-        status, response, _ = self.post(
-            request, path="/v1/agents/sales-market-agent/structured-runs",
-        )
-        self.assertEqual(status, 422)
-        self.assertEqual(response["error"]["code"], "INVALID_CANONICAL_REQUEST")
-
-    def test_opt_in_synthetic_demo_returns_labeled_analysis_without_changing_v01_envelope(self):
-        request = valid_demo_request()
-        status, response, _ = self.post(
-            request,
-            agent_factory=lambda: MarketResearchAgent(SyntheticQueryCoverageSource()),
-        )
-        self.assertEqual(status, 200)
-        self.assertEqual(set(response), RESPONSE_FIELDS)
-        self.assertEqual(response["contract_version"], "vogue-handoff/0.1")
-        self.assertEqual(response["producer"]["schema_version"], "1.0")
-        self.assertEqual(response["status"], "partial")
-        self.assertEqual(response["result"]["status"], "partial")
-        self.assertEqual(response["result"]["request_id"], request["request_id"])
-        self.assertEqual(len(response["result"]["findings"]), 2)
-        self.assertTrue(all(item["kind"] == "proposal" for item in response["result"]["findings"]))
-        self.assertTrue(all("[SYNTHETIC TEST DATA]" in item["statement"] for item in response["result"]["findings"]))
-        self.assertTrue(all("excluded colors=black" in item["statement"] for item in response["result"]["findings"]))
-        self.assertTrue(any("not actual H&M/VOGUE sales" in item for item in response["result"]["limitations"]))
-        self.assertEqual(response["result"]["evidence"], [])
-
-    def test_synthetic_demo_natural_language_without_supported_scope_still_searches_fixture(self):
-        request = valid_demo_request()
-        request["input"]["requested_query"] = "시장 데이터를 요약해줘"
-        request["input"].pop("requested_category", None)
-        request["input"].pop("requested_period", None)
-        # Keep gender unspecified too; unrequested dimensions must not become hard filters.
-        request["input"]["planning_request"]["context"].pop("gender", None)
-        status, response, _ = self.post(
-            request,
-            agent_factory=lambda: MarketResearchAgent(SyntheticQueryCoverageSource()),
-        )
-        self.assertEqual(status, 200)
-        self.assertEqual(response["result"]["status"], "partial")
-        self.assertGreater(len(response["result"]["findings"]), 0)
-        self.assertTrue(all("[SYNTHETIC TEST DATA]" in item["statement"] for item in response["result"]["findings"]))
-
-    def test_synthetic_stable_route_filters_to_the_requested_metric(self):
-        request = valid_demo_request()
-        request["input"]["requested_metrics"] = ["scenario_units_sold"]
-        status, response, _ = self.post(request, synthetic_simulation_enabled=True)
-        self.assertEqual(status, 200)
-        findings = response["result"]["findings"]
-        self.assertEqual(len(findings), 1)
-        self.assertEqual(findings[0]["topic"], "synthetic_sales_demo")
-        self.assertIn("item_units", findings[0]["statement"])
-
-    def test_unscoped_stable_analysis_keeps_geography_and_channel_series_separate(self):
-        request = valid_demo_request()
-        request["input"]["requested_geography"] = None
-        request["input"]["requested_channel"] = None
-        status, response, _ = self.post(request, synthetic_simulation_enabled=True)
-        self.assertEqual(status, 200)
-        market = next(item for item in response["result"]["findings"] if item["topic"] == "synthetic_market_demo")
-        statement = market["statement"]
-        self.assertIn('geography="KR"', statement)
-        self.assertIn('geography="JP"', statement)
-        self.assertIn('channel="online"', statement)
-        self.assertIn('channel="offline"', statement)
-        self.assertIn("kept separate", statement)
-
-    def test_synthetic_simulation_api_is_separate_opt_in_and_keeps_safety_lineage(self):
-        request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
-        status, disabled, _ = self.post(request, path=SYNTHETIC_SIMULATION_PATH)
-        self.assertEqual(status, 404)
-        self.assertEqual(disabled["error"]["code"], "NOT_FOUND")
-
-        status, response, headers = self.post(
-            request, path=SYNTHETIC_SIMULATION_PATH, synthetic_simulation_enabled=True,
-        )
-        self.assertEqual(status, 200)
-        self.assertEqual(response["schema_version"], "synthetic-rag-analysis/0.2-proposal")
-        self.assertEqual(response["simulation_mode"], "synthetic_simulation")
-        self.assertTrue(response["synthetic"])
-        self.assertEqual(response["data_nature"], "synthetic_test")
-        self.assertEqual(response["permission_status"], "authorized_for_synthetic_testing_only")
-        self.assertFalse(response["operational_eligible"])
-        self.assertEqual(response["requested_scope"]["raw_query"], request["raw_query"])
-        self.assertEqual(len(response["market_like"]["observations"]), 6)
-        self.assertEqual(response["sales_like"]["status"], "not_queried")
-        for observation in response["market_like"]["observations"]:
-            self.assertTrue(observation["observation_id"])
-            self.assertTrue(observation["synthetic"])
-            self.assertTrue(observation["evidence_ids"])
-            self.assertTrue(all(item["locator"] and item["content_hash"] for item in observation["evidence"]))
-        self.assertEqual(headers["Cache-Control"], "no-store")
-
-        # Explicit simulation service mode also supplies synthetic analysis through the stable handoff route.
-        status, regular, headers = self.post(valid_demo_request(), synthetic_simulation_enabled=True)
-        self.assertEqual(status, 200)
-        self.assertEqual(regular["contract_version"], "vogue-handoff/0.1")
-        self.assertIn(regular["status"], {"ok", "partial"})
-        self.assertTrue(any("[SYNTHETIC TEST DATA]" in item["statement"] for item in regular["result"]["findings"]))
-        self.assertEqual(regular["result"]["evidence"], [])
-        self.assertEqual(headers["X-Data-Nature"], "synthetic_test")
-        self.assertEqual(headers["X-Operational-Eligible"], "false")
-
-    def test_detailed_simulation_route_uses_injected_r2_bundle_provider(self):
-        from market_research_agent.synthetic_rag import load_fixture_bundle
-
-        provider = Mock(return_value=load_fixture_bundle())
-        request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
-        status, response, _ = self.post(
-            request, path=AGENT_SIMULATION_PATH, synthetic_simulation_enabled=True,
-            synthetic_bundle_provider=provider,
-        )
-        self.assertEqual(status, 200)
-        provider.assert_called_once_with()
-        self.assertIsNone(response["source_manifests"]["r2_release"])
-
-    def test_synthetic_simulation_route_requires_existing_bearer_auth_and_valid_canonical_input(self):
-        request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
-        for token in (None, "wrong-token"):
-            status, response, _ = self.post(
-                request, path=SYNTHETIC_SIMULATION_PATH, token=token,
-                synthetic_simulation_enabled=True,
-            )
-            self.assertEqual(status, 401)
-            self.assertEqual(response["reason"], "unauthorized")
-            self.assertTrue(response["synthetic"])
-        invalid = dict(request)
-        invalid["trend_result"] = {"status": "ok"}
-        status, response, _ = self.post(
-            invalid, path=SYNTHETIC_SIMULATION_PATH, synthetic_simulation_enabled=True,
-        )
-        self.assertEqual(status, 422)
-        self.assertEqual(response["reason"], "invalid_canonical_request")
-        self.assertFalse(response["operational_eligible"])
-
-    def test_synthetic_simulation_fixture_failure_is_safe_source_error(self):
-        from market_research_agent import http_server
-        request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
-        with patch.object(http_server, "analyze_synthetic_request", side_effect=http_server.SyntheticFixtureError("sensitive-path-marker")):
-            status, response, _ = self.post(
-                request, path=SYNTHETIC_SIMULATION_PATH, synthetic_simulation_enabled=True,
-            )
-        self.assertEqual(status, 503)
-        self.assertEqual(response["reason"], "fixture_unavailable_or_invalid")
-        self.assertNotIn("sensitive-path-marker", json.dumps(response))
-        self.assertTrue(response["synthetic"])
-
-    def test_synthetic_simulation_ui_is_opt_in_and_has_strong_disclosure(self):
-        status, _, _ = self.get(path="/")
-        self.assertEqual(status, 404)
-        status, _, _ = self.get(path=SYNTHETIC_SIMULATION_UI_PATH)
-        self.assertEqual(status, 404)
-        status, page, headers = self.get(path=SYNTHETIC_SIMULATION_UI_PATH, synthetic_simulation_enabled=True)
-        self.assertEqual(status, 200)
-        self.assertIn("합성 데이터 시뮬레이션".encode(), page)
-        self.assertIn("실제 시장 관측".encode(), page)
-        self.assertIn(b"/synthetic-simulation.js", page)
-        self.assertIn("default-src 'none'" , headers["Content-Security-Policy"])
-        self.assertNotIn("unsafe-inline", headers["Content-Security-Policy"])
-        status, script, _ = self.get(path="/synthetic-simulation.js", synthetic_simulation_enabled=True)
-        self.assertEqual(status, 200)
-        self.assertIn(b"textContent", script)
-        self.assertNotIn(b"localStorage", script)
-
-    def test_simulation_is_available_from_main_app_entry_and_agent_api_namespace(self):
-        request = json.loads((ROOT / "examples/synthetic_rag_analysis/women-knitwear-2028-03.request.json").read_text(encoding="utf-8"))
-        status, page, _ = self.get(path="/", synthetic_simulation_enabled=True)
-        self.assertEqual(status, 200)
-        self.assertIn("합성 데이터 시뮬레이션".encode(), page)
-        status, script, _ = self.get(path="/synthetic-simulation.js", synthetic_simulation_enabled=True)
-        self.assertEqual(status, 200)
-        self.assertIn(b"/v1/agents/sales-market-agent/runs", script)
-
-        status, payload, _ = self.post(request, path=AGENT_SIMULATION_PATH, synthetic_simulation_enabled=True)
-        self.assertEqual(status, 200)
-        self.assertEqual(payload["simulation_mode"], "synthetic_simulation")
-        self.assertTrue(payload["synthetic"])
-        status, health_body, _ = self.get(path="/api/health", synthetic_simulation_enabled=True)
-        self.assertEqual(status, 200)
-        health = json.loads(health_body)
-        self.assertEqual(health["mode"], "synthetic_simulation")
-        self.assertFalse(health["operational_eligible"])
-
-    def test_simulation_cli_flag_is_opt_in_and_cannot_mix_with_legacy_demo(self):
-        with patch.object(http_server, "serve") as serve:
-            self.assertEqual(http_server.main([]), 0)
-            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=False, synthetic_source_backend="r2", service_mode=False)
-            serve.reset_mock()
-            self.assertEqual(http_server.main(["--enable-synthetic-simulation"]), 0)
-            serve.assert_called_once_with("127.0.0.1", 8766, synthetic_demo=False, enable_synthetic_simulation=True, synthetic_source_backend="r2", service_mode=False)
-            serve.reset_mock()
-            with self.assertRaises(SystemExit):
-                http_server.main(["--enable-synthetic-simulation", "--synthetic-source", "local"])
-            serve.assert_not_called()
-        with self.assertRaises(ValueError):
-            http_server.serve(synthetic_demo=True, enable_synthetic_simulation=True)
-        with self.assertRaises(ValueError):
-            http_server.serve(host="0.0.0.0", enable_synthetic_simulation=True)
-
-    def test_service_simulation_uses_r2_bundle_provider_by_default(self):
-        class FakeServer:
-            def __init__(self, address, handler):
-                self.address = address
-                self.handler = handler
-                self.closed = False
-
-            def serve_forever(self):
-                raise KeyboardInterrupt
-
-            def server_close(self):
-                self.closed = True
-
-        class FakeBundleStore:
-            def load_bundle(self):
-                return {}
-
-        store = FakeBundleStore()
+        research_bundle = research_bundle or {
+            "fabric_prices": (), "fabric_price_error": None,
+            "fabric_price_source_status": "not_configured",
+            "customer_age_profile": None, "customer_age_error": None,
+            "historical_price": None, "historical_price_error": None,
+        }
+        test_env = {
+            "VOGUE_AGENT_SERVICE_BEARER_TOKEN": "test-token",
+            "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
+            "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "false",
+            "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED": "false",
+        }
+        test_env.update(env_overrides or {})
         with (
-            patch.object(http_server.SyntheticR2FixtureBundleStore, "from_env", return_value=store) as from_env,
-            patch.object(http_server, "SyntheticQueryCoverageSource", wraps=SyntheticQueryCoverageSource) as source,
-            patch.object(http_server, "ThreadingHTTPServer", side_effect=FakeServer) as server,
+            patch.dict(os.environ, test_env),
+            patch("market_research_agent.http_server.HmCombinedResearchSource.analyze", return_value=research_bundle),
+            patch("market_research_agent.http_server.fetch_usd_krw_reference_rate", return_value=fx_reference),
+            patch("market_research_agent.http_server.propose_target_audience",
+                  side_effect=llm_failure if llm_failure is not None else None,
+                  return_value=llm_proposal),
         ):
-            http_server.serve(enable_synthetic_simulation=True)
-        from_env.assert_called_once_with()
-        source.assert_called_once_with(bundle_loader=store.load_bundle)
-        self.assertIsNotNone(server.call_args.args[1])
+            (handler_type.do_POST if method == "POST" else handler_type.do_GET)(handler)
+        output = handler.wfile.getvalue()
+        return handler.response_status, json.loads(output) if output else None
 
-    def test_project08_route_alias_is_supported_for_local_proposal_client(self):
-        status, response, headers = self.post(
-            valid_request(), path="/v1/agents/market-research-agent/runs",
+    def test_disconnected_client_does_not_trigger_second_response(self):
+        handler_type = make_handler()
+        handler = object.__new__(handler_type)
+        handler.send_response = lambda _status: None
+        handler.send_header = lambda _name, _value: None
+        handler.end_headers = lambda: None
+
+        class DisconnectedWriter:
+            def write(self, _value):
+                raise BrokenPipeError("client disconnected")
+
+        handler.wfile = DisconnectedWriter()
+        handler._send_json(200, {"status": "ok"})
+
+    def test_health_reports_local_and_container_service_modes(self):
+        local_status, local_body = self.request("GET", "/api/health")
+        service_status, service_body = self.request(
+            "GET", "/api/health", service_mode=True,
+        )
+        self.assertEqual((local_status, local_body), (200, {"status": "ok", "mode": "local-development"}))
+        self.assertEqual((service_status, service_body), (200, {"status": "ok", "mode": "container-service"}))
+
+    def test_serve_restricts_bind_and_requires_auth_for_service_mode(self):
+        with patch.dict(os.environ, {"VOGUE_PROJECT07_DISABLE_DOTENV": "true"}, clear=True):
+            with self.assertRaisesRegex(ValueError, "Non-loopback bind"):
+                serve("0.0.0.0", 8766)
+            with self.assertRaisesRegex(ValueError, "Bearer authentication"):
+                serve("0.0.0.0", 8766, service_mode=True)
+
+    def test_service_mode_binds_all_interfaces_with_bearer_configured(self):
+        server = unittest.mock.Mock()
+        server.serve_forever.side_effect = KeyboardInterrupt
+        with (
+            patch.dict(os.environ, {
+                "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
+                "VOGUE_AGENT_SERVICE_BEARER_TOKEN": "synthetic-service-token",
+            }, clear=True),
+            patch("market_research_agent.http_server.ThreadingHTTPServer", return_value=server) as server_type,
+        ):
+            serve("0.0.0.0", 8766, service_mode=True)
+        self.assertEqual(server_type.call_args.args[0], ("0.0.0.0", 8766))
+        self.assertEqual(server_type.call_args.args[1].__name__, "Project07Handler")
+        server.server_close.assert_called_once_with()
+
+    def valid_review(self):
+        product = {
+            "category": "Outerwear", "product_type": "Jacket",
+            "gender": "women", "season": "winter", "material": "wool blend",
+        }
+        return {
+            "contract_version": REVIEW_CONTRACT_VERSION,
+            "request_id": "review-http-001",
+            "input": {
+                "request_id": "review-http-001",
+                "product": product,
+                "product_evidence": {
+                    field: {
+                        "kind": "user_requested", "source_ref": "request.product." + field,
+                        "evidence_ids": [],
+                    }
+                    for field in product
+                },
+            },
+        }
+
+    def test_review_route_returns_review_and_human_decision_support(self):
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
         )
         self.assertEqual(status, 200)
+        self.assertEqual(response["contract_version"], REVIEW_CONTRACT_VERSION)
         self.assertEqual(response["producer"]["agent_id"], "sales-market-agent")
-        self.assertEqual(headers["Deprecation"], "true")
+        self.assertEqual(response["producer"]["schema_version"], "sales-market-review/0.1-internal")
+        self.assertEqual(response["request_id"], "review-http-001")
+        self.assertEqual(response["status"], response["result"]["status"])
+        self.assertEqual(response["result"]["request_id"], response["request_id"])
+        self.assertEqual(response["result"]["producer_id"], response["producer"]["agent_id"])
+        self.assertEqual(response["result"]["schema_version"], response["producer"]["schema_version"])
+        self.assertEqual(response["result"]["draft_id"], None)
+        self.assertEqual(response["result"]["draft_context"], {
+            "category": "Outerwear", "product_type": "Jacket", "gender": "women",
+            "season": "winter", "material": "wool blend",
+        })
+        self.assertTrue(response["result"]["decision_support"]["human_decision_required"])
 
-    def test_all_domain_statuses_use_http_200_and_preserve_result_body(self):
-        for domain_status in ("ok", "partial", "no_results", "error"):
-            with self.subTest(status=domain_status):
-                raw_result = {
-                    "schema_version": "1.0",
-                    "request_id": REQUEST_ID,
-                    "agent_id": "sales-market-agent",
-                    "status": domain_status,
-                    "summary": "synthetic exact body",
-                    "findings": [], "evidence": [], "limitations": ["synthetic"], "errors": [],
-                }
-
-                class FakeResult:
-                    def to_dict(self):
-                        return raw_result
-
-                class FakeAgent:
-                    def run(self, context):
-                        self.context = context
-                        return FakeResult()
-
-                status, response, _ = self.post(
-                    valid_request(), agent_factory=FakeAgent,
-                )
-                self.assertEqual(status, 200)
-                expected_status = "partial" if domain_status == "no_results" else domain_status
-                self.assertEqual(response["status"], expected_status)
-                self.assertEqual(response["result"]["status"], expected_status)
-                self.assertEqual(response["result"], http_server.normalize_no_results_payload(raw_result))
-                self.assertEqual(set(response), RESPONSE_FIELDS)
-
-    def test_service_failures_use_safe_transport_error_envelope(self):
-        class FailingAgent:
-            def run(self, context):
-                raise RuntimeError("synthetic-secret-marker")
-
-        status, response, _ = self.post(valid_request(), agent_factory=FailingAgent)
-        self.assertEqual(status, 500)
-        self.assertEqual(response["contract_version"], "vogue-handoff/0.1")
-        self.assertEqual(response["request_id"], REQUEST_ID)
-        self.assertEqual(response["error"]["code"], "RUN_FAILED")
-        self.assertNotIn("synthetic-secret-marker", json.dumps(response))
-
-        class UnavailableAgent:
-            def run(self, context):
-                raise ConnectionError("synthetic-endpoint-marker")
-
-        status, response, _ = self.post(valid_request(), agent_factory=UnavailableAgent)
-        self.assertEqual(status, 503)
-        self.assertEqual(response["error"]["code"], "SERVICE_UNAVAILABLE")
-        self.assertNotIn("synthetic-endpoint-marker", json.dumps(response))
-
-    def test_request_id_mismatch_is_rejected_before_agent_run(self):
-        mutations = (
-            lambda item: item.update(request_id="synthetic-different-id"),
-            lambda item: item["input"].update(request_id="synthetic-different-id"),
-            lambda item: item["input"]["planning_request"].update(request_id="synthetic-different-id"),
-            lambda item: item["input"]["trend_result"].update(request_id="synthetic-different-id"),
-            lambda item: item["input"]["inventory_product_result"].update(request_id="synthetic-different-id"),
+    def test_no_sources_returns_no_results_not_empty_partial(self):
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
         )
-        for mutate in mutations:
-            with self.subTest(mutate=mutate):
-                request = valid_request()
-                mutate(request)
-                status, response, _ = self.post(request)
+        self.assertEqual(status, 200)
+        self.assertEqual(response["status"], "no_results")
+        self.assertEqual(response["result"]["status"], "no_results")
+        self.assertEqual(response["status"], response["result"]["status"])
+        self.assertEqual(response["result"]["category_price_comparison"], [])
+        self.assertEqual(response["result"]["material_cost_analysis"], [])
+        self.assertEqual(response["result"]["customer_segment_analysis"], [])
+
+    def test_age_failure_retains_successful_results_at_native_contract_paths(self):
+        prices = {
+            "source_id": "hm-kaggle-personalized-fashion-recommendations",
+            "source_type": "historical_kaggle_transaction_price_aggregate",
+            "permission_status": "non_commercial_research_only",
+            "sample_count": 24,
+            "price_statistics": {"mean": 0.02, "median": 0.02},
+            "scaled_price_statistics": {"mean": 11.8, "currency": "USD", "unit": "USD"},
+            "sources": [{"object_key": "transactions.parquet", "version": "synthetic-v1"}],
+        }
+        fabric = ({
+            "source_type": "owner_provided_public_fabric_listing_snapshot",
+            "source_grade": "public_sale",
+            "source_object": {"object_key": "fabric.csv", "version": "synthetic-v1"},
+            "sources": [],
+            "permission_status": "owner_provided_snapshot",
+        },)
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            research_bundle={
+                "fabric_prices": fabric, "fabric_price_error": None,
+                "fabric_price_source_status": "available",
+                "customer_age_profile": None,
+                "customer_age_error": "synthetic DuckDB timeout",
+                "historical_price": prices, "historical_price_error": None,
+            },
+        )
+        review = response["result"]
+        self.assertEqual(status, 200)
+        self.assertEqual(response["status"], "partial")
+        self.assertEqual(review["status"], response["status"])
+        self.assertEqual(review["request_id"], response["request_id"])
+        self.assertEqual(review["category_price_comparison"][0]["sample_count"], 24)
+        self.assertEqual(review["material_cost_analysis"][0]["source_object"], fabric[0]["source_object"])
+        self.assertTrue(review["material_cost_analysis"][0]["evidence_ids"])
+        evidence_by_id = {item["evidence_id"]: item for item in review["evidence"]}
+        for evidence_id in review["category_price_comparison"][0]["evidence_ids"]:
+            self.assertIn("result.category_price_comparison", evidence_by_id[evidence_id]["supports_fields"])
+        self.assertEqual({item["code"] for item in review["errors"]}, {"CUSTOMER_AGE_RESEARCH_FAILED"})
+        self.assertGreaterEqual(len(review["evidence"]), 2)
+        # P08's agreed handoff consumes the native P07 result under `result`.
+        consumer_result = response["result"]
+        self.assertTrue(consumer_result["category_price_comparison"])
+        self.assertTrue(consumer_result["material_cost_analysis"])
+        self.assertTrue(consumer_result["missing_data"])
+        _validate_review_result(consumer_result, response["request_id"])
+
+    def test_all_documented_output_fields_survive_repeated_local_responses(self):
+        """Exercise the documented output surface using synthetic source bundles."""
+        prices = {
+            "source_id": "synthetic-hm-research",
+            "source_type": "historical_kaggle_transaction_price_aggregate",
+            "permission_status": "non_commercial_research_only",
+            "sample_count": 24,
+            "price_statistics": {"mean": 0.02, "median": 0.018, "p25": 0.01, "p75": 0.03},
+            "scaled_price_statistics": {"mean": 11.8, "p25": 5.9, "p75": 17.7, "currency": "USD", "unit": "USD"},
+            "period": {"start": "2020-01-01", "end": "2020-12-31"},
+            "sources": [{"object_key": "synthetic/transactions.parquet", "version": "fixture-v1"}],
+        }
+        fabric = ({
+            "source_type": "owner_provided_public_fabric_listing_snapshot",
+            "source_grade": "public_sale",
+            "source_object": {"object_key": "synthetic/fabric.csv", "version": "fixture-v1"},
+            "sources": [{"record_id": "fixture-fabric-1", "unit_price_krw_per_meter": 12000}],
+            "permission_status": "owner_provided_snapshot",
+            "verified_price_per_meter_available": False,
+        },)
+        profile = {
+            "source_id": "synthetic-hm-research",
+            "source_type": "historical_kaggle_customer_article_transaction_aggregate",
+            "permission_status": "non_commercial_research_only",
+            "target_age_cohort": {"age_band": "20_39", "suppressed": False},
+            "age_bands": [{"age_band": "20_29", "unique_customer_count": 12}],
+            "sources": [{"object_key": "synthetic/customers.parquet", "version": "fixture-v1"}],
+        }
+        bundle = {
+            "fabric_prices": fabric, "fabric_price_error": None,
+            "fabric_price_source_status": "available",
+            "customer_age_profile": profile, "customer_age_error": None,
+            "customer_age_source_status": "available",
+            "historical_price": prices, "historical_price_error": None,
+            "historical_price_source_status": "available",
+        }
+        fx = {
+            "base_currency": "USD", "quote_currency": "KRW", "rate": 1400.0,
+            "rate_date": "2026-11-13", "provider": "synthetic-fixture",
+            "rate_type": "reference", "fallback_used": False,
+            "fallback_age_days": 0, "stale": False,
+        }
+        proposal = {"primary_segment": {"description": "합성 검증용 타깃 가설"}}
+        documented_fields = (
+            "category_price_comparison", "material_cost_analysis", "customer_segment_analysis",
+            "target_audience_analysis", "evidence", "missing_data", "errors", "limitations",
+            "margin_estimate", "margin_price_range_analysis", "decision_support",
+        )
+
+        for attempt in range(5):
+            with self.subTest(attempt=attempt + 1):
+                request = self.valid_review()
+                request_id = f"review-http-repeat-{attempt + 1}"
+                request["request_id"] = request_id
+                request["input"]["request_id"] = request_id
+                status, response = self.request(
+                    "POST", "/v1/agents/sales-market-agent/reviews", request,
+                    research_bundle=bundle,
+                    env_overrides={
+                        "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true",
+                        "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED": "true",
+                        "LLM_API_KEY": "synthetic-test-key",
+                        "LLM_MODEL": "synthetic-test-model",
+                    },
+                    fx_reference=fx,
+                    llm_proposal=proposal,
+                )
+
+                self.assertEqual(status, 200)
+                self.assertEqual(response["status"], "ok")
+                result = response["result"]
+                self.assertEqual(result["status"], response["status"])
+                self.assertEqual(result["request_id"], request_id)
+                self.assertTrue(set(documented_fields).issubset(result))
+                self.assertTrue(result["category_price_comparison"])
+                self.assertEqual(result["category_price_comparison"][0]["sample_count"], 24)
+                self.assertTrue(result["material_cost_analysis"])
+                self.assertEqual(result["material_cost_analysis"][0]["sources"][0]["record_id"], "fixture-fabric-1")
+                self.assertTrue(result["customer_segment_analysis"])
+                self.assertEqual(result["target_audience_analysis"]["age_cohort"], profile["target_age_cohort"])
+                self.assertEqual(result["target_audience_analysis"]["proposal"], proposal)
+                self.assertGreaterEqual(len(result["evidence"]), 3)
+                self.assertEqual(result["missing_data"], [])
+                self.assertEqual(result["errors"], [])
+                self.assertTrue(result["limitations"])
+                self.assertEqual(result["margin_estimate"]["status"], "benchmark_estimate")
+                self.assertEqual(
+                    result["margin_estimate"]["estimate_type"],
+                    "industry_average_gross_margin_benchmark",
+                )
+                self.assertEqual(result["margin_price_range_analysis"]["status"], "benchmark_estimate")
+                self.assertEqual(result["margin_price_range_analysis"]["fx_provider"], "synthetic-fixture")
+                self.assertEqual(result["decision_support"]["recommendation"], "review_required")
+                self.assertEqual(result["decision_support"]["evidence_areas"]["category_price"], True)
+                self.assertEqual(result["decision_support"]["evidence_areas"]["customer_segments"], True)
+                evidence_by_id = {item["evidence_id"]: item for item in result["evidence"]}
+                self.assertEqual(len(evidence_by_id), len(result["evidence"]))
+                self.assertTrue(all(item["analysis"].get("observed") for item in result["evidence"]))
+                price_evidence = evidence_by_id[result["category_price_comparison"][0]["evidence_ids"][0]]
+                customer_evidence = evidence_by_id[result["customer_segment_analysis"][0]["evidence_ids"][0]]
+                fabric_evidence = evidence_by_id[result["material_cost_analysis"][0]["evidence_ids"][0]]
+                self.assertEqual(price_evidence["analysis"]["observed"]["sample_count"], 24)
+                self.assertEqual(customer_evidence["analysis"]["observed"]["target_age_cohort"], profile["target_age_cohort"])
+                self.assertEqual(fabric_evidence["analysis"]["observed"]["matched_record_ids"], ["fixture-fabric-1"])
+                benchmark_evidence = next(item for item in result["evidence"] if item["source_type"] == "industry_gross_margin_benchmark")
+                fx_evidence = next(item for item in result["evidence"] if item["source_type"] == "usd_krw_reference_rate")
+                self.assertEqual(benchmark_evidence["analysis"]["observed"]["gross_margin_rate"], 0.5688)
+                self.assertEqual(fx_evidence["analysis"]["observed"]["rate_date"], "2026-11-13")
+                for rows, path in (
+                    (result["category_price_comparison"], "result.category_price_comparison"),
+                    (result["material_cost_analysis"], "result.material_cost_analysis"),
+                    (result["customer_segment_analysis"], "result.customer_segment_analysis"),
+                ):
+                    for row in rows:
+                        self.assertTrue(row["evidence_ids"])
+                        for evidence_id in row["evidence_ids"]:
+                            self.assertIn(path, evidence_by_id[evidence_id]["supports_fields"])
+                self.assertTrue(result["target_audience_analysis"]["evidence_ids"])
+                self.assertTrue(result["margin_estimate"]["evidence_ids"])
+                self.assertTrue(result["price_analysis"]["evidence_ids"])
+                self.assertTrue(result["fabric_cost_analysis"]["evidence_ids"])
+                self.assertTrue(result["margin_analysis"]["evidence_ids"])
+                self.assertTrue(result["margin_price_range_analysis"]["evidence_ids"])
+                _validate_review_result(result, request_id)
+
+    def test_optional_llm_failure_marks_successful_research_as_partial(self):
+        from market_research_agent.llm.responses_api import LlmCallError
+
+        prices = {
+            "source_id": "synthetic-hm-research",
+            "source_type": "historical_kaggle_transaction_price_aggregate",
+            "permission_status": "non_commercial_research_only",
+            "sample_count": 12,
+            "price_statistics": {"mean": 0.02},
+            "sources": [{"object_key": "synthetic/transactions.parquet", "version": "fixture-v1"}],
+        }
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            research_bundle={
+                "fabric_prices": (), "fabric_price_error": None,
+                "fabric_price_source_status": "not_configured",
+                "customer_age_profile": None, "customer_age_error": None,
+                "customer_age_source_status": "disabled",
+                "historical_price": prices, "historical_price_error": None,
+                "historical_price_source_status": "available",
+            },
+            env_overrides={
+                "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true",
+                "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED": "true",
+                "LLM_API_KEY": "synthetic-test-key",
+                "LLM_MODEL": "synthetic-test-model",
+            },
+            fx_reference={
+                "base_currency": "USD", "quote_currency": "KRW", "rate": 1400.0,
+                "rate_date": "2026-11-13", "provider": "synthetic-fixture",
+                "rate_type": "reference", "fallback_used": False,
+            },
+            llm_failure=LlmCallError("LLM provider returned HTTP 401."),
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(response["status"], "partial")
+        self.assertEqual(response["status"], response["result"]["status"])
+        self.assertEqual(response["result"]["target_audience"]["llm_call_status"], "failed")
+        self.assertIn("TARGET_AUDIENCE_LLM_FAILED", {item["code"] for item in response["result"]["errors"]})
+
+    def test_fabric_failure_does_not_drop_price_or_customer_analysis(self):
+        profile = {
+            "source_id": "hm-kaggle-personalized-fashion-recommendations",
+            "source_type": "historical_kaggle_customer_article_transaction_aggregate",
+            "permission_status": "non_commercial_research_only",
+            "sources": [{"object_key": "customers.csv", "version": "synthetic-v1"}],
+        }
+        prices = {
+            "source_id": "hm-kaggle-personalized-fashion-recommendations",
+            "source_type": "historical_kaggle_transaction_price_aggregate",
+            "permission_status": "non_commercial_research_only", "sample_count": 13,
+            "price_statistics": {"mean": 0.01},
+            "sources": [{"object_key": "transactions.parquet", "version": "synthetic-v1"}],
+        }
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            research_bundle={
+                "fabric_prices": (), "fabric_price_error": "synthetic access denied",
+                "fabric_price_source_status": "error",
+                "customer_age_profile": profile, "customer_age_error": None,
+                "historical_price": prices, "historical_price_error": None,
+            },
+        )
+        review = response["result"]
+        self.assertEqual(status, 200)
+        self.assertEqual(response["status"], "partial")
+        self.assertTrue(review["category_price_comparison"])
+        self.assertTrue(review["customer_segment_analysis"])
+        self.assertIn("R2_FABRIC_PRICE_READ_FAILED", {item["code"] for item in review["errors"]})
+
+    def test_review_contract_validator_rejects_missing_fields_and_status_mismatch(self):
+        with self.assertRaisesRegex(ValueError, "missing contract fields"):
+            _validate_review_result({}, "review-http-001")
+        _status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+        )
+        invalid = dict(response["result"], status="partial")
+        with self.assertRaisesRegex(ValueError, "status claims results"):
+            _validate_review_result(invalid, response["request_id"])
+        inconsistent = dict(response["result"])
+        inconsistent["category_price_comparison"] = [{"sample_count": 1}]
+        with self.assertRaisesRegex(ValueError, "no_results but review content"):
+            _validate_review_result(inconsistent, response["request_id"])
+
+    def test_r2_fabric_read_failure_is_nonfatal_and_preserves_request_id(self):
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            research_bundle={
+                "fabric_prices": (), "fabric_price_error": "synthetic snapshot unavailable",
+                "fabric_price_source_status": "error",
+                "customer_age_profile": None, "customer_age_error": None,
+                "historical_price": None, "historical_price_error": None,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response["request_id"], "review-http-001")
+        self.assertEqual(response["result"]["request_id"], "review-http-001")
+        self.assertEqual(response["status"], "no_results")
+        self.assertIn(
+            "R2_FABRIC_PRICE_READ_FAILED",
+            {error["code"] for error in response["result"]["errors"]},
+        )
+        self.assertEqual(response["result"]["material_cost_analysis"], [])
+        self.assertEqual(response["result"]["fabric_cost_analysis"]["unit_cost"], None)
+        self.assertEqual(response["result"]["missing_data"][1]["reason"], "source_error")
+
+    def test_customer_age_failure_is_partial_and_keeps_review_linkage(self):
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            research_bundle={
+                "fabric_prices": (), "fabric_price_error": None,
+                "fabric_price_source_status": "not_configured",
+                "customer_age_profile": None,
+                "customer_age_error": "H&M research aggregates could not be read safely from R2 (TimeoutError).",
+                "historical_price": {"category": "Outerwear", "sample_count": 20},
+                "historical_price_error": None,
+            },
+        )
+        self.assertEqual(status, 200)
+        self.assertEqual(response["request_id"], "review-http-001")
+        self.assertEqual(response["result"]["request_id"], "review-http-001")
+        self.assertEqual(response["status"], "partial")
+        errors = {error["code"]: error["message"] for error in response["result"]["errors"]}
+        self.assertIn("CUSTOMER_AGE_RESEARCH_FAILED", errors)
+        self.assertIn("TimeoutError", errors["CUSTOMER_AGE_RESEARCH_FAILED"])
+        self.assertTrue(response["result"]["category_price_comparison"])
+        self.assertEqual(response["result"]["price_analysis"]["status"], "reference_only")
+        self.assertEqual(response["result"]["draft_context"]["category"], "Outerwear")
+
+    def test_integrated_case_keeps_price_when_age_fails_and_fabric_has_no_match(self):
+        historical_price = {
+            "source_id": "synthetic-hm-research",
+            "source_type": "historical_kaggle_transaction_price_aggregate",
+            "permission_status": "non_commercial_research_only",
+            "sample_count": 3_163_443,
+            "price_statistics": {"mean": 0.0278, "median": 0.025, "p25": 0.018, "p75": 0.034},
+            "scaled_price_statistics": {"mean": 16.402, "median": 14.75, "p25": 10.62, "p75": 20.06,
+                                         "scale_factor": 590, "currency": "USD", "unit": "USD"},
+            "period": {"start": "2018-09-20", "end": "2020-09-22"},
+            "sources": [{"object_key": "synthetic/transactions.parquet", "version": "fixture-v1"}],
+        }
+        response_status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            research_bundle={
+                "fabric_prices": (), "fabric_price_error": None,
+                "fabric_price_source_status": "no_match",
+                "customer_age_profile": None,
+                "customer_age_error": "H&M research aggregates could not be read safely from R2 (stage=object_metadata; code=ObjectNotFound).",
+                "customer_age_source_status": "error",
+                "historical_price": historical_price, "historical_price_error": None,
+                "historical_price_source_status": "available",
+            },
+            env_overrides={"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"},
+            fx_reference={
+                "base_currency": "USD", "quote_currency": "KRW", "rate": 1400.0,
+                "rate_date": "2026-11-13", "provider": "synthetic-fixture",
+                "rate_type": "reference", "fallback_used": False, "fallback_age_days": 0,
+                "stale": False,
+            },
+        )
+
+        self.assertEqual(response_status, 200)
+        self.assertEqual(response["status"], "partial")
+        self.assertEqual(response["status"], response["result"]["status"])
+        self.assertEqual(response["request_id"], response["result"]["request_id"])
+        result = response["result"]
+        self.assertEqual(result["price_analysis"]["status"], "ok")
+        self.assertEqual(result["price_analysis"]["proposed_price"], 23_000)
+        self.assertEqual(result["price_analysis"]["sample_size"], 3_163_443)
+        self.assertEqual(result["price_analysis"]["period"], historical_price["period"])
+        self.assertTrue(result["category_price_comparison"])
+        self.assertEqual(result["customer_segment_analysis"], [])
+        self.assertIsNone(result["target_audience_analysis"]["age_cohort"])
+        self.assertEqual(result["fabric_cost_analysis"]["status"], "no_results")
+        self.assertIsNone(result["fabric_cost_analysis"]["unit_cost"])
+        missing = {item["field"]: item for item in result["missing_data"]}
+        self.assertEqual(missing["fabric_costs"]["reason"], "no_match")
+        self.assertEqual(missing["customer_segments"]["reason"], "source_error")
+        age_error = next(item for item in result["errors"] if item["code"] == "CUSTOMER_AGE_RESEARCH_FAILED")
+        self.assertIn("stage=object_metadata", age_error["message"])
+        self.assertIn("code=ObjectNotFound", age_error["message"])
+        _validate_review_result(result, response["request_id"])
+
+    def test_unconfigured_fabric_source_returns_missing_data_without_invented_cost(self):
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+        )
+
+        self.assertEqual(status, 200)
+        self.assertEqual(response["request_id"], "review-http-001")
+        self.assertEqual(response["result"]["request_id"], response["request_id"])
+        errors = {error["code"] for error in response["result"]["errors"]}
+        self.assertNotIn("R2_FABRIC_PRICE_READ_FAILED", errors)
+        self.assertEqual(response["result"]["material_cost_analysis"], [])
+        self.assertIsNone(response["result"]["fabric_cost_analysis"]["unit_cost"])
+        self.assertEqual(response["result"]["missing_data"][1]["field"], "fabric_costs")
+        self.assertEqual(
+            response["result"]["missing_data"][1]["reason"],
+            "source_not_configured",
+        )
+        self.assertEqual(
+            response["result"]["missing_data"][1]["message"],
+            "R2 fabric price source is not configured.",
+        )
+
+    def test_configured_fabric_source_without_material_match_is_not_a_read_error(self):
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            research_bundle={
+                "fabric_prices": (), "fabric_price_error": None,
+                "fabric_price_source_status": "no_match",
+                "customer_age_profile": None, "customer_age_error": None,
+                "historical_price": None, "historical_price_error": None,
+            },
+        )
+
+        self.assertEqual(status, 200)
+        result = response["result"]
+        self.assertEqual(response["status"], "no_results")
+        self.assertNotIn("R2_FABRIC_PRICE_READ_FAILED", {error["code"] for error in result["errors"]})
+        fabric_missing = next(item for item in result["missing_data"] if item["field"] == "fabric_costs")
+        self.assertEqual(fabric_missing["reason"], "no_match")
+        self.assertEqual(result["material_cost_analysis"], [])
+        self.assertEqual(result["fabric_cost_analysis"]["status"], "no_results")
+        self.assertIsNone(result["fabric_cost_analysis"]["unit_cost"])
+
+    def test_category_only_minimum_product_request_is_accepted(self):
+        payload = self.valid_review()
+        payload["input"]["product"] = {"category": "Outerwear"}
+        payload["input"]["product_evidence"] = {
+            "category": {
+                "kind": "user_requested", "source_ref": "request.product.category",
+                "evidence_ids": [],
+            },
+        }
+        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(response["result"]["draft_context"], {"category": "Outerwear"})
+
+    def test_optional_product_fields_may_be_missing_or_null(self):
+        payload = self.valid_review()
+        payload["input"]["product"] = {
+            "category": "Outerwear", "product_type": None, "gender": None,
+            "season": None, "material": None,
+        }
+        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+        self.assertEqual(status, 200)
+        self.assertEqual(response["result"]["draft_context"], {"category": "Outerwear"})
+
+    def test_category_is_required(self):
+        payload = self.valid_review()
+        payload["input"]["product"] = {"product_type": "Jacket"}
+        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+        self.assertEqual(status, 422)
+        self.assertEqual(response["error"]["code"], "INVALID_PRODUCT")
+        self.assertEqual(response["contract_version"], REVIEW_CONTRACT_VERSION)
+
+    def test_gender_must_use_supported_enum(self):
+        payload = self.valid_review()
+        payload["input"]["product"]["gender"] = "WOMEN"
+        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+        self.assertEqual(status, 422)
+        self.assertEqual(response["error"]["code"], "INVALID_GENDER")
+
+    def test_price_costing_image_and_evidence_fields_are_rejected(self):
+        for field, value in (
+            ("proposed_price", 129000), ("currency", "KRW"), ("costing", {}),
+            ("image_ref", {}), ("evidence", {"private": "metadata"}),
+        ):
+            with self.subTest(field=field):
+                payload = self.valid_review()
+                payload["input"]["product"][field] = value
+                status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
                 self.assertEqual(status, 422)
-                self.assertEqual(response["error"]["code"], "REQUEST_ID_MISMATCH")
+                self.assertEqual(response["error"]["code"], "INVALID_PRODUCT")
 
-        request = valid_request()
-        request["input"]["trend_result"]["result"] = {"request_id": "synthetic-different-id"}
-        status, response, _ = self.post(request)
-        self.assertEqual(status, 422)
-        self.assertEqual(response["error"]["code"], "REQUEST_ID_MISMATCH")
+    def test_planning_draft_wrapper_and_image_flag_are_rejected(self):
+        for field, value in (
+            ("planning_draft", {}), ("include_image_style_analysis", True),
+            ("evidence", {"producer_metadata": "do not forward"}),
+        ):
+            with self.subTest(field=field):
+                payload = self.valid_review()
+                payload["input"][field] = value
+                status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+                self.assertEqual(status, 422)
+                self.assertEqual(response["error"]["code"], "INVALID_INPUT")
 
-    def test_unsupported_contract_and_planning_schema_are_rejected(self):
-        request = valid_request()
-        request["contract_version"] = "unsupported"
-        status, response, _ = self.post(request)
+    def test_review_requires_bearer_authentication(self):
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(), token=None,
+        )
+        self.assertEqual(status, 401)
+        # Authentication runs before body/version dispatch on the shared route.
+        self.assertEqual(response["contract_version"], "vogue-workflow/0.1")
+        self.assertIsNone(response["request_id"])
+        self.assertEqual(response["error"]["code"], "UNAUTHORIZED")
+        self.assertTrue(response["error"]["message"])
+
+    def test_retired_02_contract_is_rejected_explicitly(self):
+        payload = self.valid_review()
+        payload["contract_version"] = "vogue-sales-market-review/0.2-proposal"
+        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
         self.assertEqual(status, 422)
+        self.assertEqual(response["contract_version"], REVIEW_CONTRACT_VERSION)
         self.assertEqual(response["error"]["code"], "UNSUPPORTED_CONTRACT_VERSION")
 
-        request = valid_request()
-        request["input"]["planning_request"]["schema_version"] = "99.0"
-        status, response, _ = self.post(request)
+    def test_current_contract_requires_provenance_for_each_product_field(self):
+        payload = self.valid_review()
+        del payload["input"]["product_evidence"]["material"]
+        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
         self.assertEqual(status, 422)
-        self.assertEqual(response["error"]["code"], "UNSUPPORTED_PRODUCER_SCHEMA")
+        self.assertEqual(response["error"]["code"], "INVALID_PRODUCT_EVIDENCE")
 
-        request = valid_request()
-        request["input"]["trend_result"]["schema_version"] = "99.0"
-        status, response, _ = self.post(request)
-        self.assertEqual(status, 422)
-        self.assertEqual(response["error"]["code"], "UNSUPPORTED_PRODUCER_SCHEMA")
+    def test_legacy_research_endpoints_reject_the_product_review_contract(self):
+        for route in (
+            "/v1/agents/sales-market-agent/runs",
+            "/v1/agents/sales-market-agent/structured-runs",
+        ):
+            with self.subTest(route=route):
+                status, response = self.request("POST", route, self.valid_review())
+                self.assertEqual(status, 422)
 
-        request = valid_request()
-        request["input"]["inventory_product_result"]["schema_version"] = "99.0"
-        status, response, _ = self.post(request)
-        self.assertEqual(status, 422)
-        self.assertEqual(response["error"]["code"], "UNSUPPORTED_PRODUCER_SCHEMA")
-
-    def test_invalid_upstream_status_and_oversized_body_are_rejected(self):
-        request = valid_request()
-        request["input"]["trend_result"]["status"] = "unknown"
-        status, response, _ = self.post(request)
-        self.assertEqual(status, 422)
-        self.assertEqual(response["error"]["code"], "INVALID_UPSTREAM_STATUS")
-
-        request = valid_request()
-        request["input"]["uncontracted_field"] = "synthetic"
-        status, response, _ = self.post(request)
-        self.assertEqual(status, 422)
-        self.assertEqual(response["error"]["code"], "INVALID_INPUT")
-
-        status, response, _ = self.post(b" " * (MAX_BODY_BYTES + 1))
-        self.assertEqual(status, 413)
-        self.assertEqual(response["error"]["code"], "REQUEST_TOO_LARGE")
-
-    def test_malformed_json_media_type_and_wrong_route_are_rejected(self):
-        status, response, _ = self.post(b"{bad", content_type="application/json")
-        self.assertEqual(status, 400)
-        self.assertEqual(response["error"]["code"], "INVALID_JSON")
-
-        status, response, _ = self.post(valid_request(), content_type="text/plain")
-        self.assertEqual(status, 415)
-        self.assertEqual(response["error"]["code"], "UNSUPPORTED_MEDIA_TYPE")
-
-        status, response, _ = self.post(valid_request(), path="/v1/agents/other-agent/runs")
+    def test_simulation_stays_disabled_by_default(self):
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/simulation-runs", self.valid_review(),
+        )
         self.assertEqual(status, 404)
-        self.assertEqual(response["error"]["code"], "AGENT_NOT_FOUND")
+        self.assertEqual(response["error"]["code"], "NOT_FOUND")
+
+    def test_review_rejects_mismatched_request_ids(self):
+        payload = self.valid_review()
+        payload["input"]["request_id"] = "different-id"
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", payload,
+        )
+        self.assertEqual(status, 422)
+        self.assertEqual(response["error"]["code"], "REQUEST_ID_MISMATCH")
 
 
 if __name__ == "__main__":

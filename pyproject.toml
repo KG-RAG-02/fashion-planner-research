@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vogue-market-research-agent"
+name = "vogue-sales-market-review-agent"
 version = "0.1.0"
-description = "Evidence-aware domain core for the VOGUE Market Research Agent"
+description = "Evidence-backed post-planning sales and market review agent for VOGUE"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["jsonschema>=4.23,<5"]
@@ -16,6 +16,7 @@ r2 = ["boto3>=1.35,<2", "duckdb>=2.0,<3"]
 [project.scripts]
 vogue-market-research = "market_research_agent.cli:main"
 vogue-market-research-http = "market_research_agent.http_server:main"
+vogue-sales-market-review-http = "market_research_agent.http_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]

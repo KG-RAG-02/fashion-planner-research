@@ -1,0 +1,9 @@
+{
+  "schema_version": "project07-r2-source-manifest/1.0",
+  "objects": {
+    "hm_articles": "articles.parquet",
+    "hm_transactions": "transactions_train.parquet",
+    "hm_customers": "customers.csv",
+    "fabric_prices": "example/fabric-prices/fabric_price_list.csv"
+  }
+}

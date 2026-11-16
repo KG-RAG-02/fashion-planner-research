@@ -1,16 +1,17 @@
 FROM python:3.14-slim
 
-# Read-only-rootfs friendly: no bytecode writes, HOME on /tmp (tmpfs), and
-# writable state only under the declared /data paths (volumes or tmpfs).
-# .env is never loaded in the container; configuration comes from the
-# process environment (VOGUE_AGENT_SERVICE_BEARER_TOKEN is required).
+# Runtime state lives on declared volumes; the root filesystem can stay read-only.
 ENV PYTHONDONTWRITEBYTECODE=1 \
     PYTHONUNBUFFERED=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     HOME=/tmp \
+    PORT=8766 \
     VOGUE_PROJECT07_DISABLE_DOTENV=1 \
     VOGUE_P07_REVIEW_ARTIFACT_DIR=/data/reviews \
-    VOGUE_R2_HM_DB_CACHE_DIR=/data/hm-cache
+    VOGUE_R2_HM_DB_CACHE_DIR=/data/hm-cache \
+    PROJECT07_PROMPTS_DIR=/app/prompts \
+    PROJECT07_CONFIGS_DIR=/app/configs \
+    VOGUE_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
 
 WORKDIR /app
 
@@ -23,21 +24,25 @@ RUN groupadd --gid 10001 agent \
 COPY --chown=10001:10001 pyproject.toml README.md ./
 COPY --chown=10001:10001 src/ ./src/
 COPY --chown=10001:10001 contracts/ ./contracts/
+COPY --chown=10001:10001 prompts/ ./prompts/
+COPY --chown=10001:10001 configs/ ./configs/
 COPY --chown=10001:10001 examples/ ./examples/
 COPY --chown=10001:10001 scripts/ ./scripts/
 COPY --chown=10001:10001 tests/ ./tests/
 
-# r2 extra: boto3 + duckdb for the configured H&M R2 DuckDB source.
-RUN pip install --no-cache-dir ".[r2]"
+RUN pip install --no-cache-dir '.[r2]' \
+    && mkdir -p /opt/duckdb/extensions \
+    && python -c "import duckdb; c=duckdb.connect(); c.execute(\"SET extension_directory='/opt/duckdb/extensions'\"); c.execute('INSTALL httpfs'); c.execute('LOAD httpfs'); c.close()" \
+    && chown -R 10001:10001 /opt/duckdb
 
 USER 10001:10001
 
+RUN python -c "import duckdb; c=duckdb.connect(); c.execute(\"SET extension_directory='/opt/duckdb/extensions'\"); c.execute('LOAD httpfs'); assert c.execute(\"SELECT loaded FROM duckdb_extensions() WHERE extension_name='httpfs'\").fetchone()[0]; c.close()"
+
 EXPOSE 8766
 
-# Liveness only: loopback /api/health, no auth, no external call, proxies ignored.
+# Liveness uses loopback only and ignores proxy settings.
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request as u; r = u.build_opener(u.ProxyHandler({})).open('http://127.0.0.1:8766/api/health', timeout=3); raise SystemExit(0 if r.status == 200 else 1)"]
 
-# Bearer-protected service bind (conventions section 2). The idle development
-# loop remains available as: python -m market_research_agent.runtime
-CMD ["vogue-market-research-http", "--service-mode", "--host", "0.0.0.0", "--port", "8766"]
+CMD ["vogue-sales-market-review-http", "--service-mode", "--host", "0.0.0.0", "--port", "8766"]
