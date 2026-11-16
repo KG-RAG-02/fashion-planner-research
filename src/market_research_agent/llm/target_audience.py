@@ -22,7 +22,7 @@ _PROMPTS_DIR = Path(os.getenv("PROJECT07_PROMPTS_DIR", _ROOT / "prompts"))
 _SYSTEM = (_PROMPTS_DIR / "target_audience_hypothesis" / "v1" / "rendered_system.md").read_text(encoding="utf-8")
 _OUTPUT_FIELDS = {
     "proposal", "primary_segment", "secondary_segments", "age_evidence", "product_fit",
-    "price_positioning", "merchandising_actions", "channel_content_hypotheses",
+    "merchandising_actions", "channel_content_hypotheses",
     "validation_plan", "evidence_basis", "limitations",
 }
 _LOGGER = logging.getLogger(__name__)
@@ -99,7 +99,6 @@ def _string_list(value: Any, *, minimum: int, maximum: int, item_maximum: int = 
 
 def propose_target_audience(
     *, product_context: dict[str, Any], customer_profile: dict[str, Any] | None,
-    market_price_reference: dict[str, Any] | None = None,
     fabric_listing_reference: list[dict[str, Any]] | None = None,
     client: OpenAIResponsesClient | None = None,
     call: Callable[..., dict[str, Any]] | None = None,
@@ -113,16 +112,6 @@ def propose_target_audience(
             "aggregation", "limitations",
         )
         age_profile = {key: customer_profile[key] for key in allowed_age_fields if key in customer_profile}
-    price_reference = None
-    if isinstance(market_price_reference, dict):
-        price_reference = {
-            key: market_price_reference.get(key) for key in (
-                "source_id", "source_type", "category", "mapped_product_type_category",
-                "merchandise_segment", "sample_count", "article_count", "period",
-                "price_statistics", "scaled_price_statistics", "usd_krw_conversion",
-                "category_mapping", "limitations",
-            ) if key in market_price_reference
-        }
     fabric_references = []
     for group in fabric_listing_reference or []:
         if not isinstance(group, dict):
@@ -133,17 +122,12 @@ def propose_target_audience(
             "source_type": group.get("source_type"),
             "sample_count": group.get("sample_count"),
             "price_per_meter_krw_statistics": group.get("price_per_meter_krw_statistics"),
-            "source_record_ids": [
-                item.get("record_id") for item in group.get("sources", [])
-                if isinstance(item, dict) and isinstance(item.get("record_id"), str)
-            ],
             "limitations": group.get("limitations", []),
         })
     payload = {
         "product_context": {key: product_context.get(key) for key in
                             ("category", "product_type", "season", "material", "gender")},
         "historical_customer_aggregate": age_profile,
-        "market_price_reference": price_reference,
         "fabric_listing_reference": fabric_references,
     }
     text = "Analyze this JSON fashion-product planning data using the system instructions and return the required JSON object:\n" + json.dumps(
@@ -164,17 +148,6 @@ def propose_target_audience(
                 or any(not _string_list(product_fit.get(key), minimum=2, maximum=4)
                        for key in ("wearing_occasions", "needs_hypotheses", "styling_cues"))):
             raise LlmCallError("Target audience product_fit fields are invalid.")
-        price_positioning = output.get("price_positioning")
-        position = price_positioning.get("position") if isinstance(price_positioning, dict) else None
-        confidence = price_positioning.get("confidence") if isinstance(price_positioning, dict) else None
-        if (not isinstance(price_positioning, dict)
-                or set(price_positioning) != {"position", "rationale", "confidence"}
-                or not isinstance(position, str)
-                or position not in {"value", "mid_market", "premium_hypothesis", "undetermined"}
-                or not isinstance(confidence, str)
-                or confidence not in {"low", "medium", "high"}
-                or not _nonempty_string(price_positioning.get("rationale"))):
-            raise LlmCallError("Target audience price_positioning fields are invalid.")
         for key, minimum, maximum in (
             ("merchandising_actions", 2, 4), ("channel_content_hypotheses", 2, 4),
             ("validation_plan", 3, 5), ("evidence_basis", 2, 6), ("limitations", 2, 6),
@@ -184,7 +157,7 @@ def propose_target_audience(
         output["type"] = "hypothesis"
         output["provider"] = "openai_responses_api" if call is None else "injected_test_client"
         evidence_ids: list[str] = []
-        for source in (customer_profile, market_price_reference):
+        for source in (customer_profile,):
             if isinstance(source, dict):
                 source_id = source.get("source_id")
                 if isinstance(source_id, str) and source_id and source_id not in evidence_ids:

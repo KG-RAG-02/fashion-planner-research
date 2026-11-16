@@ -25,14 +25,14 @@ from ....sources.shared.r2_source_manifest import r2_source_key
 from ....runtime_settings import hm_research_noncommercial_enabled
 from .duckdb_http import configure_httpfs
 from .hm_customer_age_source import (
-    _CSV_COLUMNS, _MAPPING_PATH, _build_profiles, _checked_key, _map_gender, _map_product_type,
+    _CSV_COLUMNS, _MAPPING_PATH, _build_profiles, _checked_key, _configure_age_duckdb, _map_gender, _map_product_type,
     _map_requested_category,
 )
 from .hm_price_source import _sql_string
 
 
-SCHEMA_VERSION = "hm-sales-market-aggregate/1.1"
-_AGGREGATION_VERSION = "p07-hm-aggregate/2"
+SCHEMA_VERSION = "hm-sales-market-aggregate/1.2"
+_AGGREGATION_VERSION = "p07-hm-aggregate/4"
 _MAX_SOURCE_BYTES = {
     "hm_customers": 300_000_000,
     "hm_articles": 50_000_000,
@@ -83,14 +83,22 @@ def _object_version(metadata: dict[str, Any]) -> str:
     return str(metadata.get("VersionId") or metadata.get("ETag", "")).strip('"')
 
 
-def _aggregate_sql(settings: R2Settings, keys: tuple[str, str, str]) -> str:
+def _aggregate_sql(settings: R2Settings, keys: tuple[str, str, str]) -> tuple[str, str]:
+    """Return separate age and price rollups to bound DuckDB aggregate state.
+
+    The former query joined customers onto every transaction and evaluated
+    distinct-customer counts plus price quantiles in four grouping sets.
+    Keeping those large states alive together caused multi-gigabyte peaks. The
+    two queries intentionally scan transactions separately but hold only one
+    expensive aggregate family at a time.
+    """
     customers_uri = _sql_string(f"s3://{settings.bucket}/{keys[0]}")
     articles_uri = _sql_string(f"s3://{settings.bucket}/{keys[1]}")
     transactions_uri = _sql_string(f"s3://{settings.bucket}/{keys[2]}")
     customer_schema = "{" + _CSV_COLUMNS + "}"
-    return f"""
+    age_sql = f"""
         WITH mapped_articles AS (
-            SELECT a.article_id, a.index_group_name,
+            SELECT a.article_id, a.index_group_name, a.product_type_name,
                    COALESCE(type_map.mapped_category, group_map.mapped_category) AS category
             FROM read_parquet({articles_uri}) AS a
             LEFT JOIN hm_category_map AS type_map
@@ -99,89 +107,134 @@ def _aggregate_sql(settings: R2Settings, keys: tuple[str, str, str]) -> str:
             LEFT JOIN hm_category_map AS group_map
               ON group_map.dimension = 'group'
              AND lower(trim(a.product_group_name)) = lower(trim(group_map.source_value))
-        ), customers_raw AS (
+        ), customers AS (
             SELECT customer_id, age FROM read_csv(
                 {customers_uri}, header=true, delim=',', columns={customer_schema}, sample_size=1000
             )
-        ), customers AS (
-            SELECT customer_id,
-                   CASE WHEN COUNT(DISTINCT age) = 1 THEN MAX(age) ELSE NULL END AS age
-            FROM customers_raw
-            GROUP BY customer_id
         ), joined AS (
-            SELECT a.category, a.index_group_name, t.customer_id, c.customer_id AS matched_customer_id,
-                   c.age, t.article_id, TRY_CAST(t.t_dat AS DATE) AS transaction_date,
-                   t.price, t.sales_channel_id,
-                   CASE WHEN c.customer_id IS NULL THEN NULL
-                        WHEN c.age BETWEEN 16 AND 100 THEN
-                          CASE WHEN c.age < 20 THEN 'under_20' WHEN c.age < 30 THEN '20_29'
-                               WHEN c.age < 40 THEN '30_39' WHEN c.age < 50 THEN '40_49'
-                               ELSE '50_plus' END
-                        ELSE 'unknown_age' END AS age_band
+            SELECT a.category, a.index_group_name, c.customer_id AS matched_customer_id,
+                   c.age, TRY_CAST(t.t_dat AS DATE) AS transaction_date
             FROM read_parquet({transactions_uri}) AS t
             INNER JOIN mapped_articles AS a USING (article_id)
-            LEFT JOIN customers AS c USING (customer_id)
+            INNER JOIN customers AS c USING (customer_id)
             WHERE a.category IS NOT NULL
         )
         SELECT category,
                CASE WHEN GROUPING(index_group_name) = 1 THEN '__all__'
                     ELSE COALESCE(index_group_name, '__unknown__') END AS merchandise_segment,
-               CASE WHEN GROUPING(age_band) = 1 THEN 'price' ELSE 'age' END AS measure,
-               CASE WHEN GROUPING(age_band) = 1 THEN NULL ELSE age_band END AS age_band,
+               'age' AS measure,
+               age_band,
                COUNT(DISTINCT matched_customer_id)::BIGINT AS unique_customers,
-               CASE WHEN GROUPING(age_band) = 1 THEN
-                    MIN(transaction_date) FILTER (WHERE price IS NOT NULL)
-                    ELSE MIN(transaction_date) FILTER (WHERE matched_customer_id IS NOT NULL) END::VARCHAR AS period_start,
-               CASE WHEN GROUPING(age_band) = 1 THEN
-                    MAX(transaction_date) FILTER (WHERE price IS NOT NULL)
-                    ELSE MAX(transaction_date) FILTER (WHERE matched_customer_id IS NOT NULL) END::VARCHAR AS period_end,
-               COUNT(*) FILTER (WHERE price IS NOT NULL)::BIGINT AS transaction_rows,
-               COUNT(DISTINCT article_id) FILTER (WHERE price IS NOT NULL)::BIGINT AS article_count,
-               MIN(price), quantile_cont(price, 0.25), quantile_cont(price, 0.5),
-               quantile_cont(price, 0.75), MAX(price), AVG(price),
-               list(DISTINCT CAST(sales_channel_id AS VARCHAR)) FILTER (WHERE price IS NOT NULL) AS channel_codes
-        FROM joined
+               MIN(transaction_date)::VARCHAR AS period_start,
+               MAX(transaction_date)::VARCHAR AS period_end,
+               0::BIGINT AS transaction_rows,
+               0::BIGINT AS article_count,
+               NULL::DOUBLE AS minimum_price, NULL::DOUBLE AS p25, NULL::DOUBLE AS median,
+               NULL::DOUBLE AS p75, NULL::DOUBLE AS maximum_price, NULL::DOUBLE AS mean_price,
+               []::VARCHAR[] AS channel_codes,
+               NULL::VARCHAR AS source_product_type
+        FROM (
+            SELECT *,
+                   CASE WHEN age BETWEEN 16 AND 100 THEN
+                       CASE WHEN age < 20 THEN 'under_20' WHEN age < 30 THEN '20_29'
+                            WHEN age < 40 THEN '30_39' WHEN age < 50 THEN '40_49'
+                            ELSE '50_plus' END
+                   ELSE 'unknown_age' END AS age_band
+            FROM joined
+        ) AS categorized
         GROUP BY GROUPING SETS (
             (category, index_group_name, age_band),
-            (category, age_band),
-            (category, index_group_name),
-            (category)
+            (category, age_band)
         )
     """
+    price_sql = f"""
+        WITH mapped_articles AS (
+            SELECT a.article_id, a.index_group_name, a.product_type_name,
+                   COALESCE(type_map.mapped_category, group_map.mapped_category) AS category
+            FROM read_parquet({articles_uri}) AS a
+            LEFT JOIN hm_category_map AS type_map
+              ON type_map.dimension = 'type'
+             AND lower(trim(a.product_type_name)) = lower(trim(type_map.source_value))
+            LEFT JOIN hm_category_map AS group_map
+              ON group_map.dimension = 'group'
+             AND lower(trim(a.product_group_name)) = lower(trim(group_map.source_value))
+        )
+        SELECT a.category,
+               CASE WHEN GROUPING(a.index_group_name) = 1 THEN '__all__'
+                    ELSE COALESCE(a.index_group_name, '__unknown__') END AS merchandise_segment,
+               'price' AS measure,
+               NULL::VARCHAR AS age_band,
+               0::BIGINT AS unique_customers,
+               MIN(TRY_CAST(t.t_dat AS DATE))::VARCHAR AS period_start,
+               MAX(TRY_CAST(t.t_dat AS DATE))::VARCHAR AS period_end,
+               COUNT(*)::BIGINT AS transaction_rows,
+               COUNT(DISTINCT t.article_id)::BIGINT AS article_count,
+               MIN(t.price) AS minimum_price,
+               approx_quantile(t.price, 0.25) AS p25,
+               approx_quantile(t.price, 0.5) AS median,
+               approx_quantile(t.price, 0.75) AS p75,
+               MAX(t.price) AS maximum_price,
+               AVG(t.price) AS mean_price,
+               list(DISTINCT CAST(t.sales_channel_id AS VARCHAR)) AS channel_codes,
+               CASE WHEN GROUPING(a.product_type_name) = 1 THEN NULL
+                    ELSE NULLIF(trim(a.product_type_name), '') END AS source_product_type
+        FROM read_parquet({transactions_uri}) AS t
+        INNER JOIN mapped_articles AS a USING (article_id)
+        WHERE a.category IS NOT NULL AND t.price IS NOT NULL
+        GROUP BY GROUPING SETS (
+            (a.category, a.index_group_name, a.product_type_name),
+            (a.category, a.index_group_name),
+            (a.category)
+        )
+    """
+    return age_sql, price_sql
 
 
 def _run_aggregate_query(
     duckdb: Any, settings: R2Settings, keys: tuple[str, str, str], mapping: dict[str, Any],
 ) -> list[tuple[Any, ...]]:
-    connection = duckdb.connect()
-    try:
-        extension_dir = os.getenv("VOGUE_DUCKDB_EXTENSION_DIRECTORY", "").strip()
-        if extension_dir:
-            connection.execute("SET extension_directory = " + _sql_string(extension_dir))
-        connection.execute("LOAD httpfs")
-        configure_httpfs(connection)
-        endpoint = urlsplit(settings.endpoint).netloc if settings.endpoint else f"{settings.account_id}.r2.cloudflarestorage.com"
-        connection.execute(
-            "CREATE SECRET hm_aggregate_r2 (TYPE S3, KEY_ID " + _sql_string(settings.access_key_id)
-            + ", SECRET " + _sql_string(settings.secret_access_key) + ", ENDPOINT " + _sql_string(endpoint)
-            + ", REGION 'auto', URL_STYLE 'path', USE_SSL true)"
-        )
-        connection.execute("CREATE TEMP TABLE hm_category_map (source_value VARCHAR, dimension VARCHAR, mapped_category VARCHAR)")
-        rows = [(key, "type", value) for key, value in mapping["product_type_name"].items()]
-        rows.extend((key, "group", value) for key, value in mapping["product_group_name"].items())
-        connection.executemany("INSERT INTO hm_category_map VALUES (?, ?, ?)", rows)
-        return connection.execute(_aggregate_sql(settings, keys)).fetchall()
-    finally:
-        connection.close()
+    source_rows = [(key, "type", value) for key, value in mapping["product_type_name"].items()]
+    source_rows.extend((key, "group", value) for key, value in mapping["product_group_name"].items())
+    endpoint = urlsplit(settings.endpoint).netloc if settings.endpoint else f"{settings.account_id}.r2.cloudflarestorage.com"
+    rows: list[tuple[Any, ...]] = []
+    for stage, query in zip(("age", "price"), _aggregate_sql(settings, keys), strict=True):
+        # Release the previous query's hash/quantile state before the next
+        # query starts. DuckDB can retain allocator blocks on a live connection.
+        connection = duckdb.connect()
+        try:
+            _configure_age_duckdb(connection)
+            extension_dir = os.getenv("VOGUE_DUCKDB_EXTENSION_DIRECTORY", "").strip()
+            if extension_dir:
+                connection.execute("SET extension_directory = " + _sql_string(extension_dir))
+            connection.execute("LOAD httpfs")
+            configure_httpfs(connection)
+            connection.execute(
+                "CREATE SECRET hm_aggregate_r2 (TYPE S3, KEY_ID " + _sql_string(settings.access_key_id)
+                + ", SECRET " + _sql_string(settings.secret_access_key) + ", ENDPOINT " + _sql_string(endpoint)
+                + ", REGION 'auto', URL_STYLE 'path', USE_SSL true)"
+            )
+            connection.execute("CREATE TEMP TABLE hm_category_map (source_value VARCHAR, dimension VARCHAR, mapped_category VARCHAR)")
+            connection.executemany("INSERT INTO hm_category_map VALUES (?, ?, ?)", source_rows)
+            stage_rows = connection.execute(query).fetchall()
+            rows.extend(stage_rows)
+            _LOGGER.info("H&M snapshot %s rollup completed: groups=%d", stage, len(stage_rows))
+        except Exception as exc:
+            _LOGGER.warning("H&M snapshot %s rollup failed: %s", stage, type(exc).__name__)
+            raise
+        finally:
+            connection.close()
+    return rows
 
 
 def _price_record(row: tuple[Any, ...], *, source_refs: tuple[dict[str, str], ...],
                   mapping: dict[str, Any], mapping_fingerprint: str) -> dict[str, Any]:
     category, segment = str(row[0]), str(row[1])
+    product_type = str(row[16]).strip() if len(row) > 16 and row[16] is not None else None
     channels = sorted(str(item) for item in (row[15] or []))
     statistics = [None if item is None else float(item) for item in row[9:15]]
     return {
         "category": category,
+        "product_type": product_type,
         "merchandise_segment": segment,
         "requested_gender": None if segment == "__all__" else (
             "women" if segment.casefold() == "ladieswear" else "men" if segment.casefold() == "menswear" else None
@@ -199,13 +252,13 @@ def _price_record(row: tuple[Any, ...], *, source_refs: tuple[dict[str, str], ..
             "minimum": statistics[0], "p25": statistics[1], "median": statistics[2],
             "p75": statistics[3], "maximum": statistics[4], "mean": statistics[5],
             "currency": None, "unit": "normalized_source_price; currency not provided",
-            "statistic": "transaction_price_distribution; unweighted transaction rows",
+            "statistic": "transaction_price_distribution; unweighted transaction rows; T-Digest approximate p25/median/p75; minimum, maximum, mean, and counts are exact",
         },
         "sources": list(source_refs),
         "category_mapping": {
             "mapping_id": mapping["mapping_id"], "mapping_version": mapping["mapping_version"],
             "mapping_fingerprint": mapping_fingerprint,
-            "matching": "product_type_exact_then_product_group_fallback",
+            "matching": "product_type_exact" if product_type else "product_group_fallback",
             "requested_category": category,
             "mapped_category": category,
         },
@@ -226,6 +279,20 @@ def build_snapshot_payload(
     ]
     categories = sorted({row[0] for row in age_rows} | {str(row[0]) for row in rows if row[2] == "price"})
     profiles = []
+    product_type_prices = []
+    for row in rows:
+        source_product_type = str(row[16]).strip() if len(row) > 16 and row[16] is not None else ""
+        if row[2] != "price" or not source_product_type or int(row[7]) <= 0:
+            continue
+        product_type_prices.append({
+            "category": str(row[0]),
+            "segment": str(row[1]),
+            "product_type": source_product_type,
+            "historical_price_aggregate": _price_record(
+                row, source_refs=source_refs, mapping=mapping,
+                mapping_fingerprint=mapping_fingerprint,
+            ),
+        })
     genders = (("women", "ladieswear"), ("men", "menswear"), ("", "__all__"))
     for category in categories:
         for gender, segment_key in genders:
@@ -238,6 +305,7 @@ def build_snapshot_payload(
                 row for row in rows
                 if row[2] == "price" and str(row[0]).casefold() == category.casefold()
                 and str(row[1]).casefold() == segment_key
+                and (len(row) <= 16 or row[16] is None)
             ]
             price_record = _price_record(
                 segment_rows[0], source_refs=source_refs, mapping=mapping,
@@ -261,6 +329,7 @@ def build_snapshot_payload(
     snapshot = {
         **source_identity,
         "profiles": profiles,
+        "product_type_price_aggregates": product_type_prices,
     }
     if fabric_source_ref is not None and fabric_listing_csv is not None:
         snapshot["fabric_source"] = fabric_source_ref
@@ -479,6 +548,7 @@ class HmResearchAggregateSource:
                 or not isinstance(value.get("snapshot_id"), str)
                 or not isinstance(value.get("source_objects"), list)
                 or not isinstance(value.get("profiles"), list)
+                or not isinstance(value.get("product_type_price_aggregates"), list)
                 or not isinstance(fabric_source, dict)
                 or not all(isinstance(fabric_source.get(field), str) and fabric_source[field].strip()
                            for field in ("object_key", "version", "sha256"))
@@ -487,6 +557,12 @@ class HmResearchAggregateSource:
         if not all(isinstance(row, dict) and isinstance(row.get("category"), str)
                    and isinstance(row.get("segment"), str) for row in value["profiles"]):
             raise ValueError("Aggregate snapshot profile rows are invalid.")
+        if not all(isinstance(row, dict) and isinstance(row.get("category"), str)
+                   and isinstance(row.get("segment"), str)
+                   and isinstance(row.get("product_type"), str)
+                   and isinstance(row.get("historical_price_aggregate"), dict)
+                   for row in value["product_type_price_aggregates"]):
+            raise ValueError("Aggregate snapshot product-type price rows are invalid.")
         if _snapshot_identifier(value) != value["snapshot_id"]:
             raise ValueError("Aggregate snapshot ID does not match its content.")
 
@@ -496,35 +572,45 @@ class HmResearchAggregateSource:
         requested_category = str(product.get("category", "")).strip()
         category_mapping = _map_requested_category(requested_category, mapping)
         mapped_category = category_mapping["mapped_category"]
+        product_type = product.get("product_type")
+        product_type_mapping = _map_product_type(product_type, mapping)
         category = requested_category.casefold()
-        mapped_category_key = str(mapped_category).casefold()
         gender_mapping = _map_gender(product.get("gender"),)
         gender = gender_mapping.get("mapped") or ""
         segment = gender_mapping.get("merchandise_segment") or "__all__"
         profiles = snapshot["profiles"]
-        selected = next((row for row in profiles if row["category"].casefold() == category
+        age_category_candidates = list(dict.fromkeys(
+            str(value).strip().casefold() for value in (
+                product_type_mapping.get("mapped_category"), mapped_category, requested_category,
+            ) if isinstance(value, str) and value.strip()
+        ))
+        selected = next((row for candidate in age_category_candidates for row in profiles
+                         if row["category"].casefold() == candidate
                          and row["segment"].casefold() == segment), None)
-        if selected is None and mapped_category_key != category:
-            selected = next((row for row in profiles if row["category"].casefold() == mapped_category_key
-                             and row["segment"].casefold() == segment), None)
         age_profile = selected.get("customer_age_profile") if selected else None
         age_profile_fallback = False
         if gender and segment == "__all__":
             age_profile_fallback = age_profile is not None
 
-        product_type = product.get("product_type")
-        product_type_mapping = _map_product_type(product_type, mapping)
         mapped_price_category = product_type_mapping.get("mapped_category") or mapped_category
         mapped_price_product_type = product_type_mapping.get("mapped")
         price_category_key = str(mapped_price_category).casefold()
         price_segment = {"women": "ladieswear", "men": "menswear"}.get(gender, "__all__")
+        product_type_price_row = next((row for row in snapshot.get("product_type_price_aggregates", [])
+                                       if row["product_type"].casefold() == str(mapped_price_product_type or "").casefold()
+                                       and row["category"].casefold() == price_category_key
+                                       and row["segment"].casefold() == price_segment), None)
         price_row = next((row for row in profiles if row["category"].casefold() == price_category_key
                           and row["segment"].casefold() == price_segment), None)
+        price_record = (
+            product_type_price_row["historical_price_aggregate"] if product_type_price_row else
+            price_row.get("historical_price_aggregate") if price_row else None
+        )
         price_gender_fallback = False
         if price_row is not None and gender and price_segment == "__all__":
             price_gender_fallback = True
         historical_price = _format_price(
-            price_row.get("historical_price_aggregate") if price_row else None,
+            price_record,
             requested_category=requested_category, product_type=mapped_price_product_type,
             season=product.get("season"), mapping=mapping,
         )
@@ -533,14 +619,21 @@ class HmResearchAggregateSource:
             historical_price["category_mapping"]["product_type_mapping"] = product_type_mapping
             historical_price["category_mapping"]["gender_mapping"] = gender_mapping
             historical_price["product_type_filter"] = mapped_price_product_type
-            historical_price["product_type_filter_applied"] = False
-            historical_price["product_type_fallback_applied"] = bool(mapped_price_product_type)
+            historical_price["product_type_filter_applied"] = product_type_price_row is not None
+            historical_price["product_type_fallback_applied"] = bool(
+                mapped_price_product_type and product_type_price_row is None
+            )
             historical_price["requested_product_type_context"] = product_type
             historical_price["gender_fallback_applied"] = price_gender_fallback
         customer_age_status = "available" if age_profile is not None else "no_match"
         historical_price_status = "available" if historical_price is not None else "no_match"
         if age_profile is not None and age_profile.get("category", "").casefold() != category:
-            age_profile = {**age_profile, "requested_product_type_context": requested_category}
+            age_profile = {**age_profile,
+                           "requested_product_type_context": product_type or requested_category,
+                           "requested_product_category": requested_category,
+                           "requested_product_type": product_type,
+                           "category_mapping": category_mapping,
+                           "product_type_mapping": product_type_mapping}
         if age_profile is not None:
             age_profile = {**age_profile, "requested_gender": gender or None,
                            "gender_mapping": gender_mapping,

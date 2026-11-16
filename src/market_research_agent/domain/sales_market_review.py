@@ -21,12 +21,16 @@ def _fabric_reference(fabric_rows: tuple[dict[str, Any], ...]) -> tuple[float | 
     values: list[tuple[float, str | None]] = []
     for group in fabric_rows:
         for item in group.get("sources", []):
+            if item.get("unit_price_estimation_status") != "observed":
+                continue
             amount = item.get("unit_price_krw_per_meter")
             if isinstance(amount, (int, float)) and not isinstance(amount, bool) and math.isfinite(amount) and amount > 0:
                 values.append((float(amount), item.get("record_id")))
     if not values:
         for group in fabric_rows:
             stats = group.get("price_per_meter_krw_statistics")
+            if not isinstance(stats, dict) or stats.get("status") != "observed":
+                continue
             amount = stats.get("median") if isinstance(stats, dict) else None
             if isinstance(amount, (int, float)) and not isinstance(amount, bool) and math.isfinite(amount) and amount > 0:
                 values.append((float(amount), None))
@@ -87,7 +91,7 @@ def _review_evidence(
 
     for label, kind, analysis, supports in (
         ("H&M historical customer aggregate", "customer", customer_age_profile,
-         ["result.customer_segment_analysis", "result.target_audience_analysis"]),
+         ["result.customer_segment_analysis", "result.target_audience_analysis.age_cohort"]),
         ("H&M historical transaction price aggregate", "price", historical_price_analysis,
          ["result.category_price_comparison", "result.price_analysis"]),
     ):
@@ -173,7 +177,9 @@ def _review_evidence(
                                             if isinstance(item, dict) and item.get("record_id")],
                 },
                 "interpretation": "Public listing reference only; it is not a verified purchase or production cost, and material composition is not inferred.",
-            }, supports=["result.material_cost_analysis", "result.fabric_cost_analysis", "result.margin_estimate", "result.margin_analysis", "result.margin_price_range_analysis"])
+            }, supports=["result.material_cost_analysis", "result.fabric_cost_analysis",
+                         "result.margin_estimate", "result.margin_analysis",
+                         "result.margin_price_range_analysis"])
 
     if historical_price_analysis:
         conversion = historical_price_analysis.get("usd_krw_conversion")
@@ -550,13 +556,13 @@ def build_sales_market_review(
     limitations: list[str] = []
     material_rows = tuple(fabrics)
     if margin.get("status") in {"benchmark_estimate", "benchmark_only"}:
-        limitations.append("Margin analysis uses the US apparel industry gross-margin benchmark; it is not this product's actual gross margin.")
+        limitations.append("[마진 참고] 미국 의류 업계 평균 매출총이익률 벤치마크이며 이 상품의 실제 마진이 아닙니다.")
     if historical_price_analysis is not None:
-        limitations.append("H&M Kaggle transaction prices are historical non-commercial research references, not current market listing prices.")
+        limitations.append("[거래 가격 자료] H&M Kaggle 거래 가격은 과거 비상업 연구 참고치이며 현재 시장 판매가가 아닙니다.")
     if fabrics:
-        limitations.append("R2 fabric listing prices are public snapshot references and are not confirmed per-meter production costs.")
+        limitations.append("[원단 자료] R2 공개 목록 가격은 참고치이며 검증된 구매 단가나 제품 생산 원가가 아닙니다.")
     if customer_age_profile is not None:
-        limitations.append("H&M age-band profiles are historical non-commercial research only; they are not current VOGUE customer behavior or demand.")
+        limitations.append("[고객 연령 자료] H&M 과거 비상업 집계는 현재 VOGUE 고객 구성이나 수요를 나타내지 않습니다.")
     target_audience_status = (
         "ok" if target_audience_proposal is not None
         else "partial" if customer_age_profile is not None

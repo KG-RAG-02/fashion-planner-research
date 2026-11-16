@@ -75,6 +75,12 @@ class SalesMarketReviewAdapterTests(unittest.TestCase):
         self.assertEqual(evidence_by_id[price_ids[0]]["locator"], "transactions.parquet")
         self.assertEqual(evidence_by_id[fabric_ids[0]]["locator"], "fabric.csv")
         self.assertEqual(evidence_by_id[price_ids[0]]["analysis"]["observed"]["sample_count"], 12)
+        self.assertTrue(any(item.startswith("[거래 가격 자료]") for item in review["limitations"]))
+        self.assertTrue(any(item.startswith("[원단 자료]") for item in review["limitations"]))
+        self.assertNotIn("result.target_audience_analysis.age_cohort",
+                         evidence_by_id[price_ids[0]]["supports_fields"])
+        self.assertNotIn("result.target_audience_analysis.price_positioning",
+                         evidence_by_id[fabric_ids[0]]["supports_fields"])
         self.assertIn("result.category_price_comparison", evidence_by_id[price_ids[0]]["supports_fields"])
 
     def test_internal_review_marks_unconnected_sources_and_does_not_echo_draft(self):

@@ -47,6 +47,32 @@ _CSV_COLUMNS = (
 )
 
 
+def _configure_age_duckdb(conn: Any) -> None:
+    """Bound DuckDB concurrency and point spill files at the writable cache volume."""
+    threads_raw = os.getenv("VOGUE_HM_AGE_DUCKDB_THREADS", "1").strip()
+    if re.fullmatch(r"[1-9][0-9]{0,2}", threads_raw) is None:
+        raise CustomerAgeSourceError("DuckDB age-query thread configuration is invalid.")
+    memory_limit = os.getenv("VOGUE_HM_AGE_DUCKDB_MEMORY_LIMIT", "3GB").strip()
+    if re.fullmatch(r"[1-9][0-9]*(?:\.[0-9]+)?(?:GB|GIB|MB|MIB)", memory_limit, re.IGNORECASE) is None:
+        raise CustomerAgeSourceError("DuckDB age-query memory configuration is invalid.")
+    temp_directory = os.getenv(
+        "VOGUE_HM_AGE_DUCKDB_TEMP_DIRECTORY",
+        os.getenv("VOGUE_R2_HM_DB_CACHE_DIR", "/tmp") + "/duckdb-age-tmp",
+    ).strip()
+    if not temp_directory or "\x00" in temp_directory:
+        raise CustomerAgeSourceError("DuckDB age-query temporary directory is invalid.")
+    try:
+        Path(temp_directory).mkdir(parents=True, exist_ok=True)
+    except OSError:
+        raise CustomerAgeSourceError("DuckDB age-query temporary directory is not writable.") from None
+    conn.execute("SET threads = " + threads_raw)
+    conn.execute("SET memory_limit = " + _sql_string(memory_limit))
+    conn.execute("SET preserve_insertion_order = false")
+    conn.execute("SET temp_directory = " + _sql_string(temp_directory))
+    _LOGGER.info("H&M age DuckDB config: threads=%s memory_limit=%s temp_directory=configured",
+                 threads_raw, memory_limit)
+
+
 def _sql_string(value: str) -> str:
     return "'" + value.replace("'", "''") + "'"
 
@@ -138,9 +164,9 @@ def _map_product_type(value: str | None, mapping: dict[str, Any]) -> dict[str, A
     if not requested:
         return {"requested": value, "mapped": None, "method": "not_provided", "score": None}
     candidates = {str(label): str(mapped) for label, mapped in mapping.get("product_type_name", {}).items()}
-    exact = next((mapped for label, mapped in candidates.items() if label.casefold() == requested.casefold()), None)
-    if exact:
-        return {"requested": requested, "mapped": requested, "mapped_category": exact,
+    exact_label = next((label for label in candidates if label.casefold() == requested.casefold()), None)
+    if exact_label:
+        return {"requested": requested, "mapped": exact_label, "mapped_category": candidates[exact_label],
                 "method": "exact", "score": 1.0}
     query = _category_key(requested)
     score, label, mapped = max(
@@ -318,7 +344,8 @@ class HmCustomerAgeResearchSource:
     articles_key: str = ""
     transactions_key: str = ""
 
-    def profile(self, category: str, *, gender: str | None = None) -> dict[str, Any] | None:
+    def profile(self, category: str, *, gender: str | None = None,
+                product_type: str | None = None) -> dict[str, Any] | None:
         profile_started = time.perf_counter()
         if not hm_research_noncommercial_enabled():
             raise CustomerAgeSourceError("H&M age research is disabled by Project_07 runtime settings.")
@@ -420,14 +447,33 @@ class HmCustomerAgeResearchSource:
             gender_key = gender_mapping.get("mapped") or ""
             if gender_key not in {"women", "men"}:
                 gender_key = ""
-            requested_category_key = category.strip().casefold()
-            mapped_category = _mapped_requested_category(category, mapping)
-            category_key = mapped_category.casefold()
-            profile = aggregate_map.get((category_key, gender_key))
+            category_mapping = _map_requested_category(category, mapping)
+            product_type_mapping = _map_product_type(product_type, mapping)
+            mapped_category = category_mapping["mapped_category"]
+            if product_type_mapping.get("mapped"):
+                # The aggregate map includes exact product-type aliases. Prefer this
+                # key for specific requests, then retain the category as fallback.
+                profile = aggregate_map.get((str(product_type_mapping["mapped"]).casefold(), gender_key))
+                if profile is None:
+                    profile = aggregate_map.get((str(product_type_mapping.get("mapped_category") or mapped_category).casefold(), gender_key))
+                lookup_method = "exact_product_type" if profile is not None else "product_type_no_match"
+            else:
+                profile = aggregate_map.get((mapped_category.casefold(), gender_key))
+                lookup_method = "category_fallback"
             if profile is not None:
-                profile = {**profile, "requested_product_type_context": category.strip(),
+                profile = {**profile,
+                           "requested_product_type_context": product_type or category.strip(),
+                           "requested_product_category": category.strip(),
+                           "requested_product_type": product_type,
+                           "category_mapping": category_mapping,
+                           "product_type_mapping": product_type_mapping,
+                           "lookup_method": lookup_method,
                            "requested_gender": gender,
                            "gender_mapping": gender_mapping,
+                           "gender_aggregate_scope": (
+                               "women" if gender_key == "women" else
+                               "men" if gender_key == "men" else "all_merchandise_segments"
+                           ),
                            "gender_filter_applied": gender_key in {"women", "men"},
                            "gender_fallback_applied": False}
             if profile is None:
@@ -456,6 +502,7 @@ class HmCustomerAgeResearchSource:
         conn = duckdb.connect()
         query_started = time.perf_counter()
         try:
+            _configure_age_duckdb(conn)
             extension_dir = os.getenv("VOGUE_DUCKDB_EXTENSION_DIRECTORY", "").strip()
             if extension_dir:
                 conn.execute("SET extension_directory = " + _sql_string(extension_dir))

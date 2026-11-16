@@ -31,6 +31,18 @@ class HmCombinedResearchParallelTests(unittest.TestCase):
         self.assertIsNone(result["historical_price"])
         self.assertEqual(result["fabric_prices"], ())
 
+    def test_age_source_receives_product_type_without_mutating_request(self):
+        product = {"category": "블라우스", "product_type": "blouse", "gender": "women"}
+        original = dict(product)
+        with patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"}, clear=True), \
+             patch("market_research_agent.sources.sales.hm_kaggle.hm_combined_research_source.R2FabricPriceSource.analyze", return_value=()), \
+             patch("market_research_agent.sources.sales.hm_kaggle.hm_combined_research_source.HmCustomerAgeResearchSource.profile", return_value={"category": "Tops"}) as age, \
+             patch("market_research_agent.sources.sales.hm_kaggle.hm_combined_research_source.HmHistoricalPriceResearchSource.analyze", return_value=None):
+            result = HmCombinedResearchSource().analyze(product)
+        age.assert_called_once_with("블라우스", gender="women", product_type="blouse")
+        self.assertEqual(product, original)
+        self.assertEqual(result["customer_age_profile"]["category"], "Tops")
+
     def test_independent_sources_run_concurrently_and_preserve_partial_results(self):
         barrier = threading.Barrier(3)
 
@@ -38,7 +50,7 @@ class HmCombinedResearchParallelTests(unittest.TestCase):
             barrier.wait(timeout=2)
             return ({"material": "cotton"},)
 
-        def age(self, category, *, gender=None):
+        def age(self, category, *, gender=None, product_type=None):
             barrier.wait(timeout=2)
             raise CustomerAgeSourceError("age source error")
 

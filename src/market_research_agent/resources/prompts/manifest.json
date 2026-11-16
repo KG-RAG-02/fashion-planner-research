@@ -13,8 +13,8 @@
           "user_template": "target_audience_hypothesis/v1/user_template.md",
           "examples": "target_audience_hypothesis/v1/examples.json",
           "rendered_system": "target_audience_hypothesis/v1/rendered_system.md",
-          "input_modality": "opt-in text: allowlisted product projection, historical customer aggregates, market price aggregates, fabric listing aggregates",
-          "output_contract": "validated fashion target profile, price positioning hypothesis, merchandising actions, and validation plan"
+          "input_modality": "opt-in text: allowlisted product projection, historical customer aggregates, fabric listing aggregates",
+          "output_contract": "validated fashion target profile, merchandising actions, and validation plan"
         }
       }
     }

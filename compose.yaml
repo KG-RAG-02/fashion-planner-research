@@ -14,8 +14,6 @@ services:
     environment:
       VOGUE_AGENT_SERVICE_BEARER_TOKEN: ${VOGUE_AGENT_SERVICE_BEARER_TOKEN:?VOGUE_AGENT_SERVICE_BEARER_TOKEN is required}
       VOGUE_PROJECT07_DISABLE_DOTENV: "1"
-      VOGUE_P07_REVIEW_ARTIFACT_DIR: /data/reviews
-      VOGUE_P07_REVIEW_SOURCE: ${VOGUE_P07_REVIEW_SOURCE:-}
       R2_ACCOUNT_ID: ${R2_ACCOUNT_ID:-}
       R2_BUCKET: ${R2_BUCKET:-}
       R2_ACCESS_KEY_ID: ${R2_ACCESS_KEY_ID:-}
@@ -23,10 +21,7 @@ services:
       VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY: ${VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY:-}
       LLM_API_KEY: ${LLM_API_KEY:-}
       LLM_MODEL: ${LLM_MODEL:-}
-      # workflow/0.1 requires an upstream artifact mount; the orchestrator's
-      # deploy/compose.yaml supplies VOGUE_UPSTREAM_ARTIFACT_ROOT and that mount.
     volumes:
-      - review-artifacts:/data/reviews
       - hm-cache:/data/hm-cache
 
   sales-market-review-agent-tests:
@@ -39,5 +34,4 @@ services:
     restart: "no"
 
 volumes:
-  review-artifacts:
   hm-cache:

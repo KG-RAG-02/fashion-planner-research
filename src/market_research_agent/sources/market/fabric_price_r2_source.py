@@ -8,6 +8,7 @@ import hashlib
 import io
 import logging
 import os
+import re
 import threading
 import time
 import unicodedata
@@ -66,6 +67,65 @@ def _positive_decimal(value: str) -> Decimal | None:
     except (InvalidOperation, AttributeError):
         return None
     return amount if amount.is_finite() and amount > 0 else None
+
+
+_UNIT_LENGTH_PATTERN = re.compile(
+    r"(?P<quantity>[0-9]+(?:\.[0-9]+)?)\s*(?P<unit>millimeters?|millimetres?|mm|"
+    r"centimeters?|centimetres?|cm|meters?|metres?|m|yards?|yd|마)(?=$|[^A-Za-z])",
+    re.IGNORECASE,
+)
+
+
+def _listing_length_m(row: dict[str, str]) -> tuple[Decimal | None, str | None]:
+    """Return the listed cut length in meters with the basis kept explicit."""
+    estimated_length = _positive_decimal(row.get("estimated_length_m", ""))
+    if estimated_length is not None and estimated_length <= Decimal("1000"):
+        return estimated_length, "source estimated_length_m"
+
+    unit_text = " ".join((row.get("original_unit", ""), row.get("estimated_sales_unit", "")))
+    match = _UNIT_LENGTH_PATTERN.search(unit_text)
+    if not match:
+        return None, None
+    quantity = Decimal(match.group("quantity"))
+    unit = match.group("unit").casefold()
+    meters_per_unit = (
+        Decimal("0.001") if unit in {"mm", "millimeter", "millimeters", "millimetre", "millimetres"} else
+        Decimal("0.01") if unit in {"cm", "centimeter", "centimeters", "centimetre", "centimetres"} else
+        Decimal("0.9144") if unit in {"yd", "yard", "yards"} else
+        Decimal("0.9") if unit == "마" else
+        Decimal("1")
+    )
+    return quantity * meters_per_unit, f"unit conversion from {match.group(0).strip()}"
+
+
+def _per_meter_price(row: dict[str, str], listed_amount: Decimal) -> dict[str, Any] | None:
+    """Preserve source unit prices; otherwise derive a labeled estimate when safe."""
+    source_value = _positive_decimal(row.get("unit_price_krw_per_meter", ""))
+    source_status = row.get("unit_price_estimation_status", "").strip().casefold()
+    if source_value is not None:
+        observed = source_status in {"observed", "verified"}
+        return {
+            "value": source_value,
+            "status": "observed" if observed else "estimated_not_verified",
+            "method": row.get("unit_price_estimation_method", "").strip() or (
+                "source-observed per-meter value" if observed else
+                "source-supplied per-meter value; verification not stated"
+            ),
+            "confidence": row.get("unit_price_estimation_confidence", "").strip() or (
+                "high" if observed else "low"
+            ),
+        }
+    if row.get("currency", "").strip().upper() != "KRW":
+        return None
+    length_m, basis = _listing_length_m(row)
+    if length_m is None or length_m <= 0:
+        return None
+    return {
+        "value": listed_amount / length_m,
+        "status": "estimated_not_verified",
+        "method": f"listed price / listed cut length ({basis}); estimate only, not a procurement cost",
+        "confidence": "low",
+    }
 
 
 def _material_terms(material: str) -> tuple[str, ...]:
@@ -225,20 +285,19 @@ class R2FabricPriceSource:
             amounts = [amount for _row, amount in entries]
             currencies = {row.get("currency", "").strip().upper() for row, _amount in entries}
             currency = next(iter(currencies)) if len(currencies) == 1 else None
-            per_meter = [value for row, _amount in entries
-                         if (value := _positive_decimal(row.get("unit_price_krw_per_meter", ""))) is not None]
-            per_meter_statuses = {
-                row.get("unit_price_estimation_status", "").strip()
-                for row, _amount in entries
-                if _positive_decimal(row.get("unit_price_krw_per_meter", "")) is not None
+            meter_details = {
+                id(row): _per_meter_price(row, amount) for row, amount in entries
             }
+            per_meter_rows = [detail for detail in meter_details.values() if detail is not None]
+            per_meter = [detail["value"] for detail in per_meter_rows]
+            per_meter_statuses = {detail["status"] for detail in per_meter_rows}
             confidence_counts: dict[str, int] = {}
-            for row, _amount in entries:
-                if _positive_decimal(row.get("unit_price_krw_per_meter", "")) is not None:
-                    confidence = row.get("unit_price_estimation_confidence", "unknown").strip() or "unknown"
-                    confidence_counts[confidence] = confidence_counts.get(confidence, 0) + 1
+            for detail in per_meter_rows:
+                confidence = detail["confidence"]
+                confidence_counts[confidence] = confidence_counts.get(confidence, 0) + 1
             comparables = []
             for row, amount in entries:
+                meter_detail = meter_details[id(row)]
                 comparables.append({
                     "record_id": row["record_id"].strip(),
                     "product_name": row["product_name"].strip(),
@@ -252,10 +311,16 @@ class R2FabricPriceSource:
                     "estimated_length_m": row.get("estimated_length_m", "").strip() or None,
                     "listed_price": float(amount),
                     "currency": row.get("currency", "").strip().upper() or None,
-                    "unit_price_krw_per_meter": float(value) if (value := _positive_decimal(row.get("unit_price_krw_per_meter", ""))) else None,
-                    "unit_price_estimation_status": row.get("unit_price_estimation_status", "").strip() or None,
-                    "unit_price_estimation_method": row.get("unit_price_estimation_method", "").strip() or None,
-                    "unit_price_estimation_confidence": row.get("unit_price_estimation_confidence", "").strip() or None,
+                    "unit_price_krw_per_meter": float(meter_detail["value"]) if meter_detail else None,
+                    "unit_price_estimation_status": meter_detail["status"] if meter_detail else (
+                        row.get("unit_price_estimation_status", "").strip() or None
+                    ),
+                    "unit_price_estimation_method": meter_detail["method"] if meter_detail else (
+                        row.get("unit_price_estimation_method", "").strip() or None
+                    ),
+                    "unit_price_estimation_confidence": meter_detail["confidence"] if meter_detail else (
+                        row.get("unit_price_estimation_confidence", "").strip() or None
+                    ),
                     "unit_price_estimation_evidence_urls": row.get("unit_price_estimation_evidence_urls", "").strip() or None,
                     "supplier": row["supplier"].strip() or None,
                     "shipping_terms": row["shipping_terms"].strip() or None,
@@ -288,7 +353,7 @@ class R2FabricPriceSource:
                     "currency": "KRW", "unit": "KRW/m",
                     "status": "estimated" if "estimated_not_verified" in per_meter_statuses else "observed",
                     "confidence_counts": confidence_counts,
-                    "method": "estimated listed_price / 0.90m (1 Korean ma)",
+                    "method": "Source-provided unit-price values or listed price divided by the source/recognized cut length; see per-record status and method.",
                 } if per_meter else None),
                 "estimated_price_per_meter_available": bool(per_meter),
                 "verified_price_per_meter_available": "observed" in per_meter_statuses,
@@ -310,7 +375,7 @@ class R2FabricPriceSource:
                 "operational_eligible": False,
                 "limitations": [
                     "This is a point-in-time public listing snapshot, not a supplier quote or verified purchase cost.",
-                    "Listed prices are not converted to per-meter values unless a separately reviewed estimate is present in the source row.",
+                    "Per-meter values marked estimated_not_verified are derived from listed prices and the source or recognized cut length; they are estimates, not observed unit prices.",
                     "Public retail listing prices are not automatically included in product margin costing.",
                     "Material percentages and some textile specifications are missing or unverified.",
                     "Shipping terms are separate and must not be treated as included in the listed price.",

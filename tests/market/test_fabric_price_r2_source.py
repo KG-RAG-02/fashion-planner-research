@@ -25,7 +25,7 @@ _COLUMNS = (
 )
 
 
-def _csv_bytes() -> bytes:
+def _csv_bytes(overrides: dict[str, str] | None = None) -> bytes:
     row = {name: "" for name in _COLUMNS}
     row.update({
         "record_id": "synthetic-fabric-001",
@@ -41,6 +41,7 @@ def _csv_bytes() -> bytes:
         "unit_price_estimation_status": "estimated_not_verified",
         "unit_price_estimation_confidence": "low",
     })
+    row.update(overrides or {})
     buffer = io.StringIO(newline="")
     writer = csv.DictWriter(buffer, fieldnames=(*_COLUMNS, "unit_price_krw_per_meter"))
     writer.writeheader()
@@ -97,6 +98,45 @@ class FabricPriceR2SourceTests(unittest.TestCase):
         self.assertEqual(result[0]["source_object"]["sha256"], hashlib.sha256(payload).hexdigest())
         self.assertEqual(result[0]["sources"][0]["unit_price_krw_per_meter"], 13333.0)
         self.assertEqual([kind for kind, _kwargs in client.calls], ["head", "get", "head"])
+
+    def test_korean_ma_listing_gets_estimated_per_meter_reference(self):
+        payload = _csv_bytes({
+            "unit_price_krw_per_meter": "",
+            "unit_price_estimation_status": "not_calculated",
+            "unit_price_estimation_method": "",
+            "unit_price_estimation_confidence": "",
+        })
+        result = R2FabricPriceSource(
+            _store(FakeR2Client(payload)), object_key="synthetic/estimated-ma.csv",
+        ).analyze({"material": "cotton"})
+
+        group = result[0]
+        comparable = group["sources"][0]
+        self.assertAlmostEqual(comparable["unit_price_krw_per_meter"], 12000 / 0.9)
+        self.assertEqual(comparable["unit_price_estimation_status"], "estimated_not_verified")
+        self.assertEqual(comparable["unit_price_estimation_confidence"], "low")
+        self.assertIn("estimate only", comparable["unit_price_estimation_method"])
+        self.assertEqual(group["price_per_meter_krw_statistics"]["status"], "estimated")
+        self.assertFalse(group["verified_price_per_meter_available"])
+        self.assertFalse(group["cost_per_meter_operational_eligible"])
+
+    def test_unknown_length_and_non_krw_amount_do_not_invent_per_meter_price(self):
+        for overrides in (
+            {"original_unit": "one roll", "estimated_sales_unit": "roll", "estimated_length_m": ""},
+            {"currency": "USD", "original_unit": "1마", "estimated_length_m": ""},
+        ):
+            with self.subTest(overrides=overrides):
+                result = R2FabricPriceSource(
+                    _store(FakeR2Client(_csv_bytes({
+                        "unit_price_krw_per_meter": "",
+                        "unit_price_estimation_status": "not_calculated",
+                        "unit_price_estimation_method": "",
+                        "unit_price_estimation_confidence": "",
+                        **overrides,
+                    }))), object_key="synthetic/no-safe-length.csv",
+                ).analyze({"material": "cotton"})
+                self.assertIsNone(result[0]["price_per_meter_krw_statistics"])
+                self.assertIsNone(result[0]["sources"][0]["unit_price_krw_per_meter"])
 
     def test_korean_fiber_aliases_match_without_misclassifying_modal_as_wool(self):
         from market_research_agent.sources.market.fabric_price_r2_source import _material_terms

@@ -52,6 +52,120 @@ class FakeConnection:
         self.statements.append(statement)
 
 
+class CategoryAliasLookupTests(unittest.TestCase):
+    def test_korean_category_blouse_type_and_women_select_tops_profile(self):
+        profile = {
+            "category": "Tops", "unique_customer_denominator": 120,
+            "target_age_cohort": {"age_band": "20_39"},
+        }
+        client = FakeR2Client()
+        source = HmCustomerAgeResearchSource(store=R2ObjectStore(
+            R2Settings("account", "synthetic-bucket", "key-id", "secret"), client=client,
+        ))
+        with patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"}), \
+             patch.dict(sys.modules, {"duckdb": FakeDuckDB}), \
+             patch.object(HmCustomerAgeResearchSource, "_query_aggregates", return_value={
+                 ("blouse", "women"): profile,
+             }):
+            result = source.profile("블라우스", product_type="blouse", gender="women")
+        self.assertIsNotNone(result)
+        self.assertEqual(result["category"], "Tops")
+        self.assertEqual(result["unique_customer_denominator"], 120)
+        self.assertEqual(result["requested_product_category"], "블라우스")
+        self.assertEqual(result["requested_product_type"], "blouse")
+        self.assertEqual(result["product_type_mapping"]["mapped"], "Blouse")
+        self.assertEqual(result["product_type_mapping"]["mapped_category"], "Tops")
+        self.assertEqual(result["requested_gender"], "women")
+        self.assertEqual(result["gender_aggregate_scope"], "women")
+        self.assertTrue(result["gender_filter_applied"])
+        self.assertNotIn("mapping", json.dumps(profile))
+
+    def test_missing_gender_uses_all_segment_profile_explicitly(self):
+        profile = {"category": "Tops", "unique_customer_denominator": 300}
+        source = HmCustomerAgeResearchSource(store=R2ObjectStore(
+            R2Settings("account", "synthetic-all-gender-bucket", "key-id", "secret"), client=FakeR2Client(),
+        ))
+        with patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"}), \
+             patch.dict(sys.modules, {"duckdb": FakeDuckDB}), \
+             patch.object(HmCustomerAgeResearchSource, "_query_aggregates", return_value={
+                 ("tops", ""): profile,
+             }):
+            result = source.profile("상의")
+        self.assertEqual(result["gender_aggregate_scope"], "all_merchandise_segments")
+        self.assertFalse(result["gender_filter_applied"])
+
+    def test_snapshot_age_selection_uses_exact_product_type_category_mapping(self):
+        profile = {
+            "category": "Tops", "unique_customer_denominator": 120,
+            "target_age_cohort": {"age_band": "20_39"},
+        }
+        snapshot = {"profiles": [{
+            "category": "Tops", "segment": "ladieswear",
+            "customer_age_profile": profile, "historical_price_aggregate": None,
+        }]}
+
+        result = HmResearchAggregateSource._select(
+            snapshot, {"category": "블라우스", "product_type": "blouse", "gender": "women"},
+        )
+
+        self.assertEqual(result["customer_age_profile"]["category"], "Tops")
+        self.assertEqual(result["customer_age_profile"]["product_type_mapping"]["mapped_category"], "Tops")
+        self.assertTrue(result["customer_age_profile"]["gender_filter_applied"])
+
+    def test_snapshot_price_prefers_exact_product_type_aggregate(self):
+        from market_research_agent.sources.sales.hm_kaggle.hm_customer_age_source import _MAPPING_PATH
+
+        mapping = json.loads(_MAPPING_PATH.read_text())
+        def price(sample_count, median):
+            return {
+                "category": "Tops", "merchandise_segment": "Ladieswear",
+                "sample_count": sample_count, "article_count": 2,
+                "period": {"start": "2019-01-01", "end": "2020-01-01"},
+                "channel_codes": ["1"],
+                "price_statistics": {"minimum": 0.01, "p25": 0.02, "median": median,
+                                     "p75": 0.04, "maximum": 0.05, "mean": median,
+                                     "currency": None, "unit": "normalized_source_price; currency not provided"},
+                "sources": [],
+                "category_mapping": {"mapping_id": mapping["mapping_id"],
+                                     "mapping_version": mapping["mapping_version"],
+                                     "matching": "product_type_exact"},
+            }
+        snapshot = {
+            "profiles": [{"category": "Tops", "segment": "ladieswear",
+                          "customer_age_profile": None,
+                          "historical_price_aggregate": price(100, 0.03)}],
+            "product_type_price_aggregates": [{
+                "category": "Tops", "segment": "ladieswear", "product_type": "Blouse",
+                "historical_price_aggregate": price(7, 0.025),
+            }],
+        }
+
+        result = HmResearchAggregateSource._select(
+            snapshot, {"category": "블라우스", "product_type": "blouse", "gender": "women"},
+        )
+
+        self.assertEqual(result["historical_price"]["sample_count"], 7)
+        self.assertEqual(result["historical_price"]["price_statistics"]["median"], 0.025)
+        self.assertTrue(result["historical_price"]["product_type_filter_applied"])
+        self.assertFalse(result["historical_price"]["product_type_fallback_applied"])
+
+
+class AgeDuckDBSettingsTests(unittest.TestCase):
+    def test_duckdb_memory_parallelism_order_and_spill_are_bounded(self):
+        connection = FakeConnection()
+        with tempfile.TemporaryDirectory(prefix="p07-age-spill-") as temp_dir, patch.dict(os.environ, {
+            "VOGUE_HM_AGE_DUCKDB_THREADS": "1",
+            "VOGUE_HM_AGE_DUCKDB_MEMORY_LIMIT": "3GB",
+            "VOGUE_HM_AGE_DUCKDB_TEMP_DIRECTORY": str(Path(temp_dir) / "duckdb-age-tmp"),
+        }, clear=False):
+            age_module._configure_age_duckdb(connection)
+            self.assertTrue((Path(temp_dir) / "duckdb-age-tmp").is_dir())
+        self.assertIn("SET threads = 1", connection.statements)
+        self.assertIn("SET memory_limit = '3GB'", connection.statements)
+        self.assertIn("SET preserve_insertion_order = false", connection.statements)
+        self.assertTrue(any(statement.startswith("SET temp_directory = '") for statement in connection.statements))
+
+
 class FakeUploadClient:
     def __init__(self, existing=None):
         self.existing = existing
@@ -191,6 +305,7 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
             "fabric_source": {"object_key": "fabric.csv", "version": "fixture-v1",
                               "sha256": hashlib.sha256(fabric_csv.encode()).hexdigest()},
             "fabric_listing_csv": fabric_csv,
+            "product_type_price_aggregates": [],
             "profiles": [{"category": "Outerwear", "segment": "ladieswear",
                           "customer_age_profile": age, "historical_price_aggregate": price}],
         }
@@ -527,7 +642,13 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
                 age_query_count = len(query_statements)
                 aggregate_rows = _run_aggregate_query(LocalDuckDB, settings, keys, mapping)
             self.assertEqual(age_query_count, 1)
-            self.assertEqual(len(query_statements) - age_query_count, 1)
+            self.assertEqual(len(query_statements) - age_query_count, 2)
+            batch_queries = query_statements[age_query_count:]
+            self.assertTrue(any("'age' AS measure" in statement for statement in batch_queries))
+            self.assertTrue(any("approx_quantile(t.price, 0.5)" in statement for statement in batch_queries))
+            self.assertFalse(any("quantile_cont" in statement for statement in batch_queries))
+            self.assertFalse(any("approx_quantile" in statement and "COUNT(DISTINCT matched_customer_id)" in statement
+                                 for statement in batch_queries))
             profile = result[(mapping["product_type_name"]["Coat"].casefold(), "women")]
             self.assertEqual(profile["unique_customer_denominator"], 180)
             self.assertEqual(profile["target_age_cohort"]["age_band"], "40_plus")
@@ -564,6 +685,16 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
             )
             self.assertEqual(stored_profile["customer_age_profile"]["unique_customer_denominator"], 180)
             self.assertEqual(stored_profile["historical_price_aggregate"]["sample_count"], 180)
+            self.assertIn("T-Digest approximate", stored_profile["historical_price_aggregate"]["price_statistics"]["statistic"])
+            exact_connection = real_connect()
+            try:
+                exact_median = exact_connection.execute(
+                    "SELECT quantile_cont(price, 0.5) FROM read_parquet(?)", [str(transactions)],
+                ).fetchone()[0]
+            finally:
+                exact_connection.close()
+            approximate_median = stored_profile["historical_price_aggregate"]["price_statistics"]["median"]
+            self.assertLessEqual(abs(approximate_median - exact_median) / exact_median, 0.05)
             self.assertNotIn(b"synthetic-0", payload)
             runtime_result = HmResearchAggregateSource._select(
                 snapshot, {"category": "Outerwear", "product_type": "Coat", "gender": "women", "season": "winter"},
