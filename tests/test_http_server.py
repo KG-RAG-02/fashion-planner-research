@@ -219,10 +219,23 @@ class Project07ReviewHttpTests(unittest.TestCase):
         fabric = ({
             "source_type": "owner_provided_public_fabric_listing_snapshot",
             "source_grade": "public_sale",
-            "source_object": {"object_key": "synthetic/fabric.csv", "version": "fixture-v1"},
-            "sources": [{"record_id": "fixture-fabric-1", "unit_price_krw_per_meter": 12000}],
-            "permission_status": "owner_provided_snapshot",
+            "material_query": "cotton",
+            "sample_count": 1,
+            "currency": "KRW",
+            "original_unit": ["1마"],
+            "listed_price_statistics": {"minimum": 12000, "median": 12000, "maximum": 12000, "currency": "KRW"},
+            "price_per_meter_krw_statistics": {
+                "sample_count": 1, "minimum": 13333.33, "median": 13333.33, "maximum": 13333.33,
+                "currency": "KRW", "unit": "KRW/m", "status": "estimated",
+                "confidence_counts": {"low": 1},
+                "method": "listed price / listed cut length (unit conversion from 1마); estimate only, not a procurement cost",
+            },
+            "estimated_price_per_meter_available": True,
             "verified_price_per_meter_available": False,
+            "cost_per_meter_operational_eligible": False,
+            "source_object": {"object_key": "synthetic/fabric.csv", "version": "fixture-v1"},
+            "sources": [{"record_id": "fixture-fabric-private-row-id", "unit_price_krw_per_meter": 13333.33}],
+            "permission_status": "owner_provided_snapshot",
         },)
         profile = {
             "source_id": "synthetic-hm-research",
@@ -281,6 +294,19 @@ class Project07ReviewHttpTests(unittest.TestCase):
                 self.assertTrue(result["category_price_comparison"])
                 self.assertEqual(result["category_price_comparison"][0]["sample_count"], 24)
                 self.assertTrue(result["material_cost_analysis"])
+                self.assertNotIn("sources", result["material_cost_analysis"][0])
+                fabric_group = result["material_cost_analysis"][0]
+                per_meter = fabric_group["price_per_meter_krw_statistics"]
+                self.assertEqual(per_meter["status"], "estimated")
+                self.assertEqual(per_meter["unit"], "KRW/m")
+                self.assertEqual(per_meter["median"], 13333.33)
+                self.assertEqual(per_meter["method"],
+                                 "listed price / listed cut length (unit conversion from 1마); estimate only, not a procurement cost")
+                self.assertTrue(fabric_group["estimated_price_per_meter_available"])
+                self.assertNotIn("verified_price_per_meter_available", fabric_group)
+                self.assertFalse(fabric_group["cost_per_meter_operational_eligible"])
+                self.assertNotIn("unit_cost", result["fabric_cost_analysis"])
+                self.assertNotIn("fixture-fabric-private-row-id", str(result))
                 self.assertNotIn("sources", result["material_cost_analysis"][0])
                 self.assertTrue(result["customer_segment_analysis"])
                 self.assertEqual(result["target_audience_analysis"]["age_cohort"], profile["target_age_cohort"])
@@ -433,7 +459,7 @@ class Project07ReviewHttpTests(unittest.TestCase):
             {error["code"] for error in response["result"]["errors"]},
         )
         self.assertEqual(response["result"]["material_cost_analysis"], [])
-        self.assertEqual(response["result"]["fabric_cost_analysis"]["unit_cost"], None)
+        self.assertNotIn("unit_cost", response["result"]["fabric_cost_analysis"])
         self.assertEqual(response["result"]["missing_data"][1]["reason"], "source_error")
 
     def test_customer_age_failure_is_partial_and_keeps_review_linkage(self):
@@ -504,7 +530,7 @@ class Project07ReviewHttpTests(unittest.TestCase):
         self.assertEqual(result["customer_segment_analysis"], [])
         self.assertIsNone(result["target_audience_analysis"]["age_cohort"])
         self.assertEqual(result["fabric_cost_analysis"]["status"], "no_results")
-        self.assertIsNone(result["fabric_cost_analysis"]["unit_cost"])
+        self.assertNotIn("unit_cost", result["fabric_cost_analysis"])
         missing = {item["field"]: item for item in result["missing_data"]}
         self.assertEqual(missing["fabric_costs"]["reason"], "no_match")
         self.assertEqual(missing["customer_segments"]["reason"], "source_error")
@@ -524,7 +550,7 @@ class Project07ReviewHttpTests(unittest.TestCase):
         errors = {error["code"] for error in response["result"]["errors"]}
         self.assertNotIn("R2_FABRIC_PRICE_READ_FAILED", errors)
         self.assertEqual(response["result"]["material_cost_analysis"], [])
-        self.assertIsNone(response["result"]["fabric_cost_analysis"]["unit_cost"])
+        self.assertNotIn("unit_cost", response["result"]["fabric_cost_analysis"])
         self.assertEqual(response["result"]["missing_data"][1]["field"], "fabric_costs")
         self.assertEqual(
             response["result"]["missing_data"][1]["reason"],
@@ -592,7 +618,7 @@ class Project07ReviewHttpTests(unittest.TestCase):
         self.assertEqual(fabric_missing["reason"], "no_match")
         self.assertEqual(result["material_cost_analysis"], [])
         self.assertEqual(result["fabric_cost_analysis"]["status"], "no_results")
-        self.assertIsNone(result["fabric_cost_analysis"]["unit_cost"])
+        self.assertNotIn("unit_cost", result["fabric_cost_analysis"])
 
     def test_category_only_minimum_product_request_is_accepted(self):
         payload = self.valid_review()
