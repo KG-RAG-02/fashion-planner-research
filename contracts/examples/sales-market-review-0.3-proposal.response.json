@@ -137,7 +137,6 @@
     },
     "fabric_cost_analysis": {
       "status": "no_results",
-      "unit_cost": null,
       "unit": null,
       "currency": null,
       "matched_material": "wool blend",

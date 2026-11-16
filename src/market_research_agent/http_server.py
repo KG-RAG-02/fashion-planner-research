@@ -137,7 +137,7 @@ def _p08_review_projection(review: dict[str, Any]) -> dict[str, Any]:
     fabric_fields = (
         "material_query", "source_category", "source_type", "source_grade", "sample_count",
         "currency", "original_unit", "listed_price_statistics", "price_per_meter_krw_statistics",
-        "estimated_price_per_meter_available", "verified_price_per_meter_available",
+        "estimated_price_per_meter_available",
         "cost_per_meter_operational_eligible", "category_mapping", "permission_status",
         "operational_eligible", "evidence_ids",
     )
@@ -179,7 +179,7 @@ def _p08_review_projection(review: dict[str, Any]) -> dict[str, Any]:
         ))
         row["price_per_meter_krw_statistics"] = pick(row.get("price_per_meter_krw_statistics"), (
             "sample_count", "minimum", "median", "maximum", "currency", "unit", "status",
-            "confidence_counts",
+            "confidence_counts", "method",
         ))
         row["category_mapping"] = pick(row.get("category_mapping"), (
             "mapping_id", "mapping_version", "matched_source_categories", "matched_terms",
@@ -188,7 +188,7 @@ def _p08_review_projection(review: dict[str, Any]) -> dict[str, Any]:
     # P08 reads these fields from the dedicated summary objects below. The
     # detailed listing rows were duplicated here and in material_cost_analysis.
     compact["fabric_cost_analysis"] = pick(review.get("fabric_cost_analysis"), (
-        "status", "unit_cost", "unit", "currency", "matched_material", "limitations", "evidence_ids",
+        "status", "unit", "currency", "matched_material", "limitations", "evidence_ids",
     ))
     compact["margin_analysis"] = pick(review.get("margin_analysis"), (
         "status", "basis", "selling_price", "currency", "margin_rate_percent",
