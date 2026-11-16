@@ -1,6 +1,6 @@
 {
   "mapping_id": "project07-hm-product-taxonomy",
-  "mapping_version": "project07-hm-category-map/1.2",
+  "mapping_version": "project07-hm-category-map/1.3",
   "mapping_policy": "Exact product_type_name mappings take precedence over product_group_name fallback mappings. Explicit requested_category_aliases normalize supported P06 category labels to H&M categories. Unlisted values are not mapped.",
   "requested_category_aliases": {
     "니트웨어": "Knitwear",
@@ -14,7 +14,29 @@
     "잠옷": "Nightwear",
     "신발": "Footwear",
     "가방": "Bags",
-    "액세서리": "Accessories"
+    "액세서리": "Accessories",
+    "탑": "Tops",
+    "블라우스": "Tops",
+    "티셔츠": "Tops",
+    "셔츠": "Tops",
+    "후드티": "Tops",
+    "니트": "Knitwear",
+    "스웨터": "Knitwear",
+    "가디건": "Knitwear",
+    "팬츠": "Bottoms",
+    "청바지": "Bottoms",
+    "스커트": "Bottoms",
+    "레깅스": "Bottoms",
+    "조거팬츠": "Bottoms",
+    "반바지": "Bottoms",
+    "코트": "Outerwear",
+    "재킷": "Outerwear",
+    "자켓": "Outerwear",
+    "점퍼": "Outerwear",
+    "패딩": "Outerwear",
+    "블레이저": "Outerwear",
+    "드레스": "Dresses",
+    "점프수트": "One-piece"
   },
   "product_group_name": {
     "Accessories": "Accessories",
