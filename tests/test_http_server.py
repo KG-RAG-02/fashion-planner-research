@@ -535,6 +535,44 @@ class Project07ReviewHttpTests(unittest.TestCase):
             "R2 fabric price source is not configured.",
         )
 
+    def test_missing_material_is_distinct_from_unconfigured_fabric_source(self):
+        payload = self.valid_review()
+        payload["input"]["product"].pop("material")
+        payload["input"]["product_evidence"].pop("material")
+        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+        self.assertEqual(status, 200)
+        fabric_missing = next(item for item in response["result"]["missing_data"]
+                              if item["field"] == "fabric_costs")
+        self.assertEqual(fabric_missing["reason"], "material_not_specified")
+        self.assertIn("Material was not supplied", fabric_missing["message"])
+
+    def test_nonempty_product_inputs_are_preserved_in_review_output(self):
+        payload = self.valid_review()
+        payload["input"]["product"].update({
+            "category": "상의", "product_type": "Blouse", "gender": "women",
+            "season": "2027SS", "material": "cotton",
+        })
+        status, response = self.request(
+            "POST", "/v1/agents/sales-market-agent/reviews", payload,
+            research_bundle={
+                "fabric_prices": (), "fabric_price_error": None,
+                "fabric_price_source_status": "no_match",
+                "customer_age_profile": {"category": "Tops", "target_age_cohort": {"age_band": "20_39"}},
+                "customer_age_error": None, "customer_age_source_status": "available",
+                "historical_price": None, "historical_price_error": None,
+                "historical_price_source_status": "no_match",
+            },
+        )
+        self.assertEqual(status, 200)
+        result = response["result"]
+        self.assertEqual(result["draft_context"], payload["input"]["product"])
+        self.assertEqual(result["status"], "partial")
+        self.assertEqual(result["customer_segment_analysis"][0]["category"], "Tops")
+        self.assertEqual(result["draft_context"]["season"], "2027SS")
+        missing = {item["field"]: item["reason"] for item in result["missing_data"]}
+        self.assertEqual(missing["historical_hm_transaction_prices"], "no_match")
+        self.assertEqual(missing["fabric_costs"], "no_match")
+
     def test_configured_fabric_source_without_material_match_is_not_a_read_error(self):
         status, response = self.request(
             "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),

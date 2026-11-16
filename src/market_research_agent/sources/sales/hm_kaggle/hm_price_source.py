@@ -19,7 +19,7 @@ from ....sources.shared.r2_object_store import R2ObjectStore, R2Settings
 from ....sources.shared.r2_source_manifest import r2_source_key
 from ....runtime_settings import hm_research_noncommercial_enabled
 from .duckdb_http import configure_httpfs
-from .hm_customer_age_source import _mapped_requested_category, _safe_failure_category
+from .hm_customer_age_source import _map_gender, _map_product_type, _map_requested_category, _safe_failure_category
 
 
 class HmPriceSourceError(RuntimeError):
@@ -201,10 +201,13 @@ class HmHistoricalPriceResearchSource:
             articles_uri = _sql_string(f"s3://{settings.bucket}/{keys[0]}")
             transactions_uri = _sql_string(f"s3://{settings.bucket}/{keys[1]}")
             mapped_product_type = mapping.get("product_type_name", {}).get(product_type or "")
-            query_category = mapped_product_type or _mapped_requested_category(requested_category, mapping)
-            expected_segment = {"women": "ladieswear", "men": "menswear"}.get(
-                (gender or "").strip().casefold()
-            )
+            product_type_mapping = _map_product_type(product_type, mapping)
+            gender_mapping = _map_gender(gender)
+            category_mapping = _map_requested_category(requested_category, mapping)
+            mapped_product_type_category = product_type_mapping.get("mapped_category")
+            query_category = mapped_product_type_category or category_mapping["mapped_category"]
+            product_type_filter = product_type_mapping.get("mapped")
+            expected_segment = gender_mapping.get("merchandise_segment")
             row = conn.execute(f"""
                 WITH mapped_articles AS (
                     SELECT a.article_id, a.index_group_name, a.product_type_name,
@@ -230,8 +233,10 @@ class HmHistoricalPriceResearchSource:
                 WHERE a.category IS NOT NULL AND t.price IS NOT NULL
                   AND lower(a.category) = lower(?)
                   AND (? IS NULL OR lower(COALESCE(a.index_group_name, '')) = lower(?))
+                  AND (? IS NULL OR lower(trim(a.product_type_name)) = lower(trim(?)))
                 GROUP BY 1
-            """, [query_category, expected_segment, expected_segment]).fetchone()
+            """, [query_category, expected_segment, expected_segment,
+                  product_type_filter, product_type_filter]).fetchone()
             if row is None:
                 return None
             transaction_rows = int(row[1])
@@ -246,16 +251,31 @@ class HmHistoricalPriceResearchSource:
                     query_category if query_category.strip().casefold() != requested_category.strip().casefold()
                     else None
                 ),
-                "product_type_filter": None,
+                "product_type_filter": product_type_filter,
+                "product_type_filter_applied": product_type_filter is not None,
+                "product_type_fallback_applied": False,
                 "requested_product_type_context": product_type,
                 "season_filter": None,
+                "requested_season": season,
+                "season_filter_status": "unsupported_source_dimension" if season else "not_provided",
                 "category_mapping": {
                     "mapping_id": mapping["mapping_id"],
                     "mapping_version": mapping["mapping_version"],
                     "mapping_fingerprint": mapping_digest,
-                    "matching": "product_type_exact_then_product_group_fallback",
+                    **category_mapping,
+                    "matching": "requested_product_type_exact_when_supplied; otherwise_category_similarity",
+                    "mapped_category": query_category,
+                    "requested_product_type": product_type,
+                    "mapped_product_type_category": mapped_product_type_category,
+                    "product_type_mapping": product_type_mapping,
+                    "gender_mapping": gender_mapping,
                 },
                 "merchandise_segment": expected_segment or "all_mapped_segments",
+                "requested_gender": gender,
+                "gender_mapping": gender_mapping,
+                "gender_filter_applied": expected_segment is not None,
+                "requested_season": season,
+                "season_filter_applied": False,
                 "sample_count": transaction_rows,
                 "article_count": int(row[2]),
                 "period": {"start": str(row[9]), "end": str(row[10])},

@@ -25,7 +25,8 @@ from ....sources.shared.r2_source_manifest import r2_source_key
 from ....runtime_settings import hm_research_noncommercial_enabled
 from .duckdb_http import configure_httpfs
 from .hm_customer_age_source import (
-    _CSV_COLUMNS, _MAPPING_PATH, _build_profiles, _checked_key, _mapped_requested_category,
+    _CSV_COLUMNS, _MAPPING_PATH, _build_profiles, _checked_key, _map_gender, _map_product_type,
+    _map_requested_category,
 )
 from .hm_price_source import _sql_string
 
@@ -182,6 +183,14 @@ def _price_record(row: tuple[Any, ...], *, source_refs: tuple[dict[str, str], ..
     return {
         "category": category,
         "merchandise_segment": segment,
+        "requested_gender": None if segment == "__all__" else (
+            "women" if segment.casefold() == "ladieswear" else "men" if segment.casefold() == "menswear" else None
+        ),
+        "gender_mapping": {"requested": None if segment == "__all__" else (
+            "women" if segment.casefold() == "ladieswear" else "men" if segment.casefold() == "menswear" else None
+        ), "mapped": None if segment == "__all__" else (
+            "women" if segment.casefold() == "ladieswear" else "men" if segment.casefold() == "menswear" else None
+        ), "method": "aggregate_segment", "filter_applied": segment != "__all__"},
         "sample_count": int(row[7]),
         "article_count": int(row[8]),
         "period": {"start": str(row[5]), "end": str(row[6])},
@@ -197,6 +206,8 @@ def _price_record(row: tuple[Any, ...], *, source_refs: tuple[dict[str, str], ..
             "mapping_id": mapping["mapping_id"], "mapping_version": mapping["mapping_version"],
             "mapping_fingerprint": mapping_fingerprint,
             "matching": "product_type_exact_then_product_group_fallback",
+            "requested_category": category,
+            "mapped_category": category,
         },
     }
 
@@ -483,11 +494,13 @@ class HmResearchAggregateSource:
     def _select(snapshot: dict[str, Any], product: dict[str, Any]) -> dict[str, Any]:
         mapping = json.loads(_MAPPING_PATH.read_text(encoding="utf-8"))
         requested_category = str(product.get("category", "")).strip()
-        mapped_category = _mapped_requested_category(requested_category, mapping)
+        category_mapping = _map_requested_category(requested_category, mapping)
+        mapped_category = category_mapping["mapped_category"]
         category = requested_category.casefold()
         mapped_category_key = str(mapped_category).casefold()
-        gender = (product.get("gender") or "").casefold()
-        segment = {"women": "ladieswear", "men": "menswear"}.get(gender, "__all__")
+        gender_mapping = _map_gender(product.get("gender"),)
+        gender = gender_mapping.get("mapped") or ""
+        segment = gender_mapping.get("merchandise_segment") or "__all__"
         profiles = snapshot["profiles"]
         selected = next((row for row in profiles if row["category"].casefold() == category
                          and row["segment"].casefold() == segment), None)
@@ -495,28 +508,56 @@ class HmResearchAggregateSource:
             selected = next((row for row in profiles if row["category"].casefold() == mapped_category_key
                              and row["segment"].casefold() == segment), None)
         age_profile = selected.get("customer_age_profile") if selected else None
+        age_profile_fallback = False
+        if gender and segment == "__all__":
+            age_profile_fallback = age_profile is not None
 
         product_type = product.get("product_type")
-        mapped_price_category = (
-            mapping.get("product_type_name", {}).get(product_type or "")
-            or _mapped_requested_category(requested_category, mapping)
-        )
+        product_type_mapping = _map_product_type(product_type, mapping)
+        mapped_price_category = product_type_mapping.get("mapped_category") or mapped_category
+        mapped_price_product_type = product_type_mapping.get("mapped")
         price_category_key = str(mapped_price_category).casefold()
         price_segment = {"women": "ladieswear", "men": "menswear"}.get(gender, "__all__")
         price_row = next((row for row in profiles if row["category"].casefold() == price_category_key
                           and row["segment"].casefold() == price_segment), None)
+        price_gender_fallback = False
+        if price_row is not None and gender and price_segment == "__all__":
+            price_gender_fallback = True
         historical_price = _format_price(
             price_row.get("historical_price_aggregate") if price_row else None,
-            requested_category=requested_category, product_type=product_type,
+            requested_category=requested_category, product_type=mapped_price_product_type,
             season=product.get("season"), mapping=mapping,
         )
+        if historical_price is not None:
+            historical_price["category_mapping"].update(category_mapping)
+            historical_price["category_mapping"]["product_type_mapping"] = product_type_mapping
+            historical_price["category_mapping"]["gender_mapping"] = gender_mapping
+            historical_price["product_type_filter"] = mapped_price_product_type
+            historical_price["product_type_filter_applied"] = False
+            historical_price["product_type_fallback_applied"] = bool(mapped_price_product_type)
+            historical_price["requested_product_type_context"] = product_type
+            historical_price["gender_fallback_applied"] = price_gender_fallback
         customer_age_status = "available" if age_profile is not None else "no_match"
         historical_price_status = "available" if historical_price is not None else "no_match"
         if age_profile is not None and age_profile.get("category", "").casefold() != category:
             age_profile = {**age_profile, "requested_product_type_context": requested_category}
+        if age_profile is not None:
+            age_profile = {**age_profile, "requested_gender": gender or None,
+                           "gender_mapping": gender_mapping,
+                           "gender_filter_applied": bool(gender and not age_profile_fallback),
+                           "gender_fallback_applied": age_profile_fallback}
+        if historical_price is not None:
+            historical_price = {**historical_price,
+                                "requested_gender": product.get("gender"),
+                                "gender_mapping": gender_mapping,
+                                "gender_filter_applied": bool(gender and not price_gender_fallback),
+                                "gender_fallback_applied": price_gender_fallback}
         fabric_prices: tuple[dict[str, Any], ...] = ()
         fabric_price_error = None
-        fabric_price_source_status = "not_configured"
+        fabric_price_source_status = (
+            "not_requested" if not isinstance(product.get("material"), str) or not product.get("material", "").strip()
+            else "not_configured"
+        )
         fabric_csv = snapshot.get("fabric_listing_csv")
         fabric_source = snapshot.get("fabric_source")
         if isinstance(fabric_csv, str) and isinstance(fabric_source, dict):
@@ -555,8 +596,9 @@ def _format_price(record: dict[str, Any] | None, *, requested_category: str,
     stats = record["price_statistics"]
     scaled = {key: (None if stats[key] is None else stats[key] * 590)
               for key in ("minimum", "p25", "median", "p75", "maximum", "mean")}
-    mapped_type = mapping.get("product_type_name", {}).get(product_type or "")
-    mapped_type = mapped_type or _mapped_requested_category(requested_category, mapping)
+    category_mapping = _map_requested_category(requested_category, mapping)
+    product_type_mapping = _map_product_type(product_type, mapping)
+    mapped_type = product_type_mapping.get("mapped_category") or category_mapping["mapped_category"]
     if mapped_type.casefold() == requested_category.casefold():
         mapped_type = None
     source_refs = record["sources"]
@@ -566,13 +608,28 @@ def _format_price(record: dict[str, Any] | None, *, requested_category: str,
         "permission_status": "non_commercial_research_only", "operational_eligible": False,
         "category": requested_category,
         "mapped_product_type_category": mapped_type,
-        "product_type_filter": None, "requested_product_type_context": product_type,
+        "product_type_filter": product_type if product_type else None, "requested_product_type_context": product_type,
+        "product_type_filter_applied": False,
+        "product_type_fallback_applied": bool(product_type),
         "season_filter": None,
-        "category_mapping": record["category_mapping"],
+        "requested_season": season,
+        "season_filter_status": "unsupported_source_dimension" if season else "not_provided",
+        "category_mapping": {
+            **record["category_mapping"],
+            **category_mapping,
+            "mapped_category": mapped_type,
+            "requested_product_type": product_type,
+            "mapped_product_type_category": product_type_mapping.get("mapped_category"),
+            "product_type_mapping": product_type_mapping,
+        },
         "merchandise_segment": (
             "all_mapped_segments" if record["merchandise_segment"] == "__all__"
             else record["merchandise_segment"]
         ),
+        "requested_gender": record.get("requested_gender"),
+        "gender_mapping": record.get("gender_mapping"),
+        "gender_filter_applied": record.get("merchandise_segment") != "__all__",
+        "gender_fallback_applied": False,
         "sample_count": record["sample_count"], "article_count": record["article_count"],
         "period": record["period"], "channel_codes": record["channel_codes"],
         "price_statistics": stats | {"unit": "normalized_source_price; currency not provided"},
