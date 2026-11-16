@@ -12,6 +12,7 @@ import json
 import os
 from pathlib import Path
 import re
+from difflib import SequenceMatcher
 import threading
 import logging
 import time
@@ -73,15 +74,107 @@ def _age_band(age: int | None) -> str:
 
 
 def _mapped_requested_category(category: str, mapping: dict[str, Any]) -> str:
-    """Normalize an explicit P06 category alias to the H&M research taxonomy."""
+    """Map a category to the closest H&M label, retaining match provenance."""
+    return _map_requested_category(category, mapping)["mapped_category"]
+
+
+_CATEGORY_SIMILARITY_THRESHOLD = 0.52
+
+
+def _category_key(value: str) -> str:
+    return "".join(character for character in value.casefold() if character.isalnum())
+
+
+def _map_requested_category(category: str, mapping: dict[str, Any]) -> dict[str, Any]:
+    """Return deterministic exact/alias/fuzzy mapping metadata for a category."""
+    requested = category.strip()
     key = category.strip().casefold()
     for alias, mapped in mapping.get("requested_category_aliases", {}).items():
         if isinstance(alias, str) and isinstance(mapped, str) and alias.strip().casefold() == key:
-            return mapped
+            return {"requested_category": requested, "mapped_category": mapped,
+                    "method": "explicit_alias", "score": 1.0, "threshold": _CATEGORY_SIMILARITY_THRESHOLD}
     for product_type, mapped in mapping.get("product_type_name", {}).items():
         if isinstance(product_type, str) and isinstance(mapped, str) and product_type.strip().casefold() == key:
-            return mapped
-    return category.strip()
+            return {"requested_category": requested, "mapped_category": mapped,
+                    "method": "exact_product_type", "score": 1.0, "threshold": _CATEGORY_SIMILARITY_THRESHOLD}
+
+    candidates: dict[str, set[str]] = {}
+    for alias, mapped in mapping.get("requested_category_aliases", {}).items():
+        if isinstance(alias, str) and isinstance(mapped, str):
+            candidates.setdefault(mapped, set()).add(alias)
+    for source, mapped in mapping.get("product_type_name", {}).items():
+        if isinstance(source, str) and isinstance(mapped, str):
+            candidates.setdefault(mapped, set()).add(source)
+    for source, mapped in mapping.get("product_group_name", {}).items():
+        if isinstance(source, str) and isinstance(mapped, str):
+            candidates.setdefault(mapped, set()).add(source)
+
+    normalized = _category_key(requested)
+    scored: list[tuple[float, str, str]] = []
+    for mapped, labels in candidates.items():
+        labels.add(mapped)
+        best = max(
+            ((SequenceMatcher(None, normalized, _category_key(label)).ratio(), label)
+             for label in labels if _category_key(label)),
+            default=(0.0, ""),
+        )
+        scored.append((best[0], mapped, best[1]))
+    if not scored:
+        return {"requested_category": requested, "mapped_category": requested,
+                "method": "unmapped", "score": 0.0, "threshold": _CATEGORY_SIMILARITY_THRESHOLD}
+    score, mapped, matched_label = max(scored, key=lambda item: (item[0], item[1]))
+    if score < _CATEGORY_SIMILARITY_THRESHOLD:
+        return {"requested_category": requested, "mapped_category": requested,
+                "method": "below_threshold", "score": round(score, 4),
+                "matched_label": matched_label, "suggested_category": mapped,
+                "threshold": _CATEGORY_SIMILARITY_THRESHOLD}
+    return {"requested_category": requested, "mapped_category": mapped,
+            "method": "fuzzy_similarity", "score": round(score, 4),
+            "matched_label": matched_label, "threshold": _CATEGORY_SIMILARITY_THRESHOLD}
+
+
+def _map_product_type(value: str | None, mapping: dict[str, Any]) -> dict[str, Any]:
+    requested = value.strip() if isinstance(value, str) else None
+    if not requested:
+        return {"requested": value, "mapped": None, "method": "not_provided", "score": None}
+    candidates = {str(label): str(mapped) for label, mapped in mapping.get("product_type_name", {}).items()}
+    exact = next((mapped for label, mapped in candidates.items() if label.casefold() == requested.casefold()), None)
+    if exact:
+        return {"requested": requested, "mapped": requested, "mapped_category": exact,
+                "method": "exact", "score": 1.0}
+    query = _category_key(requested)
+    score, label, mapped = max(
+        ((SequenceMatcher(None, query, _category_key(label)).ratio(), label, mapped)
+         for label, mapped in candidates.items()), default=(0.0, "", ""),
+    )
+    if score < _CATEGORY_SIMILARITY_THRESHOLD:
+        return {"requested": requested, "mapped": None, "method": "below_threshold",
+                "score": round(score, 4), "suggested": label or None,
+                "suggested_category": mapped or None, "threshold": _CATEGORY_SIMILARITY_THRESHOLD}
+    return {"requested": requested, "mapped": label, "mapped_category": mapped,
+            "method": "fuzzy_similarity", "score": round(score, 4),
+            "matched_label": label, "threshold": _CATEGORY_SIMILARITY_THRESHOLD}
+
+
+def _map_gender(value: str | None) -> dict[str, Any]:
+    requested = value.strip() if isinstance(value, str) else None
+    if not requested:
+        return {"requested": value, "mapped": None, "merchandise_segment": None,
+                "method": "not_provided", "filter_applied": False}
+    aliases = {
+        "women": ("women", "woman", "female", "ladies", "ladieswear", "여성", "여자", "여성복"),
+        "men": ("men", "man", "male", "menswear", "남성", "남자", "남성복"),
+        "unisex": ("unisex", "공용", "유니섹스", "남녀공용"),
+        "unknown": ("unknown", "미상", "모름"),
+    }
+    key = requested.casefold()
+    for canonical, labels in aliases.items():
+        if key in labels:
+            segment = {"women": "ladieswear", "men": "menswear"}.get(canonical)
+            return {"requested": requested, "mapped": canonical, "merchandise_segment": segment,
+                    "method": "exact_alias", "filter_applied": segment is not None}
+    return {"requested": requested, "mapped": None, "merchandise_segment": None,
+            "method": "unsupported", "filter_applied": False}
 
 
 def _safe_failure_category(exc: Exception) -> str:
@@ -323,13 +416,20 @@ class HmCustomerAgeResearchSource:
                     break
                 aggregate_map = pending.result()
                 break
-            gender_key = "" if (gender or "").casefold() in {"", "unknown", "unisex"} else gender.casefold()
+            gender_mapping = _map_gender(gender)
+            gender_key = gender_mapping.get("mapped") or ""
+            if gender_key not in {"women", "men"}:
+                gender_key = ""
             requested_category_key = category.strip().casefold()
             mapped_category = _mapped_requested_category(category, mapping)
             category_key = mapped_category.casefold()
             profile = aggregate_map.get((category_key, gender_key))
-            if profile is not None and mapped_category.casefold() != requested_category_key:
-                profile = {**profile, "requested_product_type_context": category.strip()}
+            if profile is not None:
+                profile = {**profile, "requested_product_type_context": category.strip(),
+                           "requested_gender": gender,
+                           "gender_mapping": gender_mapping,
+                           "gender_filter_applied": gender_key in {"women", "men"},
+                           "gender_fallback_applied": False}
             if profile is None:
                 _LOGGER.info("H&M age profile completed with no mapped result in %.3fs",
                              time.perf_counter() - profile_started)
