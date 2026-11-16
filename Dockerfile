@@ -7,8 +7,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     HOME=/tmp \
     PORT=8766 \
     VOGUE_PROJECT07_DISABLE_DOTENV=1 \
-    VOGUE_P07_REVIEW_ARTIFACT_DIR=/data/reviews \
     VOGUE_R2_HM_DB_CACHE_DIR=/data/hm-cache \
+    VOGUE_HM_AGE_DUCKDB_TEMP_DIRECTORY=/data/hm-cache/duckdb-age-tmp \
     PROJECT07_PROMPTS_DIR=/app/prompts \
     PROJECT07_CONFIGS_DIR=/app/configs \
     VOGUE_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
@@ -17,16 +17,15 @@ WORKDIR /app
 
 RUN groupadd --gid 10001 agent \
     && useradd --uid 10001 --gid 10001 --no-create-home --home-dir /tmp --shell /usr/sbin/nologin agent \
-    && mkdir -p /data/reviews /data/hm-cache \
-    && chown 10001:10001 /data/reviews /data/hm-cache \
-    && chmod 0700 /data/reviews /data/hm-cache
+    && mkdir -p /data/hm-cache /data/hm-cache/duckdb-age-tmp \
+    && chown 10001:10001 /data/hm-cache /data/hm-cache/duckdb-age-tmp \
+    && chmod 0700 /data/hm-cache /data/hm-cache/duckdb-age-tmp
 
 COPY --chown=10001:10001 pyproject.toml README.md ./
 COPY --chown=10001:10001 src/ ./src/
 COPY --chown=10001:10001 contracts/ ./contracts/
 COPY --chown=10001:10001 prompts/ ./prompts/
 COPY --chown=10001:10001 configs/ ./configs/
-COPY --chown=10001:10001 examples/ ./examples/
 COPY --chown=10001:10001 scripts/ ./scripts/
 COPY --chown=10001:10001 tests/ ./tests/
 

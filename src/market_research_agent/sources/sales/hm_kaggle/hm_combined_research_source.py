@@ -54,6 +54,7 @@ class HmCombinedResearchSource:
         def read_age():
             return HmCustomerAgeResearchSource().profile(
                 product.get("category", ""), gender=product.get("gender"),
+                product_type=product.get("product_type"),
             )
 
         def read_price():

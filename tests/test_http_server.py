@@ -190,7 +190,7 @@ class Project07ReviewHttpTests(unittest.TestCase):
         self.assertEqual(review["status"], response["status"])
         self.assertEqual(review["request_id"], response["request_id"])
         self.assertEqual(review["category_price_comparison"][0]["sample_count"], 24)
-        self.assertEqual(review["material_cost_analysis"][0]["source_object"], fabric[0]["source_object"])
+        self.assertNotIn("source_object", review["material_cost_analysis"][0])
         self.assertTrue(review["material_cost_analysis"][0]["evidence_ids"])
         evidence_by_id = {item["evidence_id"]: item for item in review["evidence"]}
         for evidence_id in review["category_price_comparison"][0]["evidence_ids"]:
@@ -281,10 +281,11 @@ class Project07ReviewHttpTests(unittest.TestCase):
                 self.assertTrue(result["category_price_comparison"])
                 self.assertEqual(result["category_price_comparison"][0]["sample_count"], 24)
                 self.assertTrue(result["material_cost_analysis"])
-                self.assertEqual(result["material_cost_analysis"][0]["sources"][0]["record_id"], "fixture-fabric-1")
+                self.assertNotIn("sources", result["material_cost_analysis"][0])
                 self.assertTrue(result["customer_segment_analysis"])
                 self.assertEqual(result["target_audience_analysis"]["age_cohort"], profile["target_age_cohort"])
-                self.assertEqual(result["target_audience_analysis"]["proposal"], proposal)
+                self.assertNotIn("proposal", result["target_audience_analysis"])
+                self.assertEqual(result["target_audience"]["proposal"]["primary_segment"], proposal["primary_segment"])
                 self.assertGreaterEqual(len(result["evidence"]), 3)
                 self.assertEqual(result["missing_data"], [])
                 self.assertEqual(result["errors"], [])
@@ -294,24 +295,23 @@ class Project07ReviewHttpTests(unittest.TestCase):
                     result["margin_estimate"]["estimate_type"],
                     "industry_average_gross_margin_benchmark",
                 )
-                self.assertEqual(result["margin_price_range_analysis"]["status"], "benchmark_estimate")
-                self.assertEqual(result["margin_price_range_analysis"]["fx_provider"], "synthetic-fixture")
+                self.assertIsNone(result["margin_price_range_analysis"])
                 self.assertEqual(result["decision_support"]["recommendation"], "review_required")
                 self.assertEqual(result["decision_support"]["evidence_areas"]["category_price"], True)
                 self.assertEqual(result["decision_support"]["evidence_areas"]["customer_segments"], True)
                 evidence_by_id = {item["evidence_id"]: item for item in result["evidence"]}
                 self.assertEqual(len(evidence_by_id), len(result["evidence"]))
-                self.assertTrue(all(item["analysis"].get("observed") for item in result["evidence"]))
+                self.assertTrue(all(item["analysis"].get("interpretation") for item in result["evidence"]))
                 price_evidence = evidence_by_id[result["category_price_comparison"][0]["evidence_ids"][0]]
                 customer_evidence = evidence_by_id[result["customer_segment_analysis"][0]["evidence_ids"][0]]
                 fabric_evidence = evidence_by_id[result["material_cost_analysis"][0]["evidence_ids"][0]]
-                self.assertEqual(price_evidence["analysis"]["observed"]["sample_count"], 24)
-                self.assertEqual(customer_evidence["analysis"]["observed"]["target_age_cohort"], profile["target_age_cohort"])
-                self.assertEqual(fabric_evidence["analysis"]["observed"]["matched_record_ids"], ["fixture-fabric-1"])
+                self.assertNotIn("observed", price_evidence["analysis"])
+                self.assertNotIn("observed", customer_evidence["analysis"])
+                self.assertNotIn("observed", fabric_evidence["analysis"])
                 benchmark_evidence = next(item for item in result["evidence"] if item["source_type"] == "industry_gross_margin_benchmark")
                 fx_evidence = next(item for item in result["evidence"] if item["source_type"] == "usd_krw_reference_rate")
-                self.assertEqual(benchmark_evidence["analysis"]["observed"]["gross_margin_rate"], 0.5688)
-                self.assertEqual(fx_evidence["analysis"]["observed"]["rate_date"], "2026-11-13")
+                self.assertTrue(benchmark_evidence["analysis"].get("interpretation"))
+                self.assertTrue(fx_evidence["analysis"].get("interpretation"))
                 for rows, path in (
                     (result["category_price_comparison"], "result.category_price_comparison"),
                     (result["material_cost_analysis"], "result.material_cost_analysis"),
@@ -326,7 +326,7 @@ class Project07ReviewHttpTests(unittest.TestCase):
                 self.assertTrue(result["price_analysis"]["evidence_ids"])
                 self.assertTrue(result["fabric_cost_analysis"]["evidence_ids"])
                 self.assertTrue(result["margin_analysis"]["evidence_ids"])
-                self.assertTrue(result["margin_price_range_analysis"]["evidence_ids"])
+                self.assertNotIn("margin_price_range_analysis", result["margin_analysis"])
                 _validate_review_result(result, request_id)
 
     def test_optional_llm_failure_marks_successful_research_as_partial(self):
@@ -662,7 +662,7 @@ class Project07ReviewHttpTests(unittest.TestCase):
         )
         self.assertEqual(status, 401)
         # Authentication runs before body/version dispatch on the shared route.
-        self.assertEqual(response["contract_version"], "vogue-workflow/0.1")
+        self.assertEqual(response["contract_version"], REVIEW_CONTRACT_VERSION)
         self.assertIsNone(response["request_id"])
         self.assertEqual(response["error"]["code"], "UNAUTHORIZED")
         self.assertTrue(response["error"]["message"])
@@ -682,14 +682,16 @@ class Project07ReviewHttpTests(unittest.TestCase):
         self.assertEqual(status, 422)
         self.assertEqual(response["error"]["code"], "INVALID_PRODUCT_EVIDENCE")
 
-    def test_legacy_research_endpoints_reject_the_product_review_contract(self):
+    def test_retired_research_endpoints_are_not_exposed(self):
         for route in (
             "/v1/agents/sales-market-agent/runs",
             "/v1/agents/sales-market-agent/structured-runs",
+            "/v1/agents/market-research-agent/runs",
         ):
             with self.subTest(route=route):
                 status, response = self.request("POST", route, self.valid_review())
-                self.assertEqual(status, 422)
+                self.assertEqual(status, 404)
+                self.assertEqual(response["error"]["code"], "NOT_FOUND")
 
     def test_simulation_stays_disabled_by_default(self):
         status, response = self.request(

@@ -18,7 +18,7 @@ Project_07(P07)은 상품 기획 이후 시장 참고자료를 모아 검토 결
 
 1. **입력 검증 및 전달 필드 제한** — 알 수 없는 필드나 서로 다른 `request_id`를 거부하고 허용된 상품 정보만 자료원에 전달합니다.
 2. **시장 자료 조회** — 원단 listing의 category, composition, construction 항목에서 `material`과 일치하는 기록을 찾습니다. 요청 소재에서 섬유 혼용률이나 원가를 추정하지 않습니다. H&M 자료 사용 설정은 P07 코드 기본값에서 비상업 연구로 켜져 있습니다.
-   - `VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY`가 최신 통합 스냅샷을 가리키면, P07 프로세스가 처음 사용할 때 스냅샷 객체를 한 번 읽습니다. 스냅샷에는 H&M 연령·거래가격 집계와 크기가 제한된 원단 listing CSV가 있습니다. 스냅샷 생성 시 연령과 거래가격은 DuckDB의 한 집계 쿼리로 계산되며, 실행 중에는 검증한 객체를 프로세스 메모리에서 재사용합니다.
+   - `VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY`가 최신 통합 스냅샷을 가리키면, P07 프로세스가 처음 사용할 때 스냅샷 객체를 한 번 읽습니다. 스냅샷에는 H&M 연령·거래가격 집계와 크기가 제한된 원단 listing CSV가 있습니다. 스냅샷 생성은 연령과 가격 집계를 별도 DuckDB 쿼리 및 연결로 실행해 집계 메모리를 분리합니다. 가격의 p25·중앙값·p75는 T-Digest 근사 통계이며, 최소·최대·평균·행 수는 정확한 집계입니다. 실행 중에는 검증한 객체를 프로세스 메모리에서 재사용합니다.
    - 스냅샷 생성기는 H&M 고객 CSV, 상품 Parquet, 거래 Parquet를 읽어 DuckDB 집계 쿼리 한 번을 실행하고, 원단 listing 객체도 검증한 뒤 변경 불가한 새 JSON 객체를 `derived/research-aggregate-snapshots/` 아래에 게시합니다. 고객 원본 행과 ID는 스냅샷에 저장하지 않습니다. 연령 구간 중 하나라도 10명 미만이면 해당 프로필의 연령별 수치·비율, 전체 분모, 타깃 연령대 수치를 모두 숨깁니다. 원단 listing은 한 번의 스냅샷 조회로 세 분석을 제공하기 위해 포함하며, 제공 데이터의 재사용 조건은 별도 제한사항입니다.
    - 통합 스냅샷 키가 설정되면 성공·실패와 관계없이 요청은 그 객체만 읽습니다. 스냅샷을 읽지 못하면 포함된 세 자료원을 모두 `error`로 표시하며, 원단이나 H&M 원본 객체를 따로 조회하지 않습니다. 키가 없을 때만 독립 자료원 모드를 사용합니다.
 3. **가격 참고값 계산** — H&M 정규화 가격에 ×590 USD 해석을 적용하고, 값이 있으면 Frankfurter USD/KRW 기준환율로 원화 참고값을 계산합니다. 이는 제안가나 검증된 현재 시장 가격이 아닙니다. 업계 마진 기준은 시나리오 참고값이며 해당 상품의 실제 마진이 아닙니다.
@@ -28,6 +28,8 @@ Project_07(P07)은 상품 기획 이후 시장 참고자료를 모아 검토 결
 ### 3. 출력
 
 응답은 동기 방식입니다. 완료된 검토의 바깥 `status`와 `result.status`는 같은 값(`ok`, `partial`, `no_results`)을 가집니다. `request_id`도 바깥 응답과 결과에 보존됩니다. 요청 검증·서비스 실패는 `error` 객체를 포함한 HTTP 오류 응답입니다.
+
+P07은 P08 화면·기획·SWOT이 사용하는 집계 통계, 가격/소재/마진 요약, 타깃 가설, 근거 참조 ID, 누락·오류·제한만 `/reviews` 응답에 포함합니다. 거래·고객 원본 파일 목록과 원단 개별 listing 행은 전달하지 않습니다. 응답 버전과 필수 최상위 필드 이름은 유지하며, `target_audience`가 상세 가설의 소비 필드이고 `target_audience_analysis`는 상태·연령 요약 alias입니다. 근거 레코드는 출처·기간·권한·지원 필드와 해석만 전달하고, 집계값은 해당 분석 요약에 한 번만 둡니다.
 
 | 응답 경로 | 내용 |
 | --- | --- |
@@ -120,162 +122,12 @@ python -m market_research_agent.sources.sales.hm_kaggle.hm_research_aggregate --
 
 요청·응답 구현의 소유자는 P07입니다. 소비 프로젝트와 공유하는 계약 변경은 합의가 필요합니다. [저장소 경계](docs/repository-boundaries.md)와 [P08 → P07 현재 검토 흐름](docs/design/post-planning-sales-market-review.md)을 참고하세요.
 
-## Workflow 및 기존 호출 호환성
+## P08 연동 계약 및 제공 경로
 
-`/reviews`는 `contract_version`으로 `vogue-workflow/0.1`과 `vogue-sales-market-review/0.3-proposal`을 구분합니다. 전체 Draft와 원문 artifact를 검증하는 workflow 계약 및 기존 `/runs`, `/structured-runs` 소비자를 위해 legacy 도메인·source 모듈과 HTTP 명령 별칭을 유지합니다. 새 product 리뷰의 원가·가격·연령 분석은 0.3 계약에서 실행하며 workflow 응답 스키마에 섞지 않습니다.
+최신 `KG-RAG-02/fashion-planner-orchestrator` main (`da129ec`, 2026-11-16 기준)은 P07에 `POST /v1/agents/sales-market-agent/reviews`와 `vogue-sales-market-review/0.3-proposal`만 호출합니다. P08은 P06 Draft에서 허용된 상품 필드와 필드별 출처를 구성해 전달합니다. 이 저장소의 HTTP 서버도 해당 0.3 리뷰 경로만 제공합니다. P07은 구형 `/runs`, `/structured-runs`, Full-Draft artifact replay 계약을 패키징하거나 제공하지 않습니다. 이 저장소의 예시·테스트도 현재 0.3 요청 및 `sales-market-review/0.1-internal` 응답 계약을 기준으로 합니다.
 
-전체 오프라인 검증: `PYTHONPATH=src:. python scripts/run_tests.py`.
+요청·응답 계약, 예시, 상태 해석은 [`contracts/README.md`](contracts/README.md)와 [현재 P08 → P07 흐름](docs/design/post-planning-sales-market-review.md)을 기준으로 확인하세요. P06/P08 공유 계약을 변경하지 않습니다.
 
-공유 `/reviews` 경로는 인증과 전송 검증을 본문 버전 판별 전에 수행합니다. 이 단계의 오류는
-`vogue-workflow/0.1` problem envelope를 사용하고, 유효한 0.3 요청의 검증·분석 결과는 0.3 envelope를 사용합니다.
+로컬 실행은 `python -m market_research_agent.http_server` 또는 `vogue-sales-market-review-http` 명령을 사용합니다. Docker/Compose 배포는 위 기본 실행 절차를 따릅니다. API는 상태 저장 replay artifact를 만들지 않으므로 리뷰 artifact 디렉터리나 upstream artifact mount가 필요하지 않습니다.
 
-### Full-Draft post-review API (independent workflow candidate)
-
-`POST /v1/agents/sales-market-agent/reviews` accepts the full retained
-PlanningDraft using the packaged `vogue-workflow/0.1` candidate schemas
-(workflow-contract/0.2.0). This is a separate parser, use case and serializer;
-legacy `/runs` and its serializers remain available. The shared baseline is
-still proposed; this implementation alone does not establish service integration.
-
-The route dispatches on `contract_version` first. Authentication and transport
-checks come before it, but no schema, artifact, store or source work does. Only
-`vogue-workflow/0.1` is parsed. Any other value, a missing value or a non-object
-body returns a 422 problem `UNSUPPORTED_CONTRACT_VERSION`.
-
-The review validates identity, producer/schema/status, Draft and source hashes,
-search mapping and evidence references before querying a source. Exact incoming
-request bytes, the parsed full Draft, search provenance and complete source
-result are saved as private content-addressed artifacts. Review evidence includes
-the full original Draft and source snapshot (including retrieval, calculations,
-comparability, missing data and original statuses). No legacy status normalization
-runs on Review responses. Replays reuse stored identity/results; conflicting
-Draft ID/revision hashes are rejected. Current company sales stays null without
-an explicitly verified source. Historical H&M and synthetic data are labeled;
-missing configuration returns no_results, configured source failures return errors.
-
-Over HTTP, the exact raw bytes of every retained response (the Draft, plus the
-Trend and Stock responses inside it) are verified before any store or source
-work:
-
-- `VOGUE_UPSTREAM_ARTIFACT_ROOT` names a read-only directory. In compose this is
-  `/artifacts`, with the P08 blobs mounted at `/artifacts/p08/blobs`.
-  `artifact://<rel>` resolves to `<root>/<rel>`, so P08's
-  `artifact://p08/blobs/<sha256>` resolves to `/artifacts/p08/blobs/<sha256>`.
-- The reader refuses malformed URIs (422 `INVALID_ARTIFACT_URI`).
-- It refuses empty, `.` or `..` segments and symlinks at any depth (422
-  `INVALID_ARTIFACT_PATH`).
-- It checks `size_bytes` and the SHA-256 of the exact bytes (422
-  `ARTIFACT_SIZE_MISMATCH`, `ARTIFACT_HASH_MISMATCH`).
-- The bytes must parse to the retained `raw_response` (422
-  `RAW_ARTIFACT_OBJECT_MISMATCH`).
-- Unreadable bytes return 503 `ARTIFACT_UNAVAILABLE`. With the root unset, the
-  route fails closed with 503 `ARTIFACT_READER_REQUIRED`. Both are `retryable`.
-
-Writable locations (existing variable names are reused; unset or blank keeps
-the default, never the working directory itself):
-
-| Variable | Default | Container | Contents |
-|---|---|---|---|
-| `VOGUE_P07_REVIEW_ARTIFACT_DIR` | `.local/review-artifacts` (relative to the working directory) | `/data/reviews` | `artifact://p07/reviews/<sha256>.json` files (`<dir>/<sha256>.json`) and the `reviews.sqlite3` replay/revision index |
-| `VOGUE_R2_HM_DB_CACHE_DIR` | `data/local/r2_hm_db` | `/data/hm-cache` | Versioned private copy of the H&M R2 DuckDB (`hm-<sha256>.duckdb`), only when an R2 DuckDB key is configured |
-| `VOGUE_R2_HM_DB_MAX_BYTES` | `2000000000` | (default) | Download size ceiling for that DuckDB object |
-
-`VOGUE_P07_REVIEW_SOURCE` selects the Review data source. It affects only
-`/reviews`.
-
-- **Unset (default):** behavior is unchanged. The configured sources are used
-  (H&M R2 DuckDB and the synthetic R2 release when configured). If none are
-  configured, the Review is `no_results`.
-- **`synthetic_local_fixture`** (stub profile, conventions §9): the Review uses
-  only the packaged `src/market_research_agent/resources/synthetic_review_fixture/bundle.json`.
-  - The bundle is a verbatim excerpt of the seed-407 query coverage fixture:
-    women knitwear, KR online, 2027-03 to 2027-05, with 3 sales-like rows, 3
-    market-like rows (color black) and 6 evidence records.
-  - Rebuild it with `python scripts/build_synthetic_review_fixture.py`. Verify it
-    with `--check`, which regenerates the fixture offline and compares bytes.
-  - The source makes no network or R2 call.
-  - Every valid Draft gets the same values, including a Draft with null
-    category or season. The values are not filtered by the Draft. The Review is
-    `ok` (HTTP 200); the synthetic nature is stated in the limitations.
-  - Each valued metric and the Review `observation` carry `synthetic: true` and
-    `data_nature: synthetic_fixture`. The limitations state that the values are
-    synthetic and not scoped to the Draft.
-- **Any other value:** the route returns 503 `REVIEW_SOURCE_UNSUPPORTED`, and
-  the server refuses to start.
-
-The Review limitations then report how many retained responses were verified.
-Library callers may still build `SalesMarketReviewService` without a resolver.
-That Review states that the raw bytes were not fetched. Category and season
-remain in a separate search view. The legacy adapters do not apply a season
-filter, and the Review states that limitation.
-
-Local API: `vogue-market-research-http --host 127.0.0.1 --port 8766`. Set
-`VOGUE_AGENT_SERVICE_BEARER_TOKEN` in the process environment. On the host it
-binds to loopback only.
-
-Container image (`docker build -t vogue/sales-market:dev .`):
-
-- **Base and packages:** `python:3.14-slim` with `pip install ".[r2]"`, which
-  adds boto3 and duckdb for the H&M R2 DuckDB source.
-- **User and filesystem:**
-  - The image runs as uid/gid 10001 with `HOME=/tmp` and a read-only root
-    filesystem.
-  - It sets `VOGUE_PROJECT07_DISABLE_DOTENV=1`, so `.env` is never read.
-  - It sets `VOGUE_P07_REVIEW_ARTIFACT_DIR=/data/reviews` and
-    `VOGUE_R2_HM_DB_CACHE_DIR=/data/hm-cache`. Both directories are created
-    with owner 10001 and mode 0700.
-  - Mount `/data/reviews` as a volume (or tmpfs) and `/tmp` as tmpfs.
-    `/data/hm-cache` is needed only when an R2 DuckDB key is configured.
-  - The image does not declare `VOLUME`, so no anonymous volumes are created.
-- **Command:** the default `CMD` is
-  `vogue-market-research-http --service-mode --host 0.0.0.0 --port 8766`.
-  Service mode refuses to start without `VOGUE_AGENT_SERVICE_BEARER_TOKEN`.
-- **Port and health:** `EXPOSE 8766`. `HEALTHCHECK` sends `GET /api/health` to
-  loopback with the stdlib, ignores proxies and makes no external call.
-- **Routes:**
-
-  | Route | Auth | Notes |
-  |---|---|---|
-  | `GET /api/health` | none | Liveness only. Body: `{"status":"ok","mode":"service"}` under `--service-mode` (the container default), otherwise `"mode":"local-development"`. With `--enable-synthetic-simulation` the synthetic markers are added, and the mode outside service mode is `synthetic_simulation` |
-  | `POST /v1/agents/sales-market-agent/reviews` (`vogue-workflow/0.1`) | `Authorization: Bearer` (`hmac.compare_digest`), checked before the body is read | Statuses: 200 (Review `ok`/`no_results`; `ok` once findings or metrics were produced, data gaps stay in limitations), 503 or 504 (Review `error` envelope); problem bodies for 400, 401, 409 (`DRAFT_REVISION_CONFLICT`: same `draft_id` and revision already reviewed with different content), 413, 415, 422 (other semantic violations), 502, 503, 504, 500 |
-  | Legacy `POST /v1/agents/sales-market-agent/runs` (`vogue-handoff/0.1`), its deprecated alias `/v1/agents/market-research-agent/runs`, and `/structured-runs` | Bearer | Unchanged |
-
-  On these four routes every other method (`GET`, `HEAD`, `PUT`, `DELETE`,
-  `PATCH`, `OPTIONS`, `TRACE`, `CONNECT`) returns 405 with `Allow: POST`.
-  No authentication is needed for that answer, and HEAD responses have no
-  body. The body is a `METHOD_NOT_ALLOWED` problem on `/reviews`
-  (`common.schema.json#/$defs/problem`, `retryable: false`) and the
-  `vogue-handoff/0.1` error envelope on the legacy routes. Other paths keep
-  their previous answers: unknown GET paths return 404, and methods without a
-  handler return 501 from the standard library.
-
-- **Profiles:** `docker compose --profile api up --build sales-market-agent-api`
-  runs the same image with a read-only rootfs and tmpfs `/tmp`. It mounts the
-  `review-artifacts` volume at `/data/reviews` and the `hm-cache` volume at
-  `/data/hm-cache` (the DuckDB copy may reach 2 GB), and publishes on loopback. The
-  idle loop (`python -m market_research_agent.runtime`) stays available under
-  the `idle` profile. Deploy behind a private network or TLS termination.
-- **Cloud sources:** the API profile defaults to none. Inject the selected
-  existing R2/HM environment keys through an approved deployment override when
-  those sources are needed.
-
-Install with `pip install .` (or `pip install '.[r2]'` for cloud sources).
-Configs, static UI and prompt assets are package data. After editing their
-source directories, run `python scripts/sync_package_resources.py` and check
-with `--check`. The vendored workflow schemas in
-`src/market_research_agent/resources/workflow_contract/` are byte-identical
-copies of `vogue-orchestrator/contracts/workflow/` and are never edited here.
-Their raw-byte SHA-256 values are pinned by `snapshot.json` in the same folder.
-That file is a byte-identical copy of the coordinator's `snapshot.json` for
-`workflow-contract/0.2.0` (sha256 `703548af…be3011f`, the value recorded as the
-baseline `snapshot_sha256`). Importing the review module fails closed with
-`SCHEMA_SNAPSHOT_CHANGED` when any schema file is changed, missing or unpinned.
-`scripts/sync_package_resources.py` (both modes) verifies the same pin and never
-rewrites the vendored files.
-
-Run `python scripts/run_tests.py` to restore missing deterministic synthetic
-fixtures and collect `tests`, `tests/sales`, and `tests/market` separately.
-Reconstructed query labels are new hand-authored test cases, not the lost
-original evaluation corpus. Seeds and configuration assumptions are checked in;
-generated output directories are ignored. No real transactions, current market
-observations, R2 downloads or model calls are used by the restoration command.
+`python scripts/run_tests.py`는 저장소의 전체 단위 검증을 실행합니다. Dockerfile의 test profile도 이 명령을 사용합니다.

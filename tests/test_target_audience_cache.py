@@ -21,7 +21,6 @@ VALID_OUTPUT = {
         "needs_hypotheses": ["Warmth", "Easy care"],
         "styling_cues": ["Layered", "Neutral"],
     },
-    "price_positioning": {"position": "mid_market", "rationale": "Synthetic reference.", "confidence": "low"},
     "merchandising_actions": ["Interview buyers", "Review fit"],
     "channel_content_hypotheses": ["Show layering", "Explain materials"],
     "validation_plan": ["Interview", "Test samples", "Review response"],
@@ -74,6 +73,7 @@ class TargetAudienceCacheTests(unittest.TestCase):
             )
         self.assertEqual(first, second)
         self.assertEqual(first["type"], "hypothesis")
+        self.assertNotIn("price_positioning", first)
         self.assertEqual(call.call_count, 1)
 
     def test_changed_source_context_or_credential_does_not_reuse_result(self):
@@ -128,19 +128,39 @@ class TargetAudienceCacheTests(unittest.TestCase):
                 "category": "Outerwear", "unique_customer_denominator": 123,
                 "sources": [{"object_key": "private/customer-source.parquet"}],
             },
-            market_price_reference={
-                "sample_count": 456,
-                "sources": [{"object_key": "private/transaction-source.parquet"}],
-            },
             client=OpenAIResponsesClient(api_key="synthetic-key", model="synthetic-model"),
             call=fake_call,
         )
         sent = captured["input_text"]
         self.assertIn('"unique_customer_denominator": 123', sent)
-        self.assertIn('"sample_count": 456', sent)
         self.assertNotIn("private/customer-source.parquet", sent)
         self.assertNotIn("private/transaction-source.parquet", sent)
         self.assertNotIn("proposed_price", sent)
+        self.assertNotIn("market_price_reference", sent)
+        self.assertNotIn('"market_price_reference"', sent)
+
+    def test_llm_payload_uses_fabric_statistics_without_listing_identifiers(self):
+        captured = {}
+
+        def fake_call(**kwargs):
+            captured.update(kwargs)
+            return {"output": deepcopy(VALID_OUTPUT)}
+
+        target_audience.propose_target_audience(
+            product_context={"category": "상의", "product_type": "blouse", "gender": "women",
+                             "season": "2027SS", "material": "cotton"},
+            customer_profile=None,
+            fabric_listing_reference=[{
+                "material_query": "cotton", "sample_count": 2,
+                "price_per_meter_krw_statistics": {"median": 12000, "currency": "KRW"},
+                "sources": [{"record_id": "private-listing-123"}],
+            }],
+            client=OpenAIResponsesClient(api_key="synthetic-key", model="synthetic-model"),
+            call=fake_call,
+        )
+        self.assertIn('"median": 12000', captured["input_text"])
+        self.assertNotIn("private-listing-123", captured["input_text"])
+        self.assertNotIn("record_id", captured["input_text"])
 
 
 if __name__ == "__main__":
