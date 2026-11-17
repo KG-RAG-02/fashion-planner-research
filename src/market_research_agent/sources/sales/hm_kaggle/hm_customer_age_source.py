@@ -533,9 +533,17 @@ class HmCustomerAgeResearchSource:
             articles_uri = _sql_string(f"s3://{settings.bucket}/{keys[1]}")
             transactions_uri = _sql_string(f"s3://{settings.bucket}/{keys[2]}")
             customer_schema = "{" + _CSV_COLUMNS + "}"
-            sql = f"""
-                WITH mapped_articles AS (
-                    SELECT a.article_id, a.index_group_name,
+            # Materialize the large remote inputs in DuckDB's spill-backed
+            # temp storage before joining. A single remote scan/join/COUNT
+            # query held both Parquet scan buffers and distinct hash state;
+            # splitting it keeps those peaks below the container limit.
+            conn.execute(f"""
+                CREATE TEMP TABLE hm_age_transactions AS
+                SELECT customer_id, article_id, t_dat FROM read_parquet({transactions_uri})
+            """)
+            conn.execute(f"""
+                CREATE TEMP TABLE hm_age_articles AS
+                SELECT a.article_id, a.index_group_name,
                            COALESCE(type_map.mapped_category, group_map.mapped_category) AS category
                     FROM read_parquet({articles_uri}) AS a
                     LEFT JOIN hm_category_map AS type_map
@@ -544,18 +552,15 @@ class HmCustomerAgeResearchSource:
                     LEFT JOIN hm_category_map AS group_map
                       ON group_map.dimension = 'group'
                      AND lower(trim(a.product_group_name)) = lower(trim(group_map.source_value))
-                ), customers AS (
-                    SELECT customer_id, age FROM read_csv(
+            """)
+            conn.execute(f"""
+                CREATE TEMP TABLE hm_age_customers AS
+                SELECT customer_id, age FROM read_csv(
                         {customers_uri}, header=true, delim=',', columns={customer_schema}, sample_size=1000
                     )
-                ), joined AS (
-                    SELECT a.category, a.index_group_name, t.customer_id, c.age,
-                           TRY_CAST(t.t_dat AS DATE) AS transaction_date
-                    FROM read_parquet({transactions_uri}) AS t
-                    INNER JOIN mapped_articles AS a USING (article_id)
-                    INNER JOIN customers AS c USING (customer_id)
-                    WHERE a.category IS NOT NULL
-                )
+                WHERE customer_id IS NOT NULL AND trim(customer_id) <> ''
+            """)
+            sql = """
                 SELECT category, COALESCE(index_group_name, '__all__') AS index_group_name,
                        age_band,
                        COUNT(DISTINCT customer_id)::BIGINT AS unique_customers,
@@ -567,7 +572,14 @@ class HmCustomerAgeResearchSource:
                          CASE WHEN age < 20 THEN 'under_20' WHEN age < 30 THEN '20_29'
                               WHEN age < 40 THEN '30_39' WHEN age < 50 THEN '40_49' ELSE '50_plus' END
                          ELSE 'unknown_age' END AS age_band
-                  FROM joined
+                    FROM (
+                      SELECT a.category, a.index_group_name, t.customer_id, c.age,
+                             TRY_CAST(t.t_dat AS DATE) AS transaction_date
+                      FROM hm_age_transactions AS t
+                      INNER JOIN hm_age_articles AS a USING (article_id)
+                      INNER JOIN hm_age_customers AS c USING (customer_id)
+                      WHERE a.category IS NOT NULL AND t.customer_id IS NOT NULL
+                    ) AS joined
                 ) AS categorized
                 GROUP BY GROUPING SETS ((category, index_group_name, age_band), (category, age_band))
             """

@@ -162,6 +162,29 @@ class TargetAudienceCacheTests(unittest.TestCase):
         self.assertNotIn("private-listing-123", captured["input_text"])
         self.assertNotIn("record_id", captured["input_text"])
 
+    def test_secondary_segments_string_is_normalized_to_one_item(self):
+        output = deepcopy(VALID_OUTPUT)
+        output["secondary_segments"] = "Layering-focused customers"
+        result = target_audience.propose_target_audience(
+            product_context={"category": "Outerwear"}, customer_profile=None,
+            call=lambda **_kwargs: {"output": output},
+        )
+        self.assertEqual(result["secondary_segments"], ["Layering-focused customers"])
+
+    def test_empty_or_malformed_secondary_segments_use_safe_fallback(self):
+        for malformed in ([], None, {"segment": "unknown"}, ["", 42]):
+            with self.subTest(malformed=malformed):
+                output = deepcopy(VALID_OUTPUT)
+                output["secondary_segments"] = malformed
+                result = target_audience.propose_target_audience(
+                    product_context={"category": "Outerwear"}, customer_profile=None,
+                    call=lambda **_kwargs: {"output": deepcopy(output)},
+                )
+                self.assertEqual(
+                    result["secondary_segments"],
+                    ["추가 자료 전에는 보조 타깃을 특정하지 않음"],
+                )
+
 
 if __name__ == "__main__":
     unittest.main()
