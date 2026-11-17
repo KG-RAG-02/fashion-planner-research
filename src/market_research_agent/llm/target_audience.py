@@ -139,8 +139,19 @@ def propose_target_audience(
             raise LlmCallError("Target audience output did not match the expected fields.")
         if not all(_nonempty_string(output.get(key), maximum=1200) for key in ("proposal", "primary_segment", "age_evidence")):
             raise LlmCallError("Target audience summary fields must be non-empty strings.")
-        if not _string_list(output.get("secondary_segments"), minimum=1, maximum=2):
-            raise LlmCallError("Target audience secondary_segments must contain one or two strings.")
+        secondary_segments = output.get("secondary_segments")
+        if isinstance(secondary_segments, str):
+            secondary_segments = [secondary_segments]
+        if isinstance(secondary_segments, list):
+            secondary_segments = [
+                item.strip() for item in secondary_segments
+                if isinstance(item, str) and item.strip()
+            ][:2]
+        else:
+            secondary_segments = []
+        if not secondary_segments or any(len(item) > 500 for item in secondary_segments):
+            secondary_segments = ["추가 자료 전에는 보조 타깃을 특정하지 않음"]
+        output["secondary_segments"] = secondary_segments
         product_fit = output.get("product_fit")
         if (not isinstance(product_fit, dict)
                 or set(product_fit) != {"style_direction", "wearing_occasions", "needs_hypotheses", "styling_cues"}

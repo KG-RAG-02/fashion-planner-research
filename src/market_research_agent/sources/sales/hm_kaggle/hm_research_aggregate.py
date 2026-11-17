@@ -111,20 +111,21 @@ def _aggregate_sql(settings: R2Settings, keys: tuple[str, str, str]) -> tuple[st
             SELECT customer_id, age FROM read_csv(
                 {customers_uri}, header=true, delim=',', columns={customer_schema}, sample_size=1000
             )
+            WHERE customer_id IS NOT NULL AND trim(customer_id) <> ''
         ), joined AS (
-            SELECT a.category, a.index_group_name, c.customer_id AS matched_customer_id,
-                   c.age, TRY_CAST(t.t_dat AS DATE) AS transaction_date
+            SELECT a.category, a.index_group_name, t.customer_id, c.age,
+                   TRY_CAST(t.t_dat AS DATE) AS transaction_date
             FROM read_parquet({transactions_uri}) AS t
             INNER JOIN mapped_articles AS a USING (article_id)
             INNER JOIN customers AS c USING (customer_id)
-            WHERE a.category IS NOT NULL
+            WHERE a.category IS NOT NULL AND t.customer_id IS NOT NULL
         )
         SELECT category,
                CASE WHEN GROUPING(index_group_name) = 1 THEN '__all__'
                     ELSE COALESCE(index_group_name, '__unknown__') END AS merchandise_segment,
                'age' AS measure,
                age_band,
-               COUNT(DISTINCT matched_customer_id)::BIGINT AS unique_customers,
+               COUNT(DISTINCT customer_id)::BIGINT AS unique_customers,
                MIN(transaction_date)::VARCHAR AS period_start,
                MAX(transaction_date)::VARCHAR AS period_end,
                0::BIGINT AS transaction_rows,
@@ -215,6 +216,44 @@ def _run_aggregate_query(
             )
             connection.execute("CREATE TEMP TABLE hm_category_map (source_value VARCHAR, dimension VARCHAR, mapped_category VARCHAR)")
             connection.executemany("INSERT INTO hm_category_map VALUES (?, ?, ?)", source_rows)
+            if stage == "age":
+                customers_uri, articles_uri, transactions_uri = (
+                    _sql_string(f"s3://{settings.bucket}/{key}") for key in keys
+                )
+                customer_schema = "{" + _CSV_COLUMNS + "}"
+                connection.execute(
+                    "CREATE TEMP TABLE hm_age_transactions AS "
+                    f"SELECT customer_id, article_id, t_dat FROM read_parquet({transactions_uri})"
+                )
+                connection.execute(f"""
+                    CREATE TEMP TABLE hm_age_articles AS
+                    SELECT a.article_id, a.index_group_name,
+                           COALESCE(type_map.mapped_category, group_map.mapped_category) AS category
+                    FROM read_parquet({articles_uri}) AS a
+                    LEFT JOIN hm_category_map AS type_map
+                      ON type_map.dimension = 'type'
+                     AND lower(trim(a.product_type_name)) = lower(trim(type_map.source_value))
+                    LEFT JOIN hm_category_map AS group_map
+                      ON group_map.dimension = 'group'
+                     AND lower(trim(a.product_group_name)) = lower(trim(group_map.source_value))
+                """)
+                connection.execute(f"""
+                    CREATE TEMP TABLE hm_age_customers AS
+                    SELECT customer_id, age FROM read_csv(
+                        {customers_uri}, header=true, delim=',', columns={customer_schema}, sample_size=1000
+                    ) WHERE customer_id IS NOT NULL AND trim(customer_id) <> ''
+                """)
+                age_select = query[query.index("        SELECT category,"):]
+                query = """
+                    WITH joined AS (
+                        SELECT a.category, a.index_group_name, t.customer_id, c.age,
+                               TRY_CAST(t.t_dat AS DATE) AS transaction_date
+                        FROM hm_age_transactions AS t
+                        INNER JOIN hm_age_articles AS a USING (article_id)
+                        INNER JOIN hm_age_customers AS c USING (customer_id)
+                        WHERE a.category IS NOT NULL AND t.customer_id IS NOT NULL
+                    )
+                """ + age_select
             stage_rows = connection.execute(query).fetchall()
             rows.extend(stage_rows)
             _LOGGER.info("H&M snapshot %s rollup completed: groups=%d", stage, len(stage_rows))

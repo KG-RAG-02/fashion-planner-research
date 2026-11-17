@@ -124,7 +124,7 @@ python -m market_research_agent.sources.sales.hm_kaggle.hm_research_aggregate --
 
 ## P08 연동 계약 및 제공 경로
 
-최신 `KG-RAG-02/fashion-planner-orchestrator` main (`da129ec`, 2026-11-16 기준)은 P07에 `POST /v1/agents/sales-market-agent/reviews`와 `vogue-sales-market-review/0.3-proposal`만 호출합니다. P08은 P06 Draft에서 허용된 상품 필드와 필드별 출처를 구성해 전달합니다. 이 저장소의 HTTP 서버도 해당 0.3 리뷰 경로만 제공합니다. P07은 구형 `/runs`, `/structured-runs`, Full-Draft artifact replay 계약을 패키징하거나 제공하지 않습니다. 이 저장소의 예시·테스트도 현재 0.3 요청 및 `sales-market-review/0.1-internal` 응답 계약을 기준으로 합니다.
+확인된 `KG-RAG-02/fashion-planner-orchestrator` main (`2d818e0`, 2026-11-17 기준)은 P07에 `POST /v1/agents/sales-market-agent/reviews`와 `vogue-sales-market-review/0.3-proposal`만 호출합니다. P08은 P06 Draft에서 허용된 상품 필드와 필드별 출처를 구성해 전달합니다. 이 저장소의 HTTP 서버도 해당 0.3 리뷰 경로만 제공합니다. P07은 구형 `/runs`, `/structured-runs`, Full-Draft artifact replay 계약을 패키징하거나 제공하지 않습니다. 이 저장소의 예시·테스트도 현재 0.3 요청 및 `sales-market-review/0.1-internal` 응답 계약을 기준으로 합니다.
 
 요청·응답 계약, 예시, 상태 해석은 [`contracts/README.md`](contracts/README.md)와 [현재 P08 → P07 흐름](docs/design/post-planning-sales-market-review.md)을 기준으로 확인하세요. P06/P08 공유 계약을 변경하지 않습니다.
 
