@@ -200,7 +200,6 @@ class HmHistoricalPriceResearchSource:
             conn.executemany("INSERT INTO hm_category_map VALUES (?, ?, ?)", map_rows)
             articles_uri = _sql_string(f"s3://{settings.bucket}/{keys[0]}")
             transactions_uri = _sql_string(f"s3://{settings.bucket}/{keys[1]}")
-            mapped_product_type = mapping.get("product_type_name", {}).get(product_type or "")
             product_type_mapping = _map_product_type(product_type, mapping)
             gender_mapping = _map_gender(gender)
             category_mapping = _map_requested_category(requested_category, mapping)

@@ -66,24 +66,6 @@ class HmCombinedResearchSource:
         def read_aggregate():
             return HmResearchAggregateSource().analyze(product)
 
-        def apply_fabric_result() -> None:
-            try:
-                value = read_fabric()
-            except FabricPriceSourceError as exc:
-                result["fabric_price_error"] = str(exc)
-                result["fabric_price_source_status"] = "error"
-            except Exception as exc:
-                _LOGGER.warning("P07 fabric research failed: %s", type(exc).__name__)
-                result["fabric_price_error"] = f"Unexpected fabric research failure ({type(exc).__name__})."
-                result["fabric_price_source_status"] = "error"
-            else:
-                result["fabric_prices"] = value
-                result["fabric_price_source_status"] = (
-                    "available" if value else
-                    "no_match" if result["fabric_price_source_status"] == "configured" else
-                    "not_configured"
-                )
-
         if research_enabled and aggregate_key:
             try:
                 aggregate = read_aggregate()

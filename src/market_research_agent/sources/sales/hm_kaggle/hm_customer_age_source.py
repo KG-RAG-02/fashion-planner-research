@@ -85,20 +85,6 @@ def _checked_key(value: str, default: str) -> str:
     return key
 
 
-def _age_band(age: int | None) -> str:
-    if age is None or age < 16 or age > 100:
-        return "unknown_age"
-    if age < 20:
-        return "under_20"
-    if age < 30:
-        return "20_29"
-    if age < 40:
-        return "30_39"
-    if age < 50:
-        return "40_49"
-    return "50_plus"
-
-
 def _mapped_requested_category(category: str, mapping: dict[str, Any]) -> str:
     """Map a category to the closest H&M label, retaining match provenance."""
     return _map_requested_category(category, mapping)["mapped_category"]

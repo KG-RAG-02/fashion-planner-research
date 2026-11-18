@@ -346,7 +346,6 @@ def _load_project_r2_env() -> None:
         if not separator or not (key.startswith("R2_") or (key.startswith("VOGUE_HM_")
                                  and key != "VOGUE_HM_RESEARCH_NONCOMMERCIAL")
                                  or key == "VOGUE_AGENT_SERVICE_BEARER_TOKEN"
-                                 or key.startswith("PROJECT07_HM_R2_")
                                  or key == "LLM_API_KEY"
                                  or key == "LLM_MODEL"
                                  ):

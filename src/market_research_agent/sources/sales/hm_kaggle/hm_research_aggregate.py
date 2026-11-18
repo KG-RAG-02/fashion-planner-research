@@ -55,14 +55,8 @@ def _mapping_digest(mapping: dict[str, Any]) -> str:
 
 
 def _snapshot_identifier(snapshot: dict[str, Any]) -> str:
-    """Hash all snapshot content, keeping compatibility with pre-v2 IDs."""
-    if "aggregation_version" in snapshot:
-        identity = {key: value for key, value in snapshot.items() if key != "snapshot_id"}
-    else:
-        # Existing 1.1 snapshots used source identity only; keep them readable.
-        identity = {key: snapshot[key] for key in (
-            "schema_version", "source_objects", "mapping_version", "mapping_fingerprint",
-        )}
+    """Hash all snapshot content except the identifier itself."""
+    identity = {key: value for key, value in snapshot.items() if key != "snapshot_id"}
     return hashlib.sha256(
         json.dumps(identity, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()
