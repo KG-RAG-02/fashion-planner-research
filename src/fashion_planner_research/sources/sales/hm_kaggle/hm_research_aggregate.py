@@ -431,7 +431,7 @@ def upload_snapshot(store: R2ObjectStore, *, key: str, payload: bytes, digest: s
 def prepare_snapshot(store: R2ObjectStore | None = None) -> tuple[dict[str, Any], bytes, str, str]:
     """Build one request snapshot from one DuckDB query and the bounded fabric CSV."""
     if not hm_research_noncommercial_enabled():
-        raise PermissionError("P07 H&M snapshot generation is disabled by runtime settings.")
+        raise PermissionError("H&M snapshot generation is disabled by runtime settings.")
     try:
         import duckdb
     except ImportError:

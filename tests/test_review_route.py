@@ -1,4 +1,4 @@
-"""The P08 0.3 request reaches the current P07 review handler."""
+"""An orchestrator request reaches the review handler."""
 import email.message
 import io
 import json
@@ -16,7 +16,7 @@ TOKEN = "test-only-token"
 
 
 class CurrentReviewRouteTests(unittest.TestCase):
-    def test_p08_product_request_uses_review_api_without_artifact_store(self):
+    def test_orchestrator_product_request_uses_review_api_without_artifact_store(self):
         request = json.loads((ROOT / "contracts/examples/sales-market-review-0.3-proposal.request.json").read_text())
         request_schema = json.loads((ROOT / "contracts/schemas/proposals/sales-market-review-0.3-proposal.schema.json").read_text())
         response_schema = json.loads((ROOT / "contracts/schemas/proposals/sales-market-review-0.3-proposal-response.schema.json").read_text())

@@ -1,1 +1,1 @@
-"""Authorized source integrations used by the P07 review endpoint."""
+"""Authorized source integrations used by the review endpoint."""

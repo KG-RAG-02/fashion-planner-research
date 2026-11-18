@@ -51,7 +51,7 @@ def _cached_llm_result(
         cached = _LLM_CACHE.get(cache_key)
         if cached is not None:
             _LLM_CACHE.move_to_end(cache_key)
-            _LOGGER.info("P07 target LLM exact-input cache hit")
+            _LOGGER.info("Target LLM exact-input cache hit")
             return deepcopy(cached[1])
         pending = _LLM_CACHE_INFLIGHT.get(cache_key)
         if pending is None:
@@ -61,12 +61,12 @@ def _cached_llm_result(
         else:
             owner = False
     if not owner:
-        _LOGGER.info("P07 target LLM joined identical in-flight request")
+        _LOGGER.info("Target LLM joined identical in-flight request")
         return deepcopy(pending.result())
     try:
         started = time.perf_counter()
         value = producer()
-        _LOGGER.info("P07 target LLM call and output validation completed in %.3fs input_bytes=%d",
+        _LOGGER.info("Target LLM call and output validation completed in %.3fs input_bytes=%d",
                      time.perf_counter() - started, len(input_text.encode("utf-8")))
         with _LLM_CACHE_LOCK:
             _LLM_CACHE[cache_key] = (time.monotonic() + _LLM_CACHE_TTL_SECONDS, deepcopy(value))

@@ -87,7 +87,7 @@ def fetch_usd_krw_reference_rate(*, timeout_seconds: float = 8) -> dict[str, Any
 
 
 def _configured_fallback_rate() -> dict[str, Any]:
-    """Use P07's dated reference fallback when the provider is unavailable."""
+    """Use the service's dated reference fallback when the provider is unavailable."""
     raw_rate, rate_date = usd_krw_fallback()
     try:
         rate = float(raw_rate)
@@ -102,7 +102,7 @@ def _configured_fallback_rate() -> dict[str, Any]:
         "quote_currency": "KRW",
         "rate": rate,
         "rate_date": observed.isoformat(),
-        "provider": "P07 dated fallback; Frankfurter reference observation",
+        "provider": "dated fallback; Frankfurter reference observation",
         "source_url": FRANKFURTER_RATE_URL,
         "rate_type": "reference_rate_not_live_quote",
         "fallback_used": True,

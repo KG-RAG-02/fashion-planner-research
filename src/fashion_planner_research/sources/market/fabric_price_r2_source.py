@@ -153,7 +153,7 @@ class R2FabricPriceSource:
             )
         except Exception:
             raise FabricPriceSourceError(
-                "The Project_07 R2 fabric price source manifest is invalid or unreadable."
+                "The R2 fabric price source manifest is invalid or unreadable."
             ) from None
 
     def analyze(self, product: dict[str, Any]) -> tuple[dict[str, Any], ...]:
@@ -166,7 +166,7 @@ class R2FabricPriceSource:
                     or ".." in self.object_key.split("/")
                     or not all(character.isascii() and (character.isalnum() or character in "-._/")
                                for character in self.object_key)):
-                raise FabricPriceSourceError("The Project_07 R2 fabric price object key is invalid.")
+                raise FabricPriceSourceError("The R2 fabric price object key is invalid.")
             if self.store is None:
                 required_settings = (
                     "R2_ACCOUNT_ID", "R2_BUCKET", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",

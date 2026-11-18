@@ -312,7 +312,7 @@ def _build_profiles(
         "aggregation": "distinct customer_id per mapped product category and age band; one customer counted once within each category",
         "sources": list(source_refs),
         "limitations": [
-            "Historical H&M Kaggle competition data; research-only and not current VOGUE customer behavior or demand.",
+            "Historical H&M Kaggle competition data; research-only and not current customer behavior or demand.",
             "Customer records have no gender field; women/men filters use the purchased article merchandise segment.",
             "Age bands under the minimum cell size are suppressed.",
             "Product taxonomy mappings are approximate crosswalks; unmapped article types are excluded.",
@@ -333,7 +333,7 @@ class HmCustomerAgeResearchSource:
                 product_type: str | None = None) -> dict[str, Any] | None:
         profile_started = time.perf_counter()
         if not hm_research_noncommercial_enabled():
-            raise CustomerAgeSourceError("H&M age research is disabled by Project_07 runtime settings.")
+            raise CustomerAgeSourceError("H&M age research is disabled by runtime settings.")
         if not isinstance(category, str) or not category.strip():
             raise CustomerAgeSourceError("A product category is required for age-band analysis.")
         try:
@@ -584,7 +584,7 @@ class HmCustomerAgeResearchSource:
                     )
                     if profile is not None:
                         aggregate_map[(category.casefold(), gender_key)] = profile
-            # VOGUE PlanningDraft category names may be broader than H&M's
+            # Planning draft category names may be broader than H&M's
             # mapped merchandise labels. Add exact H&M product-type aliases to
             # the same aggregate without counting customers twice.
             for product_type, mapped_category in mapping["product_type_name"].items():

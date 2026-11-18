@@ -154,7 +154,7 @@ class CategoryAliasLookupTests(unittest.TestCase):
 class AgeDuckDBSettingsTests(unittest.TestCase):
     def test_duckdb_memory_parallelism_order_and_spill_are_bounded(self):
         connection = FakeConnection()
-        with tempfile.TemporaryDirectory(prefix="p07-age-spill-") as temp_dir, patch.dict(os.environ, {
+        with tempfile.TemporaryDirectory(prefix="research-age-spill-") as temp_dir, patch.dict(os.environ, {
             "VOGUE_HM_AGE_DUCKDB_THREADS": "1",
             "VOGUE_HM_AGE_DUCKDB_MEMORY_LIMIT": "3GB",
             "VOGUE_HM_AGE_DUCKDB_TEMP_DIRECTORY": str(Path(temp_dir) / "duckdb-age-tmp"),
@@ -572,7 +572,7 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
         except ImportError:
             self.skipTest("optional DuckDB dependency is not installed")
         mapping = json.loads((CONFIGS_DIR / "hm-category-map.json").read_text())
-        with tempfile.TemporaryDirectory(prefix="p07-hm-fixture-") as temp_dir:
+        with tempfile.TemporaryDirectory(prefix="research-hm-fixture-") as temp_dir:
             root = Path(temp_dir)
             articles = root / "articles.parquet"
             transactions = root / "transactions.parquet"

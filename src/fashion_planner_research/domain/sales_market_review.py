@@ -1,4 +1,4 @@
-"""P07's native Sales Market review result and source-backed assembly."""
+"""Review result of the research service and its source-backed assembly."""
 
 from __future__ import annotations
 
@@ -216,7 +216,7 @@ def _review_evidence(
 
 @dataclass(frozen=True, slots=True)
 class SalesMarketReview:
-    """P07 result payload inside the versioned review response envelope."""
+    """Result payload inside the review response envelope."""
 
     schema_version: str
     request_id: str
@@ -442,7 +442,7 @@ class SalesMarketReview:
 
 
 def _product_context(product: dict[str, Any]) -> dict[str, Any]:
-    """Keep only the P07 product attributes in the internal review result."""
+    """Keep only the allowlisted product attributes in the review result."""
     if not isinstance(product, dict):
         return {}
     allowed = ("category", "product_type", "gender", "season", "material")
@@ -472,7 +472,7 @@ def build_sales_market_review(
     customer_age_source_status: str | None = None,
     target_audience_proposal: dict[str, Any] | None = None,
 ) -> SalesMarketReview:
-    """Assemble available source analyses into the current P07 review result.
+    """Assemble available source analyses into the review result.
 
     Product attributes are restricted to the five-field request projection.
     Fabric and historical H&M price analyses are supplied by read-only R2 sources.
@@ -562,7 +562,7 @@ def build_sales_market_review(
     if fabrics:
         limitations.append("[원단 자료] R2 공개 목록 가격은 참고치이며 검증된 구매 단가나 제품 생산 원가가 아닙니다.")
     if customer_age_profile is not None:
-        limitations.append("[고객 연령 자료] H&M 과거 비상업 집계는 현재 VOGUE 고객 구성이나 수요를 나타내지 않습니다.")
+        limitations.append("[고객 연령 자료] H&M 과거 비상업 집계는 현재 고객 구성이나 수요를 나타내지 않습니다.")
     target_audience_status = (
         "ok" if target_audience_proposal is not None
         else "partial" if customer_age_profile is not None

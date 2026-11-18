@@ -1,4 +1,4 @@
-"""The current P07 0.3 request, response, and error schemas are locally valid."""
+"""The review request, response, and error schemas are locally valid."""
 import json
 from pathlib import Path
 import unittest

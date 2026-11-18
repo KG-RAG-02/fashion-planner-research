@@ -62,7 +62,7 @@ class HmHistoricalPriceResearchSource:
         analyze_started = time.perf_counter()
         stage = "configuration"
         if not hm_research_noncommercial_enabled():
-            raise HmPriceSourceError("H&M price research is disabled by Project_07 runtime settings.")
+            raise HmPriceSourceError("H&M price research is disabled by runtime settings.")
         if not isinstance(category, str) or not category.strip():
             raise HmPriceSourceError("A product category is required for historical price analysis.")
         try:

@@ -15,7 +15,7 @@ from .hm_price_source import HmHistoricalPriceResearchSource, HmPriceSourceError
 from .hm_research_aggregate import HmResearchAggregateSource
 
 _LOGGER = logging.getLogger(__name__)
-_RESEARCH_EXECUTOR = ThreadPoolExecutor(max_workers=6, thread_name_prefix="p07-research")
+_RESEARCH_EXECUTOR = ThreadPoolExecutor(max_workers=6, thread_name_prefix="research-source")
 
 
 class HmCombinedResearchSource:
@@ -43,7 +43,7 @@ class HmCombinedResearchSource:
             result["historical_price_source_status"] = "configured"
         aggregate_key = os.getenv("VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY", "").strip()
         _LOGGER.info(
-            "P07 H&M research mode: %s",
+            "H&M research mode: %s",
             "combined_aggregate_snapshot" if research_enabled and aggregate_key else
             "independent_raw_objects" if research_enabled else "disabled",
         )
@@ -71,7 +71,7 @@ class HmCombinedResearchSource:
                 aggregate = read_aggregate()
                 result.update(aggregate)
             except Exception as exc:
-                _LOGGER.warning("P07 combined H&M research failed: %s", type(exc).__name__)
+                _LOGGER.warning("Combined H&M research failed: %s", type(exc).__name__)
                 message = f"H&M aggregate snapshot failed ({type(exc).__name__})."
                 result["customer_age_error"] = message
                 result["historical_price_error"] = message
@@ -79,7 +79,7 @@ class HmCombinedResearchSource:
                 result["customer_age_source_status"] = "error"
                 result["historical_price_source_status"] = "error"
                 result["fabric_price_source_status"] = "error"
-            _LOGGER.info("P07 combined research completed in %.3fs", time.perf_counter() - started_at)
+            _LOGGER.info("Combined research completed in %.3fs", time.perf_counter() - started_at)
             return result
 
         tasks = {"fabric": read_fabric}
@@ -103,7 +103,7 @@ class HmCombinedResearchSource:
             try:
                 value = future.result()
             except errors[name] as exc:
-                _LOGGER.warning("P07 %s research failed after %.3fs: %s", name, elapsed, type(exc).__name__)
+                _LOGGER.warning("%s research failed after %.3fs: %s", name, elapsed, type(exc).__name__)
                 result[{"fabric": "fabric_price_error", "age": "customer_age_error",
                         "price": "historical_price_error"}[name]] = str(exc)
                 if name == "fabric":
@@ -114,7 +114,7 @@ class HmCombinedResearchSource:
                     result["historical_price_source_status"] = "error"
                 continue
             except Exception as exc:
-                _LOGGER.warning("P07 %s research failed after %.3fs: %s", name, elapsed, type(exc).__name__)
+                _LOGGER.warning("%s research failed after %.3fs: %s", name, elapsed, type(exc).__name__)
                 result[{"fabric": "fabric_price_error", "age": "customer_age_error",
                         "price": "historical_price_error"}[name]] = (
                     f"Unexpected {name} research failure ({type(exc).__name__})."
@@ -126,7 +126,7 @@ class HmCombinedResearchSource:
                 else:
                     result["historical_price_source_status"] = "error"
                 continue
-            _LOGGER.info("P07 %s research completed in %.3fs", name, elapsed)
+            _LOGGER.info("%s research completed in %.3fs", name, elapsed)
             if name == "fabric":
                 result["fabric_prices"] = value
                 result["fabric_price_source_status"] = (
@@ -140,5 +140,5 @@ class HmCombinedResearchSource:
             else:
                 result["historical_price"] = value
                 result["historical_price_source_status"] = "available" if value is not None else "no_match"
-        _LOGGER.info("P07 independent research sources completed in %.3fs", time.perf_counter() - started_at)
+        _LOGGER.info("Independent research sources completed in %.3fs", time.perf_counter() - started_at)
         return result

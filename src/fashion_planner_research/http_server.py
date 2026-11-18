@@ -1,4 +1,4 @@
-"""Authenticated HTTP adapter for the P07 0.3 sales-market review contract."""
+"""Authenticated HTTP adapter for the research review contract."""
 from __future__ import annotations
 
 import argparse
@@ -56,7 +56,7 @@ def _validate_json_tree(value: Any, field: str) -> None:
         raise RequestValidationError("INVALID_INPUT", f"{field} must contain valid JSON values.") from None
 
 def _validate_review_result(review: Any, request_id: str) -> None:
-    """Reject malformed or status-inconsistent P07 response results."""
+    """Reject malformed or status-inconsistent review results."""
     if not isinstance(review, dict) or not _REVIEW_REQUIRED_FIELDS.issubset(review):
         raise ValueError("Review result is missing contract fields.")
     if (
@@ -104,10 +104,10 @@ def _validate_review_result(review: Any, request_id: str) -> None:
     if decision["ready_for_human_decision"] != (review["status"] in {"ok", "partial"}):
         raise ValueError("Review status and decision readiness disagree.")
 
-def _p08_review_projection(review: dict[str, Any]) -> dict[str, Any]:
-    """Keep the P07 response contract while omitting source-row detail P08 does not consume.
+def _orchestrator_review_projection(review: dict[str, Any]) -> dict[str, Any]:
+    """Keep the response contract while omitting source-row detail the orchestrator does not consume.
 
-    P08 retains this response byte-for-byte and reads the aggregate price, fabric,
+    The orchestrator retains this response byte-for-byte and reads the aggregate price, fabric,
     customer, target, margin, evidence-reference, and status fields. The source
     adapters' per-object metadata and per-listing records are not part of that
     consumer surface and made the response several times larger than its summary.
@@ -185,7 +185,7 @@ def _p08_review_projection(review: dict[str, Any]) -> dict[str, Any]:
             "mapping_id", "mapping_version", "matched_source_categories", "matched_terms",
         ))
 
-    # P08 reads these fields from the dedicated summary objects below. The
+    # The orchestrator reads these fields from the dedicated summary objects below. The
     # detailed listing rows were duplicated here and in material_cost_analysis.
     compact["fabric_cost_analysis"] = pick(review.get("fabric_cost_analysis"), (
         "status", "unit", "currency", "matched_material", "limitations", "evidence_ids",
@@ -207,7 +207,7 @@ def _p08_review_projection(review: dict[str, Any]) -> dict[str, Any]:
     ))
     compact["margin_price_range_analysis"] = None
 
-    # P08's consumers use target_audience. Keep the duplicate legacy alias as a
+    # Orchestrator consumers use target_audience. Keep the duplicate legacy alias as a
     # small status/age summary so response schema keys remain stable.
     target = pick(review.get("target_audience"), (
         "status", "proposal", "age_cohort", "limitations", "evidence_ids",
@@ -282,7 +282,7 @@ def _review_error_payload(code: str, message: str, request_id: str | None = None
     }
 
 def context_from_review_request(value: Any) -> tuple[str, dict[str, Any]]:
-    """Validate and project the minimal product payload accepted from P06."""
+    """Validate and project the minimal product payload sent by the orchestrator."""
     if not isinstance(value, dict) or set(value) != {"contract_version", "request_id", "input"}:
         raise RequestValidationError("INVALID_ENVELOPE", "Review request envelope is invalid.")
     contract_version = value.get("contract_version")
@@ -358,9 +358,9 @@ def _load_project_r2_env() -> None:
         os.environ.setdefault(key, value)
 
 def make_handler(*, service_mode: bool = False):
-    """Build the HTTP handler for the deployed P08 0.3 review contract."""
-    class Project07Handler(BaseHTTPRequestHandler):
-        server_version = "Project07Review/0.3"
+    """Build the HTTP handler for the review contract."""
+    class ReviewHandler(BaseHTTPRequestHandler):
+        server_version = "FashionPlannerResearch/1.0.0"
 
         def log_message(self, fmt: str, *args: object) -> None:
             return
@@ -379,7 +379,7 @@ def make_handler(*, service_mode: bool = False):
                 if getattr(self, "command", None) != "HEAD":
                     self.wfile.write(encoded)
             except (ConnectionError, OSError):
-                _LOGGER.info("P07 response delivery interrupted before completion")
+                _LOGGER.info("Review response delivery interrupted before completion")
 
         def _method_not_allowed(self) -> None:
             path = unquote(urlsplit(self.path).path)
@@ -442,7 +442,7 @@ def make_handler(*, service_mode: bool = False):
                                 "status": "error", "message": str(exc),
                             }
                         finally:
-                            _LOGGER.info("P07 FX reference lookup and conversion completed in %.3fs",
+                            _LOGGER.info("FX reference lookup and conversion completed in %.3fs",
                                          time.perf_counter() - fx_started)
                 target_audience_authorized = target_llm_transfer_authorized()
                 if target_audience_authorized:
@@ -456,7 +456,7 @@ def make_handler(*, service_mode: bool = False):
                     except (LlmCallError, ValueError) as exc:
                         target_audience_error = str(exc)
                     finally:
-                        _LOGGER.info("P07 optional target-audience LLM completed in %.3fs", time.perf_counter() - llm_started)
+                        _LOGGER.info("Optional target-audience LLM completed in %.3fs", time.perf_counter() - llm_started)
                 review_started = time.perf_counter()
                 review = build_sales_market_review(
                     request_id, producer_id=AGENT_ID, product_context=product,
@@ -480,9 +480,9 @@ def make_handler(*, service_mode: bool = False):
                     review["errors"].append({"code": "TARGET_AUDIENCE_LLM_FAILED", "message": target_audience_error})
                     if review["status"] == "ok":
                         review["status"] = "partial"
-                review = _p08_review_projection(review)
+                review = _orchestrator_review_projection(review)
                 _validate_review_result(review, request_id)
-                _LOGGER.info("P07 review assembly and contract validation completed in %.3fs",
+                _LOGGER.info("Review assembly and contract validation completed in %.3fs",
                              time.perf_counter() - review_started)
                 send(200, {
                     "contract_version": body.get("contract_version", REVIEW_CONTRACT_VERSION),
@@ -491,16 +491,16 @@ def make_handler(*, service_mode: bool = False):
                     "status": review["status"],
                     "result": review,
                 })
-                _LOGGER.info("P07 request completed in %.3fs", time.perf_counter() - request_started)
+                _LOGGER.info("Review request completed in %.3fs", time.perf_counter() - request_started)
                 return
             except (ConnectionError, TimeoutError, OSError) as exc:
-                _LOGGER.error("P07 review unavailable: request_id=%s exception_class=%s",
+                _LOGGER.error("Review unavailable: request_id=%s exception_class=%s",
                               request_id, type(exc).__name__)
-                send(503, _review_error_payload("SERVICE_UNAVAILABLE", "Project_07 is temporarily unavailable.", request_id))
+                send(503, _review_error_payload("SERVICE_UNAVAILABLE", "The research service is temporarily unavailable.", request_id))
             except Exception as exc:
-                _LOGGER.error("P07 review failed: request_id=%s exception_class=%s",
+                _LOGGER.error("Review failed: request_id=%s exception_class=%s",
                               request_id, type(exc).__name__)
-                send(500, _review_error_payload("REVIEW_FAILED", "Project_07 review failed.", request_id))
+                send(500, _review_error_payload("REVIEW_FAILED", "The review failed.", request_id))
         def do_POST(self) -> None:
             if unquote(urlsplit(self.path).path) != REVIEW_PATH:
                 self._send_json(404, _review_error_payload("NOT_FOUND", "Route not found."))
@@ -538,7 +538,7 @@ def make_handler(*, service_mode: bool = False):
                 return
             self._handle_product_review(body)
 
-    return Project07Handler
+    return ReviewHandler
 
 
 def serve(host: str = "127.0.0.1", port: int = 8766, *, service_mode: bool = False) -> None:
@@ -551,7 +551,7 @@ def serve(host: str = "127.0.0.1", port: int = 8766, *, service_mode: bool = Fal
     elif host not in {"127.0.0.1", "localhost"}:
         raise ValueError("Non-loopback bind requires container service mode.")
     server = ThreadingHTTPServer((host, port), make_handler(service_mode=service_mode))
-    print(f"Project_07 sales-market review service: http://{host}:{port}")
+    print(f"Research review service: http://{host}:{port}")
     try:
         server.serve_forever()
     except KeyboardInterrupt:

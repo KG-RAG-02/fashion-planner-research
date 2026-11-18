@@ -12,7 +12,7 @@ from unittest.mock import patch
 from fashion_planner_research.http_server import REVIEW_CONTRACT_VERSION, _validate_review_result, make_handler, serve
 
 
-class Project07ReviewHttpTests(unittest.TestCase):
+class ReviewHttpTests(unittest.TestCase):
     def request(
         self, method: str, path: str, payload=None, *, token="test-token",
         research_bundle=None, env_overrides=None, fx_reference=None, llm_proposal=None,
@@ -101,7 +101,7 @@ class Project07ReviewHttpTests(unittest.TestCase):
         ):
             serve("0.0.0.0", 8766, service_mode=True)
         self.assertEqual(server_type.call_args.args[0], ("0.0.0.0", 8766))
-        self.assertEqual(server_type.call_args.args[1].__name__, "Project07Handler")
+        self.assertEqual(server_type.call_args.args[1].__name__, "ReviewHandler")
         server.server_close.assert_called_once_with()
 
     def valid_review(self):
@@ -197,7 +197,7 @@ class Project07ReviewHttpTests(unittest.TestCase):
             self.assertIn("result.category_price_comparison", evidence_by_id[evidence_id]["supports_fields"])
         self.assertEqual({item["code"] for item in review["errors"]}, {"CUSTOMER_AGE_RESEARCH_FAILED"})
         self.assertGreaterEqual(len(review["evidence"]), 2)
-        # P08's agreed handoff consumes the native P07 result under `result`.
+        # The orchestrator consumes the native result under `result`.
         consumer_result = response["result"]
         self.assertTrue(consumer_result["category_price_comparison"])
         self.assertTrue(consumer_result["material_cost_analysis"])
