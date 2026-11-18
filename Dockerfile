@@ -37,6 +37,10 @@ RUN python -c "import duckdb; c=duckdb.connect(); c.execute(\"SET extension_dire
 # 오프라인 단위 테스트용 단계: docker compose --profile test run --rm research-tests
 FROM base AS test
 
+USER root
+RUN pip install --no-cache-dir '.[r2,test]'
+USER 10001:10001
+
 COPY --chown=10001:10001 contracts/ ./contracts/
 COPY --chown=10001:10001 scripts/run_tests.py ./scripts/run_tests.py
 COPY --chown=10001:10001 tests/ ./tests/

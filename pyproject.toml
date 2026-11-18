@@ -1,17 +1,32 @@
 [build-system]
-requires = ["setuptools>=68"]
+requires = ["setuptools>=77.0.3"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "fashion-planner-research"
-version = "0.1.0"
+version = "1.0.0"
 description = "Fashion Planner의 판매·시장 검토 서비스"
 readme = "README.md"
+license = "MIT"
+license-files = ["LICEN[CS]E*"]
+authors = [{ name = "The Fashion Planner Contributors" }]
 requires-python = ">=3.11"
-dependencies = ["jsonschema>=4.23,<5"]
+dependencies = []
+classifiers = [
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.14",
+    "Natural Language :: Korean",
+    "Operating System :: OS Independent",
+]
 
 [project.optional-dependencies]
 r2 = ["boto3>=1.35,<2", "duckdb>=2.0,<3"]
+test = ["jsonschema>=4.23,<5"]
+
+[project.urls]
+Repository = "https://github.com/KG-RAG-02/fashion-planner-research"
+Issues = "https://github.com/KG-RAG-02/fashion-planner-research/issues"
 
 [project.scripts]
 fashion-planner-research = "fashion_planner_research.http_server:main"
