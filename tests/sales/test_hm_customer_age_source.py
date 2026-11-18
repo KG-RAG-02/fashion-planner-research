@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import unittest
+from unittest.mock import patch
 
 from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source import (
     CustomerAgeSourceError,
@@ -35,15 +36,17 @@ class HmCustomerAgeResearchTests(unittest.TestCase):
         self.assertFalse(result["operational_eligible"])
         self.assertNotIn("individual_customer_ids", result)
 
-    def test_noncommercial_gate_must_be_explicit(self):
-        previous = os.environ.pop("VOGUE_HM_RESEARCH_NONCOMMERCIAL", None)
-        try:
-            with self.assertRaises(CustomerAgeSourceError):
-                HmCustomerAgeResearchSource().profile("Outerwear", gender="women")
-        finally:
-            if previous is not None:
-                os.environ["VOGUE_HM_RESEARCH_NONCOMMERCIAL"] = previous
+    def test_noncommercial_gate_is_off_by_default(self):
+        class _NoStorageCalls:
+            def __getattr__(self, name):
+                raise AssertionError(f"storage was used before the gate: {name}")
 
+        source = HmCustomerAgeResearchSource(store=_NoStorageCalls())
+        for value in (None, "", "  ", "false", "0", "no"):
+            env = {} if value is None else {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": value}
+            with self.subTest(value=value), patch.dict(os.environ, env, clear=True):
+                with self.assertRaisesRegex(CustomerAgeSourceError, "disabled by runtime settings"):
+                    source.profile("Outerwear", gender="women")
 
 if __name__ == "__main__":
     unittest.main()

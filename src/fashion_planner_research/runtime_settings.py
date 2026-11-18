@@ -5,8 +5,12 @@ from __future__ import annotations
 import os
 
 
-DEFAULT_HM_RESEARCH_NONCOMMERCIAL = True
-DEFAULT_TARGET_LLM_TRANSFER_AUTHORIZED = True
+# 두 설정은 배포자의 동의가 필요한 동작이라 기본으로 꺼 둔다.
+# - H&M Kaggle 자료는 대회 규칙상 비상업 연구에만 쓸 수 있다.
+# - 타깃 가설 입력을 외부 LLM 제공자에게 보낸다.
+# 켜려면 프로세스 환경변수에 true, 1, yes 중 하나를 넣는다.
+DEFAULT_HM_RESEARCH_NONCOMMERCIAL = False
+DEFAULT_TARGET_LLM_TRANSFER_AUTHORIZED = False
 DEFAULT_USD_KRW_FALLBACK_RATE = "1334.71"
 DEFAULT_USD_KRW_FALLBACK_DATE = "2026-11-12"
 
