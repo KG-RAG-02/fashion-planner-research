@@ -16,7 +16,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
   3. 무거운 쿼리를 요청 경로에서 뺍니다. 집계 스냅샷을 오프라인에서 만들고 요청은 그것을 읽습니다(프로세스마다 객체 1회 읽기).
 - **검증.** 같은 이미지·1.5 GB 한도의 일회성 컨테이너에서, 스레드를 줄이고 `preserve_insertion_order=false`를 준 쿼리는 39.6초에, 두 단계로 나눈 쿼리는 27.7초에 성공했고 두 결과의 정규화 해시가 같았습니다. 단위 테스트 `test_duckdb_memory_parallelism_order_and_spill_are_bounded`가 연결 설정을 고정합니다.
 - **교훈.** 큰 과거 데이터는 요청 경로 밖에서 미리 집계합니다. 컨테이너에서는 호스트 기준 기본값을 믿지 말고 DuckDB의 스레드, 메모리 한도, 절대 경로 임시 디렉터리를 직접 정합니다.
-- **커밋.** {{commit:73ed40a}}, {{commit:571a558}}
+- **커밋.** [`e58dc0a`](https://github.com/KG-RAG-02/fashion-planner-research/commit/e58dc0ab76084892816843e1f6f1238edc3a245a), [`800d230`](https://github.com/KG-RAG-02/fashion-planner-research/commit/800d230ea1bde65232257ebe3b3fde5df5f49f0c)
 
 ## T-DATA-02 카테고리 매핑을 바꾼 뒤 기존 스냅샷이 거부됨
 
@@ -25,7 +25,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
 - **해결.** 현재 매핑으로 스냅샷을 새로 만듭니다. 키가 내용 해시라서 새 스냅샷은 새 키를 받고, 옛 객체는 그대로 남습니다.
 - **검증.** `test_runtime_rejects_retired_aggregate_snapshot_schema`와 스냅샷 읽기의 매핑 지문 검사.
 - **교훈.** 파생 데이터는 입력(원본 객체 버전, 매핑 해시, 쿼리)으로 식별하고, 다르면 닫힌 쪽으로 실패하게 합니다. 재빌드 방법은 매핑 파일 가까이에 적어 둡니다.
-- **커밋.** {{commit:d658b65}}, {{commit:73ed40a}}
+- **커밋.** [`764efdf`](https://github.com/KG-RAG-02/fashion-planner-research/commit/764efdf93a1fd0298b117ac58b1374c8f9a1e5c9), [`e58dc0a`](https://github.com/KG-RAG-02/fashion-planner-research/commit/e58dc0ab76084892816843e1f6f1238edc3a245a)
 
 ## T-MAP-01 실데이터 리뷰가 모두 `no_results`
 
@@ -34,7 +34,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
 - **해결.** 한국어 이름을 H&M 카테고리로 잇는 명시적 별칭 표를 만들고, 나중에 `스커트`, `가디건`, `팬츠` 같은 소분류까지 카테고리 매핑 파일 안(`requested_category_aliases`)으로 옮겼습니다.
 - **검증.** `test_korean_category_alias_selects_hm_knitwear_snapshot_profile`, `test_korean_tops_category_selects_real_tops_price_and_customer_aggregates`.
 - **교훈.** 서비스 경계에서 어휘를 버전이 있는 명시적 표로 맞추고, 추측하지 말고 어떤 별칭을 적용했는지 응답에 남깁니다.
-- **커밋.** {{commit:98e6351}}, {{commit:d658b65}}
+- **커밋.** [`742093e`](https://github.com/KG-RAG-02/fashion-planner-research/commit/742093e323b52b64d0486eee47905efed309848a), [`764efdf`](https://github.com/KG-RAG-02/fashion-planner-research/commit/764efdf93a1fd0298b117ac58b1374c8f9a1e5c9)
 
 ## T-DEP-01 DuckDB 1.x가 DuckDB 2.0 파일을 열지 못함
 
@@ -43,7 +43,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
 - **해결.** `r2` extra에서 `duckdb>=2,<3`을 요구합니다. 컨테이너 이미지는 빌드 때 맞는 `httpfs` 확장을 설치하므로, 요청 중에는 확장을 설치하지 않습니다.
 - **검증.** Python 3.14, DuckDB 2.0.0에서 단위 테스트가 통과했습니다.
 - **교훈.** 저장 형식을 가진 라이브러리는 데이터를 쓴 주 버전에 고정하고, 확장은 이미지 빌드 때 설치합니다.
-- **커밋.** {{commit:ad8bd54}}
+- **커밋.** [`8e341dc`](https://github.com/KG-RAG-02/fashion-planner-research/commit/8e341dcf7542d185947e84ad8263364d8f82292a)
 
 ## T-COST-01 판매 목록 가격이 생산 원가처럼 읽힐 수 있음
 
@@ -52,7 +52,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
 - **해결.** 두 필드를 응답 투영에서 빼고, 대신 추정 방법(`method`)을 보여 줍니다. 검증된 근거가 없으면 `decision_support.evidence_areas.material_cost`는 false로 남습니다.
 - **검증.** `tests/test_http_server.py`가 응답에 `unit_cost`와 `verified_price_per_meter_available`가 없는지 확인합니다.
 - **교훈.** 추정값은 계약에서도 추정값으로 이름 붙이고, 실제보다 확실해 보이게 하는 필드는 지웁니다.
-- **커밋.** {{commit:0b3bc53}}
+- **커밋.** [`1e1daff`](https://github.com/KG-RAG-02/fashion-planner-research/commit/1e1daff0fe6d7fc67cf565c8cf692aff92f59c1e)
 
 ## T-PKG-01 카테고리 매핑 사본 두 개가 어긋남
 
@@ -61,7 +61,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
 - **해결.** 사본을 맞췄고, 공개본에서는 패키지 `resources/`만 남겼습니다.
 - **검증.** 공개 기준선에서 루트 사본을 지우기 전에 두 사본을 바이트 단위로 비교해 차이가 없음을 확인했습니다.
 - **교훈.** 실행에 쓰는 자산은 한 곳에만 두고 `importlib.resources`로 읽어, 소스 체크아웃·휠·이미지가 같은 바이트를 읽게 합니다.
-- **커밋.** {{commit:378b3dc}}
+- **커밋.** [`6023939`](https://github.com/KG-RAG-02/fashion-planner-research/commit/6023939af1190e9c42abde652b3803396f80b0dc)
 
 ## T-LLM-01 사소한 모양 차이로 타깃 가설 전체가 실패
 
@@ -70,7 +70,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
 - **해결.** 그 필드만 정규화합니다(문자열은 항목 하나짜리 목록으로, 3개 이상은 2개로 자르고, 비면 중립 문구). 다른 필드가 틀린 출력은 계속 거부합니다.
 - **검증.** `tests/test_target_audience_cache.py`가 정규화를 확인합니다.
 - **교훈.** 안전하게 맞출 수 있는 모양 차이와 거부해야 할 의미 오류를 구분합니다.
-- **커밋.** {{commit:571a558}}
+- **커밋.** [`800d230`](https://github.com/KG-RAG-02/fashion-planner-research/commit/800d230ea1bde65232257ebe3b3fde5df5f49f0c)
 
 ## T-HTTP-01 `/api/health`가 늘 로컬 개발 모드라고 답함
 
@@ -79,7 +79,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
 - **해결.** 처리기를 만들 때 모드를 넘겨 `container-service`나 `local-development`를 답하게 했습니다.
 - **검증.** `tests/test_http_server.py`가 두 모드의 health 응답을 확인합니다.
 - **교훈.** 상태 점검은 상수가 아니라 실제로 관찰한 모드를 알려야 합니다.
-- **커밋.** {{commit:93ea49e}}
+- **커밋.** [`c1abf20`](https://github.com/KG-RAG-02/fashion-planner-research/commit/c1abf20672de15c534128b356c98b77958250ca0)
 
 ## T-HTTP-02 리뷰 경로에 다른 메서드를 보내면 404나 HTML 501
 
@@ -88,7 +88,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
 - **해결.** 그 경로의 다른 메서드에는 인증보다 먼저 `405`와 `Allow: POST`로 답합니다.
 - **검증.** `tests/test_http_server.py`가 메서드마다 `405`와 `Allow: POST`를 확인합니다.
 - **교훈.** 프로토콜 오류는 상태 코드를 의도적으로 정합니다. 프레임워크 기본값은 제각각인 본문을 흘립니다.
-- **커밋.** {{commit:8d39138}}
+- **커밋.** [`efad0ae`](https://github.com/KG-RAG-02/fashion-planner-research/commit/efad0aedfe27d5590dfbc3086623fd4d112ee44d)
 
 ## T-OPS-01 64 MB tmpfs가 DuckDB 캐시에 너무 작음
 
@@ -97,7 +97,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
 - **해결.** 캐시에는 이름 있는 볼륨을 붙이고 `/tmp`만 tmpfs로 둡니다.
 - **검증.** Compose 프로필을 검토했습니다. 이미지 자체는 바뀌지 않았습니다.
 - **교훈.** 임시 저장소 크기는 평소 크기가 아니라 담아야 할 가장 큰 객체로 정합니다.
-- **커밋.** {{commit:0172690}}
+- **커밋.** [`ee094f1`](https://github.com/KG-RAG-02/fashion-planner-research/commit/ee094f167b434a6c9c000f49a286272407741456)
 
 ## T-CFG-01 빈 환경변수가 기본값을 덮어씀
 
@@ -106,7 +106,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
 - **해결.** 빈 값은 설정하지 않은 것으로 봅니다. 지금의 설정 함수도 같은 규칙을 따릅니다.
 - **검증.** 정책 변수를 빈 값으로 두면 기본값이 나오는지 단위 테스트가 확인합니다.
 - **교훈.** Compose 파일은 `${VAR:-}`처럼 빈 값을 자주 넘깁니다. 빈 값은 "설정 안 함"으로 읽습니다.
-- **커밋.** {{commit:e49b09c}}
+- **커밋.** [`7cb390b`](https://github.com/KG-RAG-02/fashion-planner-research/commit/7cb390b04d9ddd093c9d47c427f3e32e4788792c)
 
 ## T-OPS-02 SQLite 연결이 닫히지 않음(지금은 없는 기능)
 
@@ -114,7 +114,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
 - **원인.** `with sqlite3.connect(...) as db`는 commit이나 rollback만 하고 연결을 닫지 않습니다.
 - **해결.** 연결을 `contextlib.closing()`으로 감쌌습니다. 이 재생 저장소는 나중에 현재 리뷰 계약으로 옮기면서 없앴습니다.
 - **교훈.** sqlite3의 context manager는 트랜잭션을 다룰 뿐 연결을 닫지 않습니다.
-- **커밋.** {{commit:25ac52a}}
+- **커밋.** [`39012b3`](https://github.com/KG-RAG-02/fashion-planner-research/commit/39012b325e60c95e41a06dc9d59c558dc3a181e2)
 
 ## T-HTTP-03 개정 충돌을 계약 오류로 알림(지금은 없는 기능)
 
@@ -122,7 +122,7 @@ research 서비스를 만들며 겪은 문제를 원인, 해결, 다시 쓸 교�
 - **원인.** 상태 충돌을 계약 위반 코드로 알렸습니다.
 - **해결.** 별도 오류 코드와 함께 `409`를 돌려주고, `422`는 잘못된 입력에만 씁니다. 이 경로는 나중에 재생 저장소와 함께 없앴습니다.
 - **교훈.** `422`는 입력의 의미 오류에, `409`는 상태 충돌에 씁니다.
-- **커밋.** {{commit:0c5dddf}}
+- **커밋.** [`0492326`](https://github.com/KG-RAG-02/fashion-planner-research/commit/0492326ff6bf3ce68e2e5c3b0c36e8aa16f53bc7)
 
 ## T-BUILD-01 이미지가 Git에 없는 파일을 복사함
 
