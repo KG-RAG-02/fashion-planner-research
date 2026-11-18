@@ -38,8 +38,8 @@ class CurrentReviewRouteTests(unittest.TestCase):
         handler.rfile = io.BytesIO(json.dumps(request).encode())
         handler.wfile = io.BytesIO()
         handler.send_response, handler.send_header, handler.end_headers = lambda status: setattr(handler, "status", status), lambda *_: None, lambda: None
-        env = {"VOGUE_AGENT_SERVICE_BEARER_TOKEN": TOKEN, "VOGUE_PROJECT07_DISABLE_DOTENV": "1",
-               "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "0", "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED": "0"}
+        env = {"FASHION_PLANNER_SERVICE_TOKEN": TOKEN, "RESEARCH_DISABLE_DOTENV": "1",
+               "RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "0", "RESEARCH_TARGET_LLM_TRANSFER_AUTHORIZED": "0"}
         with patch.dict(os.environ, env, clear=True), patch(
             "fashion_planner_research.http_server.HmCombinedResearchSource.analyze", return_value=research,
         ) as source:

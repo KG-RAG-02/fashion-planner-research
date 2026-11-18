@@ -19,7 +19,7 @@ def r2_source_key(name: str, *, default: str) -> str:
     A manifest path set in the environment may be absolute or relative to the
     current working directory.
     """
-    manifest_value = os.getenv("PROJECT07_R2_SOURCE_MANIFEST", "").strip()
+    manifest_value = os.getenv("RESEARCH_R2_SOURCE_MANIFEST", "").strip()
     manifest_path = Path(manifest_value).resolve() if manifest_value else _DEFAULT_MANIFEST
     try:
         payload: Any = json.loads(manifest_path.read_text(encoding="utf-8"))

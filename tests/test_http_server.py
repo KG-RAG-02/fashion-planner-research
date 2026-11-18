@@ -42,10 +42,10 @@ class ReviewHttpTests(unittest.TestCase):
             "historical_price": None, "historical_price_error": None,
         }
         test_env = {
-            "VOGUE_AGENT_SERVICE_BEARER_TOKEN": "test-token",
-            "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
-            "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "false",
-            "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED": "false",
+            "FASHION_PLANNER_SERVICE_TOKEN": "test-token",
+            "RESEARCH_DISABLE_DOTENV": "true",
+            "RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "false",
+            "RESEARCH_TARGET_LLM_TRANSFER_AUTHORIZED": "false",
         }
         test_env.update(env_overrides or {})
         with (
@@ -106,7 +106,7 @@ class ReviewHttpTests(unittest.TestCase):
         self.assertEqual((service_status, service_body), (200, {"status": "ok", "mode": "container-service"}))
 
     def test_serve_restricts_bind_and_requires_auth_for_service_mode(self):
-        with patch.dict(os.environ, {"VOGUE_PROJECT07_DISABLE_DOTENV": "true"}, clear=True):
+        with patch.dict(os.environ, {"RESEARCH_DISABLE_DOTENV": "true"}, clear=True):
             with self.assertRaisesRegex(ValueError, "Non-loopback bind"):
                 serve("0.0.0.0", 8766)
             with self.assertRaisesRegex(ValueError, "Bearer authentication"):
@@ -117,8 +117,8 @@ class ReviewHttpTests(unittest.TestCase):
         server.serve_forever.side_effect = KeyboardInterrupt
         with (
             patch.dict(os.environ, {
-                "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
-                "VOGUE_AGENT_SERVICE_BEARER_TOKEN": "synthetic-service-token",
+                "RESEARCH_DISABLE_DOTENV": "true",
+                "FASHION_PLANNER_SERVICE_TOKEN": "synthetic-service-token",
             }, clear=True),
             patch("fashion_planner_research.http_server.ThreadingHTTPServer", return_value=server) as server_type,
         ):
@@ -299,8 +299,8 @@ class ReviewHttpTests(unittest.TestCase):
                     "POST", "/v1/agents/research/reviews", request,
                     research_bundle=bundle,
                     env_overrides={
-                        "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true",
-                        "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED": "true",
+                        "RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "true",
+                        "RESEARCH_TARGET_LLM_TRANSFER_AUTHORIZED": "true",
                         "LLM_API_KEY": "synthetic-test-key",
                         "LLM_MODEL": "synthetic-test-model",
                     },
@@ -400,8 +400,8 @@ class ReviewHttpTests(unittest.TestCase):
                 "historical_price_source_status": "available",
             },
             env_overrides={
-                "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true",
-                "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED": "true",
+                "RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "true",
+                "RESEARCH_TARGET_LLM_TRANSFER_AUTHORIZED": "true",
                 "LLM_API_KEY": "synthetic-test-key",
                 "LLM_MODEL": "synthetic-test-model",
             },
@@ -531,7 +531,7 @@ class ReviewHttpTests(unittest.TestCase):
                 "historical_price": historical_price, "historical_price_error": None,
                 "historical_price_source_status": "available",
             },
-            env_overrides={"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"},
+            env_overrides={"RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "true"},
             fx_reference={
                 "base_currency": "USD", "quote_currency": "KRW", "rate": 1400.0,
                 "rate_date": "2026-11-13", "provider": "synthetic-fixture",

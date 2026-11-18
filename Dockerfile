@@ -6,10 +6,10 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     PIP_DISABLE_PIP_VERSION_CHECK=1 \
     HOME=/tmp \
     PORT=8766 \
-    VOGUE_PROJECT07_DISABLE_DOTENV=1 \
-    VOGUE_R2_HM_DB_CACHE_DIR=/data/hm-cache \
-    VOGUE_HM_AGE_DUCKDB_TEMP_DIRECTORY=/data/hm-cache/duckdb-age-tmp \
-    VOGUE_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
+    RESEARCH_DISABLE_DOTENV=1 \
+    RESEARCH_CACHE_DIR=/data/hm-cache \
+    RESEARCH_AGE_DUCKDB_TEMP_DIRECTORY=/data/hm-cache/duckdb-age-tmp \
+    RESEARCH_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
 
 WORKDIR /app
 

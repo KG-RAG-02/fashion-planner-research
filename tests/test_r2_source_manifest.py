@@ -19,7 +19,7 @@ class R2SourceManifestTests(unittest.TestCase):
                 "objects": {"fabric_prices": "synthetic/from-manifest.csv"},
             }), encoding="utf-8")
             with patch.dict(os.environ, {
-                "PROJECT07_R2_SOURCE_MANIFEST": str(path),
+                "RESEARCH_R2_SOURCE_MANIFEST": str(path),
             }, clear=True):
                 result = r2_source_key(
                     "fabric_prices", default="synthetic/default.csv",
@@ -30,7 +30,7 @@ class R2SourceManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             missing = str(Path(tmp) / "does-not-exist.json")
             with patch.dict(os.environ, {
-                "PROJECT07_R2_SOURCE_MANIFEST": missing,
+                "RESEARCH_R2_SOURCE_MANIFEST": missing,
             }, clear=True):
                 with self.assertRaisesRegex(ValueError, "manifest does not exist"):
                     r2_source_key(
@@ -41,7 +41,7 @@ class R2SourceManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "manifest.json"
             path.write_text("{}", encoding="utf-8")
-            with patch.dict(os.environ, {"PROJECT07_R2_SOURCE_MANIFEST": str(path)}, clear=True):
+            with patch.dict(os.environ, {"RESEARCH_R2_SOURCE_MANIFEST": str(path)}, clear=True):
                 with self.assertRaisesRegex(ValueError, "unsupported schema"):
                     r2_source_key("fabric_prices", default="synthetic/default.csv")
 

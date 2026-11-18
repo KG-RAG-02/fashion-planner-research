@@ -63,7 +63,7 @@ class CategoryAliasLookupTests(unittest.TestCase):
         source = HmCustomerAgeResearchSource(store=R2ObjectStore(
             R2Settings("account", "synthetic-bucket", "key-id", "secret"), client=client,
         ))
-        with patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"}), \
+        with patch.dict(os.environ, {"RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "true"}), \
              patch.dict(sys.modules, {"duckdb": FakeDuckDB}), \
              patch.object(HmCustomerAgeResearchSource, "_query_aggregates", return_value={
                  ("blouse", "women"): profile,
@@ -86,7 +86,7 @@ class CategoryAliasLookupTests(unittest.TestCase):
         source = HmCustomerAgeResearchSource(store=R2ObjectStore(
             R2Settings("account", "synthetic-all-gender-bucket", "key-id", "secret"), client=FakeR2Client(),
         ))
-        with patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"}), \
+        with patch.dict(os.environ, {"RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "true"}), \
              patch.dict(sys.modules, {"duckdb": FakeDuckDB}), \
              patch.object(HmCustomerAgeResearchSource, "_query_aggregates", return_value={
                  ("tops", ""): profile,
@@ -155,9 +155,9 @@ class AgeDuckDBSettingsTests(unittest.TestCase):
     def test_duckdb_memory_parallelism_order_and_spill_are_bounded(self):
         connection = FakeConnection()
         with tempfile.TemporaryDirectory(prefix="research-age-spill-") as temp_dir, patch.dict(os.environ, {
-            "VOGUE_HM_AGE_DUCKDB_THREADS": "1",
-            "VOGUE_HM_AGE_DUCKDB_MEMORY_LIMIT": "3GB",
-            "VOGUE_HM_AGE_DUCKDB_TEMP_DIRECTORY": str(Path(temp_dir) / "duckdb-age-tmp"),
+            "RESEARCH_AGE_DUCKDB_THREADS": "1",
+            "RESEARCH_AGE_DUCKDB_MEMORY_LIMIT": "3GB",
+            "RESEARCH_AGE_DUCKDB_TEMP_DIRECTORY": str(Path(temp_dir) / "duckdb-age-tmp"),
         }, clear=False):
             age_module._configure_age_duckdb(connection)
             self.assertTrue((Path(temp_dir) / "duckdb-age-tmp").is_dir())
@@ -316,7 +316,7 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
         store = R2ObjectStore(R2Settings("account", "bucket", "key-id", "secret"), client=client)
         from fashion_planner_research.sources.sales.hm_kaggle.hm_research_aggregate import output_key
         source = HmResearchAggregateSource(store=store, object_key=output_key(snapshot["snapshot_id"]))
-        with patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"}):
+        with patch.dict(os.environ, {"RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "true"}):
             first = source.analyze({"category": "Outerwear", "product_type": "Coat", "gender": "women"})
             second = source.analyze({"category": "Outerwear", "product_type": "Coat", "gender": "women"})
         self.assertEqual(first["customer_age_profile"]["unique_customer_denominator"], 100)
@@ -358,14 +358,14 @@ class DuckDBHttpSettingsTests(unittest.TestCase):
     def test_httpfs_timeout_and_retry_defaults_are_bounded(self):
         connection = FakeConnection()
         with patch.dict(os.environ, {}, clear=False):
-            os.environ.pop("VOGUE_HM_HTTP_TIMEOUT_SECONDS", None)
-            os.environ.pop("VOGUE_HM_HTTP_RETRIES", None)
+            os.environ.pop("RESEARCH_HTTPFS_TIMEOUT_SECONDS", None)
+            os.environ.pop("RESEARCH_HTTPFS_RETRIES", None)
             configure_httpfs(connection)
         self.assertEqual(connection.statements, ["SET http_timeout = 20", "SET http_retries = 1"])
 
     def test_invalid_httpfs_timeout_does_not_execute_sql(self):
         connection = FakeConnection()
-        with patch.dict(os.environ, {"VOGUE_HM_HTTP_TIMEOUT_SECONDS": "2"}):
+        with patch.dict(os.environ, {"RESEARCH_HTTPFS_TIMEOUT_SECONDS": "2"}):
             with self.assertRaises(ValueError):
                 configure_httpfs(connection)
         self.assertEqual(connection.statements, [])
@@ -373,7 +373,7 @@ class DuckDBHttpSettingsTests(unittest.TestCase):
 
 class HmCustomerAgeR2PipelineTests(unittest.TestCase):
     def setUp(self):
-        self.env_patch = patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"})
+        self.env_patch = patch.dict(os.environ, {"RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "true"})
         self.env_patch.start()
         age_module._CACHE.clear()
         age_module._CACHE_INFLIGHT.clear()
@@ -635,7 +635,7 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
             settings = R2Settings("account", "synthetic-bucket", "key-id", "secret")
             keys = ("customers.csv", "articles.parquet", "transactions_train.parquet")
             with patch.dict(sys.modules, {"duckdb": LocalDuckDB}), patch.dict(
-                os.environ, {"VOGUE_DUCKDB_EXTENSION_DIRECTORY": ""}, clear=False,
+                os.environ, {"RESEARCH_DUCKDB_EXTENSION_DIRECTORY": ""}, clear=False,
             ):
                 result = HmCustomerAgeResearchSource._query_aggregates(
                     LocalDuckDB, settings, keys, mapping, ("c1", "a1", "t1"),

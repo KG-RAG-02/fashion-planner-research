@@ -329,11 +329,18 @@ def context_from_review_request(value: Any) -> tuple[str, dict[str, Any]]:
     _validate_json_tree(product, "input.product")
     return request_id, product
 
-def _load_project_r2_env() -> None:
-    """Load storage credentials, service auth, and provider settings from local .env."""
-    if os.getenv("VOGUE_PROJECT07_DISABLE_DOTENV", "").casefold() in {"1", "true", "yes"}:
+_DOTENV_KEYS = frozenset({"FASHION_PLANNER_SERVICE_TOKEN", "LLM_API_KEY", "LLM_MODEL"})
+
+
+def _load_project_r2_env(env_path: Path | None = None) -> None:
+    """Load allowed settings from the repository's local .env without overriding the process.
+
+    Allowed keys: R2_*, RESEARCH_* (except RESEARCH_DISABLE_DOTENV), the shared service
+    token and LLM_API_KEY/LLM_MODEL. Values already set in the process win.
+    """
+    if os.getenv("RESEARCH_DISABLE_DOTENV", "").casefold() in {"1", "true", "yes"}:
         return
-    env_path = Path(__file__).resolve().parents[2] / ".env"
+    env_path = env_path or Path(__file__).resolve().parents[2] / ".env"
     if not env_path.is_file():
         return
     for raw_line in env_path.read_text(encoding="utf-8-sig").splitlines():
@@ -344,13 +351,9 @@ def _load_project_r2_env() -> None:
             line = line[len("export "):].strip()
         key, separator, value = line.partition("=")
         key = key.strip()
-        if not separator or not (key.startswith("R2_") or (key.startswith("VOGUE_HM_")
-                                 and key != "VOGUE_HM_RESEARCH_NONCOMMERCIAL")
-                                 or key == "VOGUE_AGENT_SERVICE_BEARER_TOKEN"
-                                 or key == "LLM_API_KEY"
-                                 or key == "LLM_MODEL"
-                                 or key == synthetic.REVIEW_SOURCE_ENV
-                                 ):
+        allowed = (key.startswith("R2_") or key in _DOTENV_KEYS
+                   or (key.startswith("RESEARCH_") and key != "RESEARCH_DISABLE_DOTENV"))
+        if not separator or not allowed:
             continue
         value = value.strip()
         if len(value) >= 2 and value[0] == value[-1] and value[0] in {"'", '"'}:
@@ -394,7 +397,7 @@ def make_handler(*, service_mode: bool = False):
         do_HEAD = do_PUT = do_DELETE = do_PATCH = do_OPTIONS = do_TRACE = do_CONNECT = _method_not_allowed
 
         def _authorized(self) -> bool:
-            expected = os.environ.get("VOGUE_AGENT_SERVICE_BEARER_TOKEN", "")
+            expected = os.environ.get("FASHION_PLANNER_SERVICE_TOKEN", "")
             authorization = self.headers.get("Authorization", "")
             supplied = authorization[7:].strip() if authorization.startswith("Bearer ") else ""
             return bool(expected and supplied) and hmac.compare_digest(supplied.encode(), expected.encode())
@@ -565,7 +568,7 @@ def serve(host: str = "127.0.0.1", port: int = 8766, *, service_mode: bool = Fal
     if service_mode:
         if host != "0.0.0.0":
             raise ValueError("Container service mode must bind to 0.0.0.0.")
-        if not os.environ.get("VOGUE_AGENT_SERVICE_BEARER_TOKEN", "").strip():
+        if not os.environ.get("FASHION_PLANNER_SERVICE_TOKEN", "").strip():
             raise ValueError("Bearer authentication is required in container service mode.")
     elif host not in {"127.0.0.1", "localhost"}:
         raise ValueError("Non-loopback bind requires container service mode.")

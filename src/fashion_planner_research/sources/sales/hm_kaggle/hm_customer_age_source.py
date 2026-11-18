@@ -48,15 +48,15 @@ _CSV_COLUMNS = (
 
 def _configure_age_duckdb(conn: Any) -> None:
     """Bound DuckDB concurrency and point spill files at the writable cache volume."""
-    threads_raw = os.getenv("VOGUE_HM_AGE_DUCKDB_THREADS", "1").strip()
+    threads_raw = os.getenv("RESEARCH_AGE_DUCKDB_THREADS", "1").strip()
     if re.fullmatch(r"[1-9][0-9]{0,2}", threads_raw) is None:
         raise CustomerAgeSourceError("DuckDB age-query thread configuration is invalid.")
-    memory_limit = os.getenv("VOGUE_HM_AGE_DUCKDB_MEMORY_LIMIT", "3GB").strip()
+    memory_limit = os.getenv("RESEARCH_AGE_DUCKDB_MEMORY_LIMIT", "3GB").strip()
     if re.fullmatch(r"[1-9][0-9]*(?:\.[0-9]+)?(?:GB|GIB|MB|MIB)", memory_limit, re.IGNORECASE) is None:
         raise CustomerAgeSourceError("DuckDB age-query memory configuration is invalid.")
     temp_directory = os.getenv(
-        "VOGUE_HM_AGE_DUCKDB_TEMP_DIRECTORY",
-        os.getenv("VOGUE_R2_HM_DB_CACHE_DIR", "/tmp") + "/duckdb-age-tmp",
+        "RESEARCH_AGE_DUCKDB_TEMP_DIRECTORY",
+        os.getenv("RESEARCH_CACHE_DIR", "/tmp") + "/duckdb-age-tmp",
     ).strip()
     if not temp_directory or "\x00" in temp_directory:
         raise CustomerAgeSourceError("DuckDB age-query temporary directory is invalid.")
@@ -488,7 +488,7 @@ class HmCustomerAgeResearchSource:
         query_started = time.perf_counter()
         try:
             _configure_age_duckdb(conn)
-            extension_dir = os.getenv("VOGUE_DUCKDB_EXTENSION_DIRECTORY", "").strip()
+            extension_dir = os.getenv("RESEARCH_DUCKDB_EXTENSION_DIRECTORY", "").strip()
             if extension_dir:
                 conn.execute("SET extension_directory = " + _sql_string(extension_dir))
             try:

@@ -198,7 +198,7 @@ def _run_aggregate_query(
         connection = duckdb.connect()
         try:
             _configure_age_duckdb(connection)
-            extension_dir = os.getenv("VOGUE_DUCKDB_EXTENSION_DIRECTORY", "").strip()
+            extension_dir = os.getenv("RESEARCH_DUCKDB_EXTENSION_DIRECTORY", "").strip()
             if extension_dir:
                 connection.execute("SET extension_directory = " + _sql_string(extension_dir))
             connection.execute("LOAD httpfs")
@@ -501,7 +501,7 @@ class HmResearchAggregateSource:
 
     def __init__(self, store: R2ObjectStore | None = None, *, object_key: str | None = None):
         self.store = store
-        self.object_key = object_key or os.getenv("VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY", "").strip()
+        self.object_key = object_key or os.getenv("RESEARCH_AGGREGATE_SNAPSHOT_KEY", "").strip()
         if self.object_key:
             self.object_key = _checked_key(self.object_key, "")
 
@@ -821,8 +821,8 @@ def main() -> None:
     if not args.upload:
         print("prepared_only=true; no R2 object was written")
         return
-    if os.getenv("VOGUE_HM_AGGREGATE_UPLOAD_ENABLED", "").strip().casefold() not in {"1", "true", "yes"}:
-        raise PermissionError("Set VOGUE_HM_AGGREGATE_UPLOAD_ENABLED=true to enable the explicit upload command.")
+    if os.getenv("RESEARCH_AGGREGATE_UPLOAD_ENABLED", "").strip().casefold() not in {"1", "true", "yes"}:
+        raise PermissionError("Set RESEARCH_AGGREGATE_UPLOAD_ENABLED=true to enable the explicit upload command.")
     uploaded = upload_snapshot(store, key=key, payload=payload, digest=digest,
                                snapshot_id=snapshot["snapshot_id"])
     print("uploaded=" + str(uploaded).lower())

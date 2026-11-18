@@ -11,7 +11,7 @@ from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source imp
 
 class HmCombinedResearchParallelTests(unittest.TestCase):
     def test_disabled_hm_research_is_distinct_from_an_empty_configured_source(self):
-        with patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "false"}, clear=True), \
+        with patch.dict(os.environ, {"RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "false"}, clear=True), \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.R2FabricPriceSource.analyze", return_value=()):
             result = HmCombinedResearchSource().analyze({"category": "니트웨어", "material": "니트"})
         self.assertEqual(result["customer_age_source_status"], "disabled")
@@ -20,7 +20,7 @@ class HmCombinedResearchParallelTests(unittest.TestCase):
         self.assertIsNone(result["historical_price"])
 
     def test_configured_hm_sources_report_no_match_without_invented_values(self):
-        with patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"}, clear=True), \
+        with patch.dict(os.environ, {"RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "true"}, clear=True), \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.R2FabricPriceSource.analyze", return_value=()), \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.HmCustomerAgeResearchSource.profile", return_value=None), \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.HmHistoricalPriceResearchSource.analyze", return_value=None):
@@ -34,7 +34,7 @@ class HmCombinedResearchParallelTests(unittest.TestCase):
     def test_age_source_receives_product_type_without_mutating_request(self):
         product = {"category": "블라우스", "product_type": "blouse", "gender": "women"}
         original = dict(product)
-        with patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"}, clear=True), \
+        with patch.dict(os.environ, {"RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "true"}, clear=True), \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.R2FabricPriceSource.analyze", return_value=()), \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.HmCustomerAgeResearchSource.profile", return_value={"category": "Tops"}) as age, \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.HmHistoricalPriceResearchSource.analyze", return_value=None):
@@ -58,7 +58,7 @@ class HmCombinedResearchParallelTests(unittest.TestCase):
             barrier.wait(timeout=2)
             return {"category": category, "sample_count": 17}
 
-        with patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"}), \
+        with patch.dict(os.environ, {"RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "true"}), \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.R2FabricPriceSource.analyze", side_effect=fabric), \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.HmCustomerAgeResearchSource.profile", age), \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.HmHistoricalPriceResearchSource.analyze", price):
@@ -84,8 +84,8 @@ class HmCombinedResearchParallelTests(unittest.TestCase):
             }
 
         with patch.dict(os.environ, {
-            "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true",
-            "VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY": "derived/research-aggregate-snapshots/synthetic.json",
+            "RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "true",
+            "RESEARCH_AGGREGATE_SNAPSHOT_KEY": "derived/research-aggregate-snapshots/synthetic.json",
         }), \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.R2FabricPriceSource.analyze", side_effect=fabric), \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.HmResearchAggregateSource.analyze", side_effect=aggregate) as hm_read, \
@@ -100,8 +100,8 @@ class HmCombinedResearchParallelTests(unittest.TestCase):
 
     def test_failed_aggregate_snapshot_does_not_read_other_r2_objects(self):
         with patch.dict(os.environ, {
-            "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true",
-            "VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY": "derived/research-aggregate-snapshots/broken.json",
+            "RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "true",
+            "RESEARCH_AGGREGATE_SNAPSHOT_KEY": "derived/research-aggregate-snapshots/broken.json",
         }), \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.R2FabricPriceSource.analyze", side_effect=AssertionError("standalone R2 read must not be attempted")) as fabric_read, \
              patch("fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.HmResearchAggregateSource.analyze", side_effect=ValueError("invalid snapshot")):

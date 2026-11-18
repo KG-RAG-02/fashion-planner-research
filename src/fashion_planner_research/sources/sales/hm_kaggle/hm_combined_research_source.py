@@ -41,7 +41,7 @@ class HmCombinedResearchSource:
         if research_enabled:
             result["customer_age_source_status"] = "configured"
             result["historical_price_source_status"] = "configured"
-        aggregate_key = os.getenv("VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY", "").strip()
+        aggregate_key = os.getenv("RESEARCH_AGGREGATE_SNAPSHOT_KEY", "").strip()
         _LOGGER.info(
             "H&M research mode: %s",
             "combined_aggregate_snapshot" if research_enabled and aggregate_key else

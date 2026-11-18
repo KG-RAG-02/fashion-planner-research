@@ -161,7 +161,7 @@ class FabricPriceR2SourceTests(unittest.TestCase):
         self.assertEqual(client.calls, [])
 
     def test_combined_source_keeps_intentionally_unconfigured_fabric_as_no_result(self):
-        with patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "false"}, clear=True):
+        with patch.dict(os.environ, {"RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "false"}, clear=True):
             result = HmCombinedResearchSource().analyze({"category": "Outerwear", "material": "cotton"})
         self.assertEqual(result["fabric_prices"], ())
         self.assertIsNone(result["fabric_price_error"])
@@ -173,7 +173,7 @@ class FabricPriceR2SourceTests(unittest.TestCase):
         env = {
             "R2_ACCOUNT_ID": "synthetic-account", "R2_BUCKET": "synthetic-bucket",
             "R2_ACCESS_KEY_ID": "synthetic-key", "R2_SECRET_ACCESS_KEY": "synthetic-secret",
-            "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "false",
+            "RESEARCH_HM_NONCOMMERCIAL_RESEARCH": "false",
         }
         with patch.dict(os.environ, env, clear=True), patch(
             "fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.R2FabricPriceSource.analyze",

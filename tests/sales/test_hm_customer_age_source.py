@@ -43,7 +43,7 @@ class HmCustomerAgeResearchTests(unittest.TestCase):
 
         source = HmCustomerAgeResearchSource(store=_NoStorageCalls())
         for value in (None, "", "  ", "false", "0", "no"):
-            env = {} if value is None else {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": value}
+            env = {} if value is None else {"RESEARCH_HM_NONCOMMERCIAL_RESEARCH": value}
             with self.subTest(value=value), patch.dict(os.environ, env, clear=True):
                 with self.assertRaisesRegex(CustomerAgeSourceError, "disabled by runtime settings"):
                     source.profile("Outerwear", gender="women")

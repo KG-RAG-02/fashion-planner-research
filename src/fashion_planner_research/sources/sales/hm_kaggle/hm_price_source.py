@@ -171,7 +171,7 @@ class HmHistoricalPriceResearchSource:
                gender: str | None, product_type: str | None, season: str | None) -> dict[str, Any] | None:
         conn = duckdb.connect()
         try:
-            extension_dir = os.getenv("VOGUE_DUCKDB_EXTENSION_DIRECTORY", "").strip()
+            extension_dir = os.getenv("RESEARCH_DUCKDB_EXTENSION_DIRECTORY", "").strip()
             if extension_dir:
                 conn.execute("SET extension_directory = " + _sql_string(extension_dir))
             try:

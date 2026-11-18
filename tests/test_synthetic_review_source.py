@@ -23,8 +23,8 @@ RESPONSE_SCHEMA = json.loads(
     (ROOT / "contracts/schemas/research-review-response.schema.json").read_text()
 )
 ENV = {
-    "VOGUE_AGENT_SERVICE_BEARER_TOKEN": "test-token",
-    "VOGUE_PROJECT07_DISABLE_DOTENV": "1",
+    "FASHION_PLANNER_SERVICE_TOKEN": "test-token",
+    "RESEARCH_DISABLE_DOTENV": "1",
     synthetic.REVIEW_SOURCE_ENV: synthetic.SYNTHETIC,
 }
 
