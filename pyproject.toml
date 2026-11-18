@@ -3,9 +3,9 @@ requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
 [project]
-name = "vogue-sales-market-review-agent"
+name = "fashion-planner-research"
 version = "0.1.0"
-description = "Evidence-backed post-planning sales and market review agent for VOGUE"
+description = "Fashion Planner의 판매·시장 검토 서비스"
 readme = "README.md"
 requires-python = ">=3.11"
 dependencies = ["jsonschema>=4.23,<5"]
@@ -14,10 +14,10 @@ dependencies = ["jsonschema>=4.23,<5"]
 r2 = ["boto3>=1.35,<2", "duckdb>=2.0,<3"]
 
 [project.scripts]
-vogue-sales-market-review-http = "market_research_agent.http_server:main"
+fashion-planner-research = "fashion_planner_research.http_server:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
 
 [tool.setuptools.package-data]
-market_research_agent = ["resources/**/*"]
+fashion_planner_research = ["resources/**/*"]

@@ -9,7 +9,7 @@ from unittest.mock import patch
 
 from jsonschema import Draft202012Validator
 
-from market_research_agent.http_server import make_handler, REVIEW_PATH
+from fashion_planner_research.http_server import make_handler, REVIEW_PATH
 
 ROOT = Path(__file__).resolve().parents[1]
 TOKEN = "test-only-token"
@@ -41,7 +41,7 @@ class CurrentReviewRouteTests(unittest.TestCase):
         env = {"VOGUE_AGENT_SERVICE_BEARER_TOKEN": TOKEN, "VOGUE_PROJECT07_DISABLE_DOTENV": "1",
                "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "0", "VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED": "0"}
         with patch.dict(os.environ, env, clear=True), patch(
-            "market_research_agent.http_server.HmCombinedResearchSource.analyze", return_value=research,
+            "fashion_planner_research.http_server.HmCombinedResearchSource.analyze", return_value=research,
         ) as source:
             handler_type.do_POST(handler)
         response = json.loads(handler.wfile.getvalue())

@@ -6,8 +6,8 @@ from concurrent.futures import ThreadPoolExecutor
 from copy import deepcopy
 from unittest.mock import patch
 
-from market_research_agent.llm.responses_api import OpenAIResponsesClient
-from market_research_agent.llm import target_audience
+from fashion_planner_research.llm.responses_api import OpenAIResponsesClient
+from fashion_planner_research.llm import target_audience
 
 
 VALID_OUTPUT = {
@@ -45,14 +45,14 @@ class TargetAudienceCacheTests(unittest.TestCase):
         self.assertEqual(client.model, "synthetic-model")
 
     def test_client_reports_missing_llm_api_key_without_sending_request(self):
-        from market_research_agent.llm.responses_api import LlmCallError
+        from fashion_planner_research.llm.responses_api import LlmCallError
 
         with patch.dict("os.environ", {"LLM_MODEL": "synthetic-model"}, clear=True):
             with self.assertRaisesRegex(LlmCallError, "LLM_API_KEY is required"):
                 OpenAIResponsesClient()
 
     def test_client_reports_missing_llm_model(self):
-        from market_research_agent.llm.responses_api import LlmCallError
+        from fashion_planner_research.llm.responses_api import LlmCallError
 
         with patch.dict("os.environ", {"LLM_API_KEY": "synthetic-env-key"}, clear=True):
             with self.assertRaisesRegex(LlmCallError, "LLM_MODEL is required"):

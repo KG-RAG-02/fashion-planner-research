@@ -19,4 +19,4 @@ customer fact.
 - `user_template.md`: human-readable input shape; runtime builds a reduced JSON payload directly
 - `examples.json`: synthetic behavior examples; not injected into model calls
 
-The prompt output is validated in `src/market_research_agent/llm/target_audience.py`. Keep its required fields synchronized with `_OUTPUT_FIELDS` and the prompt's JSON instructions.
+The prompt output is validated in `src/fashion_planner_research/llm/target_audience.py`. Keep its required fields synchronized with `_OUTPUT_FIELDS` and the prompt's JSON instructions.

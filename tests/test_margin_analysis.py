@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from market_research_agent.domain.apparel_costing import (
+from fashion_planner_research.domain.apparel_costing import (
     MarginAnalysisInputError,
     calculate_benchmark_margin_estimate,
     calculate_price_range_margin_analysis,

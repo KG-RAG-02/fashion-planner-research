@@ -11,18 +11,18 @@ import csv
 import io
 from unittest.mock import patch
 
-from market_research_agent.sources.sales.hm_kaggle import hm_customer_age_source as age_module
-from market_research_agent.sources.sales.hm_kaggle.duckdb_http import configure_httpfs
-from market_research_agent.sources.sales.hm_kaggle.hm_research_aggregate import (
+from fashion_planner_research.sources.sales.hm_kaggle import hm_customer_age_source as age_module
+from fashion_planner_research.sources.sales.hm_kaggle.duckdb_http import configure_httpfs
+from fashion_planner_research.sources.sales.hm_kaggle.hm_research_aggregate import (
     HmResearchAggregateSource, _mapping_digest, _run_aggregate_query, _snapshot_identifier,
     build_snapshot_payload, serialize_snapshot, upload_snapshot,
 )
-from market_research_agent.sources.sales.hm_kaggle.hm_customer_age_source import (
+from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source import (
     CustomerAgeSourceError,
     HmCustomerAgeResearchSource,
 )
-from market_research_agent.sources.market.fabric_price_r2_source import _REQUIRED_COLUMNS
-from market_research_agent.sources.shared.r2_object_store import R2ObjectStore, R2Settings
+from fashion_planner_research.sources.market.fabric_price_r2_source import _REQUIRED_COLUMNS
+from fashion_planner_research.sources.shared.r2_object_store import R2ObjectStore, R2Settings
 
 
 class FakeR2Client:
@@ -113,7 +113,7 @@ class CategoryAliasLookupTests(unittest.TestCase):
         self.assertTrue(result["customer_age_profile"]["gender_filter_applied"])
 
     def test_snapshot_price_prefers_exact_product_type_aggregate(self):
-        from market_research_agent.sources.sales.hm_kaggle.hm_customer_age_source import _MAPPING_PATH
+        from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source import _MAPPING_PATH
 
         mapping = json.loads(_MAPPING_PATH.read_text())
         def price(sample_count, median):
@@ -274,10 +274,10 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
         self.assertEqual(client.puts[0]["IfNoneMatch"], "*")
 
     def test_runtime_reads_one_snapshot_once_and_uses_its_versioned_profile(self):
-        from market_research_agent.sources.sales.hm_kaggle.hm_research_aggregate import (
+        from fashion_planner_research.sources.sales.hm_kaggle.hm_research_aggregate import (
             HmResearchAggregateSource, SCHEMA_VERSION, _mapping_digest,
         )
-        from market_research_agent.sources.sales.hm_kaggle.hm_customer_age_source import _MAPPING_PATH
+        from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source import _MAPPING_PATH
 
         mapping = json.loads(_MAPPING_PATH.read_text())
         age = {
@@ -313,7 +313,7 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
         payload = json.dumps(snapshot).encode()
         client = FakeSnapshotClient(payload)
         store = R2ObjectStore(R2Settings("account", "bucket", "key-id", "secret"), client=client)
-        from market_research_agent.sources.sales.hm_kaggle.hm_research_aggregate import output_key
+        from fashion_planner_research.sources.sales.hm_kaggle.hm_research_aggregate import output_key
         source = HmResearchAggregateSource(store=store, object_key=output_key(snapshot["snapshot_id"]))
         with patch.dict(os.environ, {"VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true"}):
             first = source.analyze({"category": "Outerwear", "product_type": "Coat", "gender": "women"})
@@ -325,7 +325,7 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
         self.assertEqual(client.head_count, 0)
 
     def test_runtime_rejects_retired_aggregate_snapshot_schema(self):
-        from market_research_agent.sources.sales.hm_kaggle.hm_research_aggregate import (
+        from fashion_planner_research.sources.sales.hm_kaggle.hm_research_aggregate import (
             HmResearchAggregateSource,
         )
 
@@ -339,7 +339,7 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
             HmResearchAggregateSource._validate_snapshot(retired)
 
     def test_current_snapshot_requires_bundled_fabric_listing(self):
-        from market_research_agent.sources.sales.hm_kaggle.hm_research_aggregate import (
+        from fashion_planner_research.sources.sales.hm_kaggle.hm_research_aggregate import (
             SCHEMA_VERSION, HmResearchAggregateSource,
         )
 
@@ -383,7 +383,7 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
         age_module._CACHE_INFLIGHT.clear()
 
     def _source(self, client):
-        from market_research_agent.sources.shared.r2_object_store import R2ObjectStore
+        from fashion_planner_research.sources.shared.r2_object_store import R2ObjectStore
         store = R2ObjectStore(
             R2Settings("account", "bucket", "key-id", "secret"), client=client,
         )
@@ -416,7 +416,7 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
         self.assertNotIn("customer_001", json.dumps(result))
 
     def test_korean_category_alias_selects_hm_knitwear_snapshot_profile(self):
-        from market_research_agent.sources.sales.hm_kaggle.hm_customer_age_source import (
+        from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source import (
             _MAPPING_PATH, _mapped_requested_category,
         )
         mapping = json.loads(_MAPPING_PATH.read_text(encoding="utf-8"))
@@ -434,12 +434,12 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
         self.assertEqual(selected["historical_price_source_status"], "no_match")
 
     def test_korean_tops_category_selects_real_tops_price_and_customer_aggregates(self):
-        from market_research_agent.sources.sales.hm_kaggle.hm_customer_age_source import (
+        from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source import (
             _MAPPING_PATH, _mapped_requested_category,
         )
         mapping = json.loads(_MAPPING_PATH.read_text(encoding="utf-8"))
         self.assertEqual(_mapped_requested_category("상의", mapping), "Tops")
-        from market_research_agent.sources.sales.hm_kaggle.hm_customer_age_source import (
+        from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source import (
             _map_gender, _map_product_type, _map_requested_category,
         )
         fuzzy = _map_requested_category("Topswear", mapping)
@@ -524,7 +524,7 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
                 }
                 raise error
 
-        from market_research_agent.sources.shared.r2_object_store import R2ObjectError
+        from fashion_planner_research.sources.shared.r2_object_store import R2ObjectError
         store = R2ObjectStore(
             R2Settings("account", "bucket", "key-id", "secret"), client=FailingReadClient(),
         )

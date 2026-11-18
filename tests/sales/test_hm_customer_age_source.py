@@ -3,7 +3,7 @@ from __future__ import annotations
 import os
 import unittest
 
-from market_research_agent.sources.sales.hm_kaggle.hm_customer_age_source import (
+from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source import (
     CustomerAgeSourceError,
     HmCustomerAgeResearchSource,
     _build_profiles,

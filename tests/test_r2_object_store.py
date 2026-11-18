@@ -4,7 +4,7 @@ import io
 import unittest
 from unittest.mock import patch
 
-from market_research_agent.sources.shared.r2_object_store import (
+from fashion_planner_research.sources.shared.r2_object_store import (
     R2ConfigurationError,
     R2ObjectError,
     R2ObjectStore,

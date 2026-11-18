@@ -9,7 +9,7 @@ import unittest
 from email.message import Message
 from unittest.mock import patch
 
-from market_research_agent.http_server import REVIEW_CONTRACT_VERSION, _validate_review_result, make_handler, serve
+from fashion_planner_research.http_server import REVIEW_CONTRACT_VERSION, _validate_review_result, make_handler, serve
 
 
 class Project07ReviewHttpTests(unittest.TestCase):
@@ -50,9 +50,9 @@ class Project07ReviewHttpTests(unittest.TestCase):
         test_env.update(env_overrides or {})
         with (
             patch.dict(os.environ, test_env),
-            patch("market_research_agent.http_server.HmCombinedResearchSource.analyze", return_value=research_bundle),
-            patch("market_research_agent.http_server.fetch_usd_krw_reference_rate", return_value=fx_reference),
-            patch("market_research_agent.http_server.propose_target_audience",
+            patch("fashion_planner_research.http_server.HmCombinedResearchSource.analyze", return_value=research_bundle),
+            patch("fashion_planner_research.http_server.fetch_usd_krw_reference_rate", return_value=fx_reference),
+            patch("fashion_planner_research.http_server.propose_target_audience",
                   side_effect=llm_failure if llm_failure is not None else None,
                   return_value=llm_proposal),
         ):
@@ -97,7 +97,7 @@ class Project07ReviewHttpTests(unittest.TestCase):
                 "VOGUE_PROJECT07_DISABLE_DOTENV": "true",
                 "VOGUE_AGENT_SERVICE_BEARER_TOKEN": "synthetic-service-token",
             }, clear=True),
-            patch("market_research_agent.http_server.ThreadingHTTPServer", return_value=server) as server_type,
+            patch("fashion_planner_research.http_server.ThreadingHTTPServer", return_value=server) as server_type,
         ):
             serve("0.0.0.0", 8766, service_mode=True)
         self.assertEqual(server_type.call_args.args[0], ("0.0.0.0", 8766))
@@ -356,7 +356,7 @@ class Project07ReviewHttpTests(unittest.TestCase):
                 _validate_review_result(result, request_id)
 
     def test_optional_llm_failure_marks_successful_research_as_partial(self):
-        from market_research_agent.llm.responses_api import LlmCallError
+        from fashion_planner_research.llm.responses_api import LlmCallError
 
         prices = {
             "source_id": "synthetic-hm-research",

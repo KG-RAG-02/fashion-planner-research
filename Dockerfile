@@ -44,4 +44,4 @@ EXPOSE 8766
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
     CMD ["python", "-c", "import urllib.request as u; r = u.build_opener(u.ProxyHandler({})).open('http://127.0.0.1:8766/api/health', timeout=3); raise SystemExit(0 if r.status == 200 else 1)"]
 
-CMD ["vogue-sales-market-review-http", "--service-mode", "--host", "0.0.0.0", "--port", "8766"]
+CMD ["fashion-planner-research", "--service-mode", "--host", "0.0.0.0", "--port", "8766"]

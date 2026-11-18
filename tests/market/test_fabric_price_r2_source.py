@@ -7,12 +7,12 @@ import os
 import unittest
 from unittest.mock import patch
 
-from market_research_agent.sources.market.fabric_price_r2_source import (
+from fashion_planner_research.sources.market.fabric_price_r2_source import (
     FabricPriceSourceError,
     R2FabricPriceSource,
 )
-from market_research_agent.sources.sales.hm_kaggle.hm_combined_research_source import HmCombinedResearchSource
-from market_research_agent.sources.shared.r2_object_store import R2ObjectStore, R2Settings
+from fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source import HmCombinedResearchSource
+from fashion_planner_research.sources.shared.r2_object_store import R2ObjectStore, R2Settings
 
 
 _COLUMNS = (
@@ -81,7 +81,7 @@ def _store(client: FakeR2Client) -> R2ObjectStore:
 
 class FabricPriceR2SourceTests(unittest.TestCase):
     def setUp(self) -> None:
-        from market_research_agent.sources.market import fabric_price_r2_source
+        from fashion_planner_research.sources.market import fabric_price_r2_source
         with fabric_price_r2_source._CACHE_LOCK:
             fabric_price_r2_source._CACHE.clear()
             fabric_price_r2_source._OBJECT_CACHE.clear()
@@ -139,7 +139,7 @@ class FabricPriceR2SourceTests(unittest.TestCase):
                 self.assertIsNone(result[0]["sources"][0]["unit_price_krw_per_meter"])
 
     def test_korean_fiber_aliases_match_without_misclassifying_modal_as_wool(self):
-        from market_research_agent.sources.market.fabric_price_r2_source import _material_terms
+        from fashion_planner_research.sources.market.fabric_price_r2_source import _material_terms
 
         self.assertIn("린넨", _material_terms("리넨"))
         self.assertIn("polyester", _material_terms("폴리에스테르"))
@@ -176,7 +176,7 @@ class FabricPriceR2SourceTests(unittest.TestCase):
             "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "false",
         }
         with patch.dict(os.environ, env, clear=True), patch(
-            "market_research_agent.sources.sales.hm_kaggle.hm_combined_research_source.R2FabricPriceSource.analyze",
+            "fashion_planner_research.sources.sales.hm_kaggle.hm_combined_research_source.R2FabricPriceSource.analyze",
             return_value=(),
         ):
             result = HmCombinedResearchSource().analyze({"category": "Outerwear", "material": "silk"})

@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import unittest
 
-from market_research_agent import build_sales_market_review
+from fashion_planner_research import build_sales_market_review
 
 
 class SalesMarketReviewAdapterTests(unittest.TestCase):

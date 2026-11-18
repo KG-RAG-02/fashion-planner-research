@@ -7,7 +7,7 @@ import tempfile
 import unittest
 from unittest.mock import patch
 
-from market_research_agent.sources.shared.r2_source_manifest import r2_source_key
+from fashion_planner_research.sources.shared.r2_source_manifest import r2_source_key
 
 
 class R2SourceManifestTests(unittest.TestCase):
