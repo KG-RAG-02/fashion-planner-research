@@ -243,9 +243,16 @@ def _safe_failure_category(exc: Exception) -> str:
     return type(exc).__name__
 
 
+def _mapping_sha256(mapping: dict[str, Any]) -> str:
+    """카테고리 매핑 내용의 SHA-256. 매핑의 버전 대신 이 값으로 식별한다."""
+    return hashlib.sha256(
+        json.dumps(mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def _build_profiles(
     rows: list[tuple[Any, ...]], *, requested_category: str, gender: str | None,
-    mapping_id: str, mapping_version: str, source_refs: tuple[dict[str, str], ...],
+    mapping_id: str, mapping_sha256: str, source_refs: tuple[dict[str, str], ...],
 ) -> dict[str, Any] | None:
     candidates = [row for row in rows if str(row[0]).strip().casefold() == requested_category.strip().casefold()]
     gender_key = (gender or "").casefold()
@@ -290,7 +297,7 @@ def _build_profiles(
         "permission_status": "non_commercial_research_only",
         "operational_eligible": False,
         "category": requested_category,
-        "category_mapping": {"mapping_id": mapping_id, "mapping_version": mapping_version,
+        "category_mapping": {"mapping_id": mapping_id, "mapping_sha256": mapping_sha256,
                              "matching": "product_type_exact_then_product_group_fallback"},
         "product_merchandise_segment": expected_group if expected_group != "__all__" else "all_mapped_segments",
         "unique_customer_denominator": None if small_cell_present else denominator,
@@ -386,10 +393,8 @@ class HmCustomerAgeResearchSource:
                          sum(object_sizes), time.perf_counter() - metadata_started)
             stage = "category_mapping"
             mapping = json.loads(_MAPPING_PATH.read_text(encoding="utf-8"))
-            mapping_digest = hashlib.sha256(
-                json.dumps(mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest()
-            cache_key = tuple((store.settings.bucket, *keys, *versions, mapping["mapping_version"], mapping_digest))
+            mapping_digest = _mapping_sha256(mapping)
+            cache_key = tuple((store.settings.bucket, *keys, *versions, mapping_digest))
             while True:
                 with _CACHE_LOCK:
                     if cache_key in _CACHE:
@@ -578,7 +583,7 @@ class HmCustomerAgeResearchSource:
                 for gender_key, _segment, gender in genders:
                     profile = _build_profiles(
                         rows, requested_category=category, gender=gender,
-                        mapping_id=mapping["mapping_id"], mapping_version=mapping["mapping_version"],
+                        mapping_id=mapping["mapping_id"], mapping_sha256=_mapping_sha256(mapping),
                         source_refs=tuple({"object_key": key, "version": version}
                                           for key, version in zip(keys, versions, strict=True)),
                     )
@@ -594,7 +599,7 @@ class HmCustomerAgeResearchSource:
                 for gender_key, _segment, gender in genders:
                     profile = _build_profiles(
                         rows, requested_category=mapped_category, gender=gender,
-                        mapping_id=mapping["mapping_id"], mapping_version=mapping["mapping_version"],
+                        mapping_id=mapping["mapping_id"], mapping_sha256=_mapping_sha256(mapping),
                         source_refs=tuple({"object_key": key, "version": version}
                                           for key, version in zip(keys, versions, strict=True)),
                     )

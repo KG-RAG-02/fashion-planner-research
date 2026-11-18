@@ -166,7 +166,7 @@ def _orchestrator_review_projection(review: dict[str, Any]) -> dict[str, Any]:
             "rate", "rate_date", "provider", "rate_type", "fallback_used",
         ))
         row["category_mapping"] = pick(row.get("category_mapping"), (
-            "mapped_category", "mapping_id", "mapping_version", "matching", "requested_category",
+            "mapped_category", "mapping_id", "mapping_sha256", "matching", "requested_category",
             "method", "score", "threshold", "requested_product_type", "product_type_mapping",
             "gender_mapping",
         ))
@@ -183,7 +183,7 @@ def _orchestrator_review_projection(review: dict[str, Any]) -> dict[str, Any]:
             "confidence_counts", "method",
         ))
         row["category_mapping"] = pick(row.get("category_mapping"), (
-            "mapping_id", "mapping_version", "matched_source_categories", "matched_terms",
+            "mapping_id", "mapping_sha256", "matched_source_categories", "matched_terms",
         ))
 
     # The orchestrator reads these fields from the dedicated summary objects below. The

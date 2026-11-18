@@ -21,7 +21,7 @@ class HmCustomerAgeResearchTests(unittest.TestCase):
         ]
         result = _build_profiles(
             rows, requested_category="outerwear", gender="women",
-            mapping_id="map", mapping_version="v1",
+            mapping_id="map", mapping_sha256="0" * 64,
             source_refs=({"object_key": "customers.csv", "version": "v1"},),
         )
         self.assertIsNone(result["unique_customer_denominator"])

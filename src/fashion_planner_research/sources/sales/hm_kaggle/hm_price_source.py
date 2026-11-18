@@ -2,7 +2,6 @@
 
 from __future__ import annotations
 
-import hashlib
 import json
 import logging
 import os
@@ -19,7 +18,9 @@ from ....sources.shared.r2_source_manifest import r2_source_key
 from ....resource_paths import CONFIGS_DIR
 from ....runtime_settings import hm_research_noncommercial_enabled
 from .duckdb_http import configure_httpfs
-from .hm_customer_age_source import _map_gender, _map_product_type, _map_requested_category, _safe_failure_category
+from .hm_customer_age_source import (
+    _map_gender, _map_product_type, _map_requested_category, _mapping_sha256, _safe_failure_category,
+)
 
 
 class HmPriceSourceError(RuntimeError):
@@ -99,12 +100,10 @@ class HmHistoricalPriceResearchSource:
                          sum(object_sizes), time.perf_counter() - metadata_started)
             stage = "category_mapping"
             mapping = json.loads(_MAPPING_PATH.read_text(encoding="utf-8"))
-            mapping_digest = hashlib.sha256(
-                json.dumps(mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-            ).hexdigest()
+            mapping_digest = _mapping_sha256(mapping)
             versions = tuple(ref["version"] for ref in object_refs)
             cache_key = (store.settings.bucket, articles_key, transactions_key, *versions,
-                         mapping["mapping_version"], mapping_digest,
+                         mapping_digest,
                          category.strip().casefold(), (gender or "").strip().casefold(),
                          (product_type or "").strip().casefold(), (season or "").strip().casefold())
             with _CACHE_LOCK:
@@ -257,8 +256,7 @@ class HmHistoricalPriceResearchSource:
                 "season_filter_status": "unsupported_source_dimension" if season else "not_provided",
                 "category_mapping": {
                     "mapping_id": mapping["mapping_id"],
-                    "mapping_version": mapping["mapping_version"],
-                    "mapping_fingerprint": mapping_digest,
+                    "mapping_sha256": mapping_digest,
                     **category_mapping,
                     "matching": "requested_product_type_exact_when_supplied; otherwise_category_similarity",
                     "mapped_category": query_category,

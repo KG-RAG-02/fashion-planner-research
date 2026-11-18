@@ -735,7 +735,7 @@ class ReviewHttpTests(unittest.TestCase):
         for route in (
             "/v1/agents/research/runs",
             "/v1/agents/research/structured-runs",
-            "/v1/agents/market-research-agent/runs",
+            "/v1/agents/unknown-agent/runs",
         ):
             with self.subTest(route=route):
                 status, response = self.request("POST", route, self.valid_review())

@@ -1,5 +1,6 @@
 {
-  "schema_version": "target-audience-hypothesis-examples/1.0",
+  "schema": "target-audience-hypothesis-examples",
+  "schema_version": "1.0.0",
   "examples": [
     {
       "case": "historical_age_available",

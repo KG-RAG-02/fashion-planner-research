@@ -20,8 +20,8 @@ from typing import Any
 
 from ..llm.target_audience import propose_target_audience
 from ..resource_paths import CONFIGS_DIR, RESOURCES_DIR
-from .sales.hm_kaggle.hm_customer_age_source import _map_product_type, _map_requested_category
-from .sales.hm_kaggle.hm_research_aggregate import HmResearchAggregateSource, _mapping_digest, build_snapshot_payload
+from .sales.hm_kaggle.hm_customer_age_source import _map_product_type, _map_requested_category, _mapping_sha256
+from .sales.hm_kaggle.hm_research_aggregate import HmResearchAggregateSource, build_snapshot_payload
 
 REVIEW_SOURCE_ENV = "RESEARCH_REVIEW_SOURCE"
 SYNTHETIC = "synthetic"
@@ -151,9 +151,8 @@ def synthetic_research_bundle(product: dict[str, Any]) -> dict[str, Any]:
         }
     snapshot = build_snapshot_payload(
         _aggregate_rows(fixture, _candidate_categories(product, mapping)),
-        source_refs=(source_ref,), mapping=mapping, mapping_fingerprint=_mapping_digest(mapping),
+        source_refs=(source_ref,), mapping=mapping, mapping_sha256=_mapping_sha256(mapping),
         fabric_source_ref=fabric_ref, fabric_listing_csv=fabric_csv,
-        aggregation_version=f"synthetic-review-fixture;sha256={fixture_sha256}",
     )
     bundle = HmResearchAggregateSource._select(snapshot, product)
     notice = fixture["notice"]

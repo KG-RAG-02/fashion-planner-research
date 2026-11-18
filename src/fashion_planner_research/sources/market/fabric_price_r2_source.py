@@ -6,6 +6,7 @@ import csv
 from decimal import Decimal, InvalidOperation
 import hashlib
 import io
+import json
 import logging
 import os
 import re
@@ -45,6 +46,10 @@ _MATERIAL_ALIASES = {
     "leather": ("레더", "가죽"), "polyurethane": ("폴리우레탄", "우레탄"),
     "knit": ("니트", "편물", "knitted"),
 }
+# 소재 별칭표의 내용 해시. 표를 바꾸면 응답의 mapping_sha256이 달라진다.
+_MATERIAL_TERMS_SHA256 = hashlib.sha256(
+    json.dumps(_MATERIAL_ALIASES, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+).hexdigest()
 _CACHE: OrderedDict[tuple[str, str, str, str], tuple[dict[str, Any], ...]] = OrderedDict()
 _OBJECT_CACHE: OrderedDict[tuple[str, str, str], tuple[bytes, str]] = OrderedDict()
 _CACHE_LOCK = threading.Lock()
@@ -359,8 +364,8 @@ class R2FabricPriceSource:
                 "verified_price_per_meter_available": "observed" in per_meter_statuses,
                 "cost_per_meter_operational_eligible": False,
                 "category_mapping": {
-                    "mapping_id": "project07-fabric-material-terms",
-                    "mapping_version": "1.1",
+                    "mapping_id": "fabric-material-terms",
+                    "mapping_sha256": _MATERIAL_TERMS_SHA256,
                     "matching": "normalized material term substring against product name, category, composition, or construction",
                     "matched_source_categories": [category],
                     "matched_terms": list(terms),

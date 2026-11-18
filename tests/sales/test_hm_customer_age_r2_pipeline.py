@@ -14,7 +14,7 @@ from unittest.mock import patch
 from fashion_planner_research.sources.sales.hm_kaggle import hm_customer_age_source as age_module
 from fashion_planner_research.sources.sales.hm_kaggle.duckdb_http import configure_httpfs
 from fashion_planner_research.sources.sales.hm_kaggle.hm_research_aggregate import (
-    HmResearchAggregateSource, _mapping_digest, _run_aggregate_query, _snapshot_identifier,
+    HmResearchAggregateSource, _run_aggregate_query, _snapshot_identifier, aggregation_sql_sha256,
     build_snapshot_payload, serialize_snapshot, upload_snapshot,
 )
 from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source import (
@@ -22,6 +22,7 @@ from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source imp
     HmCustomerAgeResearchSource,
 )
 from fashion_planner_research.resource_paths import CONFIGS_DIR
+from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source import _mapping_sha256
 from fashion_planner_research.sources.market.fabric_price_r2_source import _REQUIRED_COLUMNS
 from fashion_planner_research.sources.shared.r2_object_store import R2ObjectStore, R2Settings
 
@@ -128,7 +129,7 @@ class CategoryAliasLookupTests(unittest.TestCase):
                                      "currency": None, "unit": "normalized_source_price; currency not provided"},
                 "sources": [],
                 "category_mapping": {"mapping_id": mapping["mapping_id"],
-                                     "mapping_version": mapping["mapping_version"],
+                                     "mapping_sha256": _mapping_sha256(mapping),
                                      "matching": "product_type_exact"},
             }
         snapshot = {
@@ -276,7 +277,7 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
 
     def test_runtime_reads_one_snapshot_once_and_uses_its_versioned_profile(self):
         from fashion_planner_research.sources.sales.hm_kaggle.hm_research_aggregate import (
-            HmResearchAggregateSource, SCHEMA_VERSION, _mapping_digest,
+            HmResearchAggregateSource, SNAPSHOT_SCHEMA, SNAPSHOT_SCHEMA_VERSION,
         )
         from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source import _MAPPING_PATH
 
@@ -295,14 +296,13 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
                                  "currency": None, "unit": "normalized_source_price; currency not provided",
                                  "statistic": "transaction_price_distribution; unweighted transaction rows"},
             "sources": [], "category_mapping": {"mapping_id": mapping["mapping_id"],
-                "mapping_version": mapping["mapping_version"], "mapping_fingerprint": _mapping_digest(mapping),
+                "mapping_sha256": _mapping_sha256(mapping),
                 "matching": "product_type_exact_then_product_group_fallback"},
         }
         fabric_csv = ",".join(sorted(_REQUIRED_COLUMNS)) + "\n"
         snapshot = {
-            "schema_version": SCHEMA_VERSION, "snapshot_id": "",
-            "source_objects": [], "mapping_version": mapping["mapping_version"],
-            "mapping_fingerprint": _mapping_digest(mapping),
+            "schema": SNAPSHOT_SCHEMA, "schema_version": SNAPSHOT_SCHEMA_VERSION, "snapshot_id": "",
+            "source_objects": [], "mapping_sha256": _mapping_sha256(mapping),
             "fabric_source": {"object_key": "fabric.csv", "version": "fixture-v1",
                               "sha256": hashlib.sha256(fabric_csv.encode()).hexdigest()},
             "fabric_listing_csv": fabric_csv,
@@ -331,7 +331,7 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
         )
 
         retired = {
-            "schema_version": "hm-sales-market-aggregate/1.0",
+            "schema": "retired-snapshot-schema", "schema_version": "1.0.0",
             "snapshot_id": "a" * 64,
             "source_objects": [],
             "profiles": [],
@@ -341,17 +341,37 @@ class AggregateSnapshotUploadTests(unittest.TestCase):
 
     def test_current_snapshot_requires_bundled_fabric_listing(self):
         from fashion_planner_research.sources.sales.hm_kaggle.hm_research_aggregate import (
-            SCHEMA_VERSION, HmResearchAggregateSource,
+            SNAPSHOT_SCHEMA, SNAPSHOT_SCHEMA_VERSION, HmResearchAggregateSource,
         )
 
         incomplete = {
-            "schema_version": SCHEMA_VERSION,
+            "schema": SNAPSHOT_SCHEMA, "schema_version": SNAPSHOT_SCHEMA_VERSION,
             "snapshot_id": "a" * 64,
             "source_objects": [],
             "profiles": [],
         }
         with self.assertRaisesRegex(ValueError, "schema is invalid"):
             HmResearchAggregateSource._validate_snapshot(incomplete)
+
+
+class SnapshotIdentityTests(unittest.TestCase):
+    def test_aggregation_sql_hash_is_stable_and_does_not_depend_on_settings(self):
+        first = aggregation_sql_sha256()
+        self.assertRegex(first, "^[0-9a-f]{64}$")
+        with patch.dict(os.environ, {"R2_BUCKET": "another-bucket"}):
+            self.assertEqual(aggregation_sql_sha256(), first)
+
+    def test_output_key_uses_the_default_or_configured_prefix(self):
+        from fashion_planner_research.sources.sales.hm_kaggle.hm_research_aggregate import output_key
+
+        snapshot_id = "a" * 64
+        with patch.dict(os.environ, {}, clear=True):
+            self.assertEqual(output_key(snapshot_id), f"derived/research-aggregate-snapshots/{snapshot_id}.json")
+        with patch.dict(os.environ, {"RESEARCH_AGGREGATE_SNAPSHOT_PREFIX": "/team/snapshots/"}, clear=True):
+            self.assertEqual(output_key(snapshot_id), f"team/snapshots/{snapshot_id}.json")
+        with patch.dict(os.environ, {"RESEARCH_AGGREGATE_SNAPSHOT_PREFIX": "../outside"}, clear=True):
+            with self.assertRaises(CustomerAgeSourceError):
+                output_key(snapshot_id)
 
 
 class DuckDBHttpSettingsTests(unittest.TestCase):
@@ -404,7 +424,7 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
         ]
         profile = age_module._build_profiles(
             rows, requested_category="Outerwear", gender="women", mapping_id="map",
-            mapping_version="v1", source_refs=(),
+            mapping_sha256="0" * 64, source_refs=(),
         )
         source = self._source(client)
         with patch.dict(sys.modules, {"duckdb": FakeDuckDB}), patch.object(
@@ -459,7 +479,7 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
                   "price_statistics": {"minimum": 1, "p25": 2, "median": 3, "p75": 4,
                                        "maximum": 5, "mean": 3}, "sources": [],
                   "period": {}, "channel_codes": [], "article_count": 2,
-                  "category_mapping": {"mapping_id": "m", "mapping_version": "v"},
+                  "category_mapping": {"mapping_id": "m", "mapping_sha256": "0" * 64},
                   "merchandise_segment": "__all__"}},
             {"category": "Tops", "segment": "ladieswear",
              "customer_age_profile": {"category": "Tops", "unique_customer_denominator": 60},
@@ -467,7 +487,7 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
                   "price_statistics": {"minimum": 1, "p25": 2, "median": 3, "p75": 4,
                                        "maximum": 5, "mean": 3}, "sources": [],
                   "period": {}, "channel_codes": [], "article_count": 1,
-                  "category_mapping": {"mapping_id": "m", "mapping_version": "v"},
+                  "category_mapping": {"mapping_id": "m", "mapping_sha256": "0" * 64},
                   "merchandise_segment": "ladieswear"}},
         ]}
         selected = HmResearchAggregateSource._select(snapshot, {"category": "상의"})
@@ -663,14 +683,15 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
             }
             snapshot = build_snapshot_payload(
                 aggregate_rows, source_refs=refs, mapping=mapping,
-                mapping_fingerprint=_mapping_digest(mapping),
+                mapping_sha256=_mapping_sha256(mapping),
                 fabric_source_ref=fabric_source_ref, fabric_listing_csv=fabric_csv,
+                aggregation_sql_sha256=aggregation_sql_sha256(),
             )
             rebuilt_snapshot = build_snapshot_payload(
                 aggregate_rows, source_refs=refs, mapping=mapping,
-                mapping_fingerprint=_mapping_digest(mapping),
-                aggregation_version="p07-hm-aggregate/next",
+                mapping_sha256=_mapping_sha256(mapping),
                 fabric_source_ref=fabric_source_ref, fabric_listing_csv=fabric_csv,
+                aggregation_sql_sha256="0" * 64,
             )
             self.assertNotEqual(snapshot["snapshot_id"], rebuilt_snapshot["snapshot_id"])
             payload, _digest = serialize_snapshot(snapshot)

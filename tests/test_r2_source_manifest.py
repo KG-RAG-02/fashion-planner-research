@@ -15,7 +15,7 @@ class R2SourceManifestTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as tmp:
             path = Path(tmp) / "manifest.json"
             path.write_text(json.dumps({
-                "schema_version": "project07-r2-source-manifest/1.0",
+                "schema": "r2-source-manifest", "schema_version": "1.0.0",
                 "objects": {"fabric_prices": "synthetic/from-manifest.csv"},
             }), encoding="utf-8")
             with patch.dict(os.environ, {

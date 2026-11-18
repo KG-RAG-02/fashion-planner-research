@@ -30,7 +30,8 @@ def r2_source_key(name: str, *, default: str) -> str:
     except (OSError, json.JSONDecodeError):
         raise ValueError("The configured R2 source manifest is invalid or unreadable.") from None
     if payload is not None:
-        if not isinstance(payload, dict) or payload.get("schema_version") != "project07-r2-source-manifest/1.0":
+        if (not isinstance(payload, dict) or payload.get("schema") != "r2-source-manifest"
+                or payload.get("schema_version") != "1.0.0"):
             raise ValueError("The configured R2 source manifest has an unsupported schema.")
         objects = payload.get("objects")
         if not isinstance(objects, dict):

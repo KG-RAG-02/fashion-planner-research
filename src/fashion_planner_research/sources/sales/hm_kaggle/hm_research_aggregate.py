@@ -1,4 +1,4 @@
-"""Build and read one versioned R2 snapshot for all product-review sources.
+"""Build and read one content-addressed R2 snapshot for all product-review sources.
 
 H&M customer and transaction rows become suppressed category aggregates. The
 bounded owner-provided fabric listing CSV is bundled so a review can fetch all
@@ -26,13 +26,14 @@ from ....runtime_settings import hm_research_noncommercial_enabled
 from .duckdb_http import configure_httpfs
 from .hm_customer_age_source import (
     _CSV_COLUMNS, _MAPPING_PATH, _build_profiles, _checked_key, _configure_age_duckdb, _map_gender, _map_product_type,
-    _map_requested_category,
+    _map_requested_category, _mapping_sha256,
 )
 from .hm_price_source import _sql_string
 
 
-SCHEMA_VERSION = "hm-sales-market-aggregate/1.2"
-_AGGREGATION_VERSION = "p07-hm-aggregate/4"
+# 스냅샷 형식의 이름과 버전. 이름에는 버전을 넣지 않는다.
+SNAPSHOT_SCHEMA = "research-aggregate-snapshot"
+SNAPSHOT_SCHEMA_VERSION = "1.0.0"
 _MAX_SOURCE_BYTES = {
     "hm_customers": 300_000_000,
     "hm_articles": 50_000_000,
@@ -40,18 +41,12 @@ _MAX_SOURCE_BYTES = {
 }
 _MAX_SNAPSHOT_BYTES = 16_000_000
 _MAX_FABRIC_BYTES = 1_000_000
-_OUTPUT_PREFIX = "derived/research-aggregate-snapshots"
+_DEFAULT_OUTPUT_PREFIX = "derived/research-aggregate-snapshots"
 _LOGGER = logging.getLogger(__name__)
 _CACHE: OrderedDict[tuple[str, ...], dict[str, Any]] = OrderedDict()
 _INFLIGHT: dict[tuple[str, ...], Future[dict[str, Any]]] = {}
 _LOCK = threading.Lock()
 _CACHE_MAX_SNAPSHOTS = 4
-
-
-def _mapping_digest(mapping: dict[str, Any]) -> str:
-    return hashlib.sha256(
-        json.dumps(mapping, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
-    ).hexdigest()
 
 
 def _snapshot_identifier(snapshot: dict[str, Any]) -> str:
@@ -185,6 +180,62 @@ def _aggregate_sql(settings: R2Settings, keys: tuple[str, str, str]) -> tuple[st
     return age_sql, price_sql
 
 
+def _stage_statements(settings: R2Settings, keys: tuple[str, str, str]) -> dict[str, tuple[str, ...]]:
+    """단계별로 실행하는 SQL. 마지막 문장이 결과 행을 돌려주는 집계 쿼리다.
+
+    연령 단계는 큰 원격 입력을 먼저 임시 테이블로 만든 뒤 조인한다. 스캔 버퍼와
+    고유 고객 해시 상태가 동시에 커지지 않게 하려는 것이다.
+    """
+    age_sql, price_sql = _aggregate_sql(settings, keys)
+    customers_uri, articles_uri, transactions_uri = (
+        _sql_string(f"s3://{settings.bucket}/{key}") for key in keys
+    )
+    customer_schema = "{" + _CSV_COLUMNS + "}"
+    age_select = age_sql[age_sql.index("        SELECT category,"):]
+    age_statements = (
+        "CREATE TEMP TABLE hm_age_transactions AS "
+        f"SELECT customer_id, article_id, t_dat FROM read_parquet({transactions_uri})",
+        f"""
+                    CREATE TEMP TABLE hm_age_articles AS
+                    SELECT a.article_id, a.index_group_name,
+                           COALESCE(type_map.mapped_category, group_map.mapped_category) AS category
+                    FROM read_parquet({articles_uri}) AS a
+                    LEFT JOIN hm_category_map AS type_map
+                      ON type_map.dimension = 'type'
+                     AND lower(trim(a.product_type_name)) = lower(trim(type_map.source_value))
+                    LEFT JOIN hm_category_map AS group_map
+                      ON group_map.dimension = 'group'
+                     AND lower(trim(a.product_group_name)) = lower(trim(group_map.source_value))
+                """,
+        f"""
+                    CREATE TEMP TABLE hm_age_customers AS
+                    SELECT customer_id, age FROM read_csv(
+                        {customers_uri}, header=true, delim=',', columns={customer_schema}, sample_size=1000
+                    ) WHERE customer_id IS NOT NULL AND trim(customer_id) <> ''
+                """,
+        """
+                    WITH joined AS (
+                        SELECT a.category, a.index_group_name, t.customer_id, c.age,
+                               TRY_CAST(t.t_dat AS DATE) AS transaction_date
+                        FROM hm_age_transactions AS t
+                        INNER JOIN hm_age_articles AS a USING (article_id)
+                        INNER JOIN hm_age_customers AS c USING (customer_id)
+                        WHERE a.category IS NOT NULL AND t.customer_id IS NOT NULL
+                    )
+                """ + age_select,
+    )
+    return {"age": age_statements, "price": (price_sql,)}
+
+
+def aggregation_sql_sha256() -> str:
+    """집계 SQL의 SHA-256. 버킷·키·자격 증명 대신 자리표시자를 넣어 계산한다."""
+    placeholder = R2Settings("{account}", "{bucket}", "{access-key}", "{secret}")
+    statements = _stage_statements(placeholder, ("{hm_customers}", "{hm_articles}", "{hm_transactions}"))
+    return hashlib.sha256(
+        json.dumps(statements, ensure_ascii=False, sort_keys=True, separators=(",", ":")).encode("utf-8")
+    ).hexdigest()
+
+
 def _run_aggregate_query(
     duckdb: Any, settings: R2Settings, keys: tuple[str, str, str], mapping: dict[str, Any],
 ) -> list[tuple[Any, ...]]:
@@ -192,7 +243,7 @@ def _run_aggregate_query(
     source_rows.extend((key, "group", value) for key, value in mapping["product_group_name"].items())
     endpoint = urlsplit(settings.endpoint).netloc if settings.endpoint else f"{settings.account_id}.r2.cloudflarestorage.com"
     rows: list[tuple[Any, ...]] = []
-    for stage, query in zip(("age", "price"), _aggregate_sql(settings, keys), strict=True):
+    for stage, statements in _stage_statements(settings, keys).items():
         # Release the previous query's hash/quantile state before the next
         # query starts. DuckDB can retain allocator blocks on a live connection.
         connection = duckdb.connect()
@@ -210,45 +261,9 @@ def _run_aggregate_query(
             )
             connection.execute("CREATE TEMP TABLE hm_category_map (source_value VARCHAR, dimension VARCHAR, mapped_category VARCHAR)")
             connection.executemany("INSERT INTO hm_category_map VALUES (?, ?, ?)", source_rows)
-            if stage == "age":
-                customers_uri, articles_uri, transactions_uri = (
-                    _sql_string(f"s3://{settings.bucket}/{key}") for key in keys
-                )
-                customer_schema = "{" + _CSV_COLUMNS + "}"
-                connection.execute(
-                    "CREATE TEMP TABLE hm_age_transactions AS "
-                    f"SELECT customer_id, article_id, t_dat FROM read_parquet({transactions_uri})"
-                )
-                connection.execute(f"""
-                    CREATE TEMP TABLE hm_age_articles AS
-                    SELECT a.article_id, a.index_group_name,
-                           COALESCE(type_map.mapped_category, group_map.mapped_category) AS category
-                    FROM read_parquet({articles_uri}) AS a
-                    LEFT JOIN hm_category_map AS type_map
-                      ON type_map.dimension = 'type'
-                     AND lower(trim(a.product_type_name)) = lower(trim(type_map.source_value))
-                    LEFT JOIN hm_category_map AS group_map
-                      ON group_map.dimension = 'group'
-                     AND lower(trim(a.product_group_name)) = lower(trim(group_map.source_value))
-                """)
-                connection.execute(f"""
-                    CREATE TEMP TABLE hm_age_customers AS
-                    SELECT customer_id, age FROM read_csv(
-                        {customers_uri}, header=true, delim=',', columns={customer_schema}, sample_size=1000
-                    ) WHERE customer_id IS NOT NULL AND trim(customer_id) <> ''
-                """)
-                age_select = query[query.index("        SELECT category,"):]
-                query = """
-                    WITH joined AS (
-                        SELECT a.category, a.index_group_name, t.customer_id, c.age,
-                               TRY_CAST(t.t_dat AS DATE) AS transaction_date
-                        FROM hm_age_transactions AS t
-                        INNER JOIN hm_age_articles AS a USING (article_id)
-                        INNER JOIN hm_age_customers AS c USING (customer_id)
-                        WHERE a.category IS NOT NULL AND t.customer_id IS NOT NULL
-                    )
-                """ + age_select
-            stage_rows = connection.execute(query).fetchall()
+            for statement in statements[:-1]:
+                connection.execute(statement)
+            stage_rows = connection.execute(statements[-1]).fetchall()
             rows.extend(stage_rows)
             _LOGGER.info("H&M snapshot %s rollup completed: groups=%d", stage, len(stage_rows))
         except Exception as exc:
@@ -260,7 +275,7 @@ def _run_aggregate_query(
 
 
 def _price_record(row: tuple[Any, ...], *, source_refs: tuple[dict[str, str], ...],
-                  mapping: dict[str, Any], mapping_fingerprint: str) -> dict[str, Any]:
+                  mapping: dict[str, Any], mapping_sha256: str) -> dict[str, Any]:
     category, segment = str(row[0]), str(row[1])
     product_type = str(row[16]).strip() if len(row) > 16 and row[16] is not None else None
     channels = sorted(str(item) for item in (row[15] or []))
@@ -289,8 +304,7 @@ def _price_record(row: tuple[Any, ...], *, source_refs: tuple[dict[str, str], ..
         },
         "sources": list(source_refs),
         "category_mapping": {
-            "mapping_id": mapping["mapping_id"], "mapping_version": mapping["mapping_version"],
-            "mapping_fingerprint": mapping_fingerprint,
+            "mapping_id": mapping["mapping_id"], "mapping_sha256": mapping_sha256,
             "matching": "product_type_exact" if product_type else "product_group_fallback",
             "requested_category": category,
             "mapped_category": category,
@@ -300,10 +314,11 @@ def _price_record(row: tuple[Any, ...], *, source_refs: tuple[dict[str, str], ..
 
 def build_snapshot_payload(
     rows: list[tuple[Any, ...]], *, source_refs: tuple[dict[str, str], ...],
-    mapping: dict[str, Any], mapping_fingerprint: str,
+    mapping: dict[str, Any], mapping_sha256: str,
     fabric_source_ref: dict[str, str] | None = None,
     fabric_listing_csv: str | None = None,
-    aggregation_version: str = _AGGREGATION_VERSION,
+    aggregation_sql_sha256: str | None = None,
+    duckdb_version: str | None = None,
 ) -> dict[str, Any]:
     """Convert one combined DuckDB result into suppressed, category-level JSON."""
     age_rows = [
@@ -323,7 +338,7 @@ def build_snapshot_payload(
             "product_type": source_product_type,
             "historical_price_aggregate": _price_record(
                 row, source_refs=source_refs, mapping=mapping,
-                mapping_fingerprint=mapping_fingerprint,
+                mapping_sha256=mapping_sha256,
             ),
         })
     genders = (("women", "ladieswear"), ("men", "menswear"), ("", "__all__"))
@@ -331,7 +346,7 @@ def build_snapshot_payload(
         for gender, segment_key in genders:
             age_profile = _build_profiles(
                 age_rows, requested_category=category, gender=gender or None,
-                mapping_id=mapping["mapping_id"], mapping_version=mapping["mapping_version"],
+                mapping_id=mapping["mapping_id"], mapping_sha256=mapping_sha256,
                 source_refs=source_refs,
             )
             segment_rows = [
@@ -342,7 +357,7 @@ def build_snapshot_payload(
             ]
             price_record = _price_record(
                 segment_rows[0], source_refs=source_refs, mapping=mapping,
-                mapping_fingerprint=mapping_fingerprint,
+                mapping_sha256=mapping_sha256,
             ) if segment_rows else None
             if age_profile is not None or price_record is not None:
                 profiles.append({
@@ -353,12 +368,14 @@ def build_snapshot_payload(
     source_objects = list(source_refs)
     if fabric_source_ref is not None:
         source_objects.append(fabric_source_ref)
-    source_identity = {
-        "schema_version": SCHEMA_VERSION,
-        "source_objects": source_objects, "mapping_version": mapping["mapping_version"],
-        "mapping_fingerprint": mapping_fingerprint,
-        "aggregation_version": aggregation_version,
+    source_identity: dict[str, Any] = {
+        "schema": SNAPSHOT_SCHEMA, "schema_version": SNAPSHOT_SCHEMA_VERSION,
+        "source_objects": source_objects, "mapping_sha256": mapping_sha256,
     }
+    if aggregation_sql_sha256 is not None:
+        source_identity["aggregation_sql_sha256"] = aggregation_sql_sha256
+    if duckdb_version is not None:
+        source_identity["duckdb_version"] = duckdb_version
     snapshot = {
         **source_identity,
         "profiles": profiles,
@@ -379,9 +396,11 @@ def serialize_snapshot(snapshot: dict[str, Any]) -> tuple[bytes, str]:
 
 
 def output_key(snapshot_id: str) -> str:
+    """스냅샷을 올릴 키. prefix는 RESEARCH_AGGREGATE_SNAPSHOT_PREFIX로 바꿀 수 있다."""
     if re.fullmatch(r"[a-f0-9]{64}", snapshot_id) is None:
         raise ValueError("Snapshot ID is invalid.")
-    return f"{_OUTPUT_PREFIX}/{snapshot_id}.json"
+    prefix = os.getenv("RESEARCH_AGGREGATE_SNAPSHOT_PREFIX", "").strip().strip("/") or _DEFAULT_OUTPUT_PREFIX
+    return _checked_key(f"{prefix}/{snapshot_id}.json", "")
 
 
 def upload_snapshot(store: R2ObjectStore, *, key: str, payload: bytes, digest: str, snapshot_id: str) -> bool:
@@ -405,7 +424,8 @@ def upload_snapshot(store: R2ObjectStore, *, key: str, payload: bytes, digest: s
         client.put_object(
             Bucket=store.settings.bucket, Key=key, Body=payload,
             ContentType="application/json",
-            Metadata={"sha256": digest, "snapshot-id": snapshot_id, "schema-version": SCHEMA_VERSION},
+            Metadata={"sha256": digest, "snapshot-id": snapshot_id,
+                      "schema": SNAPSHOT_SCHEMA, "schema-version": SNAPSHOT_SCHEMA_VERSION},
             IfNoneMatch="*",
         )
     except Exception as exc:
@@ -478,7 +498,7 @@ def prepare_snapshot(store: R2ObjectStore | None = None) -> tuple[dict[str, Any]
         fabric_bytes, "", version=fabric_version, sha256=fabric_digest, object_key=fabric_key,
     )
     mapping = json.loads(_MAPPING_PATH.read_text(encoding="utf-8"))
-    mapping_fingerprint = _mapping_digest(mapping)
+    mapping_digest = _mapping_sha256(mapping)
     rows = _run_aggregate_query(duckdb, store.settings, keys, mapping)
     # DuckDB reads the current object versions through httpfs. Verify they still
     # match the versions recorded before the query so the content-addressed
@@ -488,10 +508,11 @@ def prepare_snapshot(store: R2ObjectStore | None = None) -> tuple[dict[str, Any]
         if _object_version(after) != ref["version"]:
             raise ValueError("An H&M source changed while the snapshot was being prepared.")
     snapshot = build_snapshot_payload(rows, source_refs=tuple(refs), mapping=mapping,
-                                      mapping_fingerprint=mapping_fingerprint,
+                                      mapping_sha256=mapping_digest,
                                       fabric_source_ref=fabric_source_ref,
                                       fabric_listing_csv=fabric_text,
-                                      aggregation_version=f"{_AGGREGATION_VERSION};duckdb/{duckdb.__version__}")
+                                      aggregation_sql_sha256=aggregation_sql_sha256(),
+                                      duckdb_version=duckdb.__version__)
     payload, digest = serialize_snapshot(snapshot)
     return snapshot, payload, digest, output_key(snapshot["snapshot_id"])
 
@@ -511,12 +532,12 @@ class HmResearchAggregateSource:
                 raise R2ObjectError("The aggregate snapshot key is not configured.")
             store = self.store or R2ObjectStore.from_env()
             mapping = json.loads(_MAPPING_PATH.read_text(encoding="utf-8"))
-            mapping_fingerprint = _mapping_digest(mapping)
+            mapping_digest = _mapping_sha256(mapping)
             # Snapshot keys include the hash of the source versions and mapping,
             # and the writer never overwrites an existing key. That makes the
             # configured object immutable: a cold process needs one GET only,
             # while later requests reuse the validated process cache.
-            cache_key = (store.settings.bucket, self.object_key, mapping_fingerprint)
+            cache_key = (store.settings.bucket, self.object_key, mapping_digest)
             with _LOCK:
                 snapshot = _CACHE.get(cache_key)
                 if snapshot is not None:
@@ -539,11 +560,10 @@ class HmResearchAggregateSource:
                             raise R2ObjectError("The aggregate snapshot digest is missing or invalid.")
                         metadata: Any = json.loads(raw.decode("utf-8"))
                         self._validate_snapshot(metadata)
-                        if output_key(metadata.get("snapshot_id", "")) != self.object_key:
+                        if self.object_key.rsplit("/", 1)[-1] != f"{metadata.get('snapshot_id', '')}.json":
                             raise ValueError("Aggregate snapshot key does not match its snapshot ID.")
-                        if (metadata.get("mapping_version") != mapping.get("mapping_version")
-                                or metadata.get("mapping_fingerprint") != mapping_fingerprint):
-                            raise ValueError("Aggregate snapshot mapping version is stale.")
+                        if metadata.get("mapping_sha256") != mapping_digest:
+                            raise ValueError("Aggregate snapshot was built with a different category mapping.")
                         with _LOCK:
                             _CACHE[cache_key] = metadata
                             _CACHE.move_to_end(cache_key)
@@ -577,7 +597,8 @@ class HmResearchAggregateSource:
     def _validate_snapshot(value: Any) -> None:
         fabric_source = value.get("fabric_source") if isinstance(value, dict) else None
         if (not isinstance(value, dict)
-                or value.get("schema_version") != SCHEMA_VERSION
+                or value.get("schema") != SNAPSHOT_SCHEMA
+                or value.get("schema_version") != SNAPSHOT_SCHEMA_VERSION
                 or not isinstance(value.get("snapshot_id"), str)
                 or not isinstance(value.get("source_objects"), list)
                 or not isinstance(value.get("profiles"), list)

@@ -1,7 +1,6 @@
 {
-  "mapping_id": "project07-hm-product-taxonomy",
-  "mapping_version": "project07-hm-category-map/1.3",
-  "mapping_policy": "Exact product_type_name mappings take precedence over product_group_name fallback mappings. Explicit requested_category_aliases normalize supported P06 category labels to H&M categories. Unlisted values are not mapped.",
+  "mapping_id": "hm-product-taxonomy",
+  "mapping_policy": "Exact product_type_name mappings take precedence over product_group_name fallback mappings. Explicit requested_category_aliases normalize supported Korean planning category labels to H&M categories. Unlisted values are not mapped.",
   "requested_category_aliases": {
     "니트웨어": "Knitwear",
     "상의": "Tops",
