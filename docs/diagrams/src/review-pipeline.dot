@@ -1,0 +1,79 @@
+// research 서비스의 리뷰 요청 처리 흐름.
+// 모든 노드와 간선의 근거(file:line)는 docs/diagrams/CLAIMS.md에 있다.
+// 색은 토큰(@BG@, @FG@ ...)이고 scripts/render_diagrams.sh가 라이트·다크 값으로 바꾼다.
+digraph review_pipeline {
+  graph [rankdir=TB, bgcolor="@BG@", fontname="Pretendard", fontcolor="@FG@", fontsize=14,
+         nodesep=0.3, ranksep=0.38, pad=0.3, newrank=true, compound=true,
+         label="research: 상품 하나를 동기식으로 검토하는 흐름", labelloc=t, labeljust=l];
+  node  [fontname="Pretendard", fontsize=12, fontcolor="@FG@", color="@SVC_LINE@",
+         fillcolor="@SVC_FILL@", style="rounded,filled", shape=box, penwidth=1.2, margin="0.18,0.08"];
+  edge  [fontname="Pretendard", fontsize=10, fontcolor="@FG@", color="@FG@", arrowsize=0.7];
+
+  caller   [label="orchestrator\nPOST /v1/agents/research/reviews"];
+  response [label="orchestrator에 200 응답\nstatus: ok | partial | no_results"];
+
+  // 외부 시스템, 오류·대체 경로
+  reject      [label="4xx 오류 응답", style="rounded,dashed", color="@ERR@", fillcolor="@BG@"];
+  r2          [label="Cloudflare R2\nH&M Kaggle 객체, 원단 CSV,\n집계 스냅샷", shape=cylinder,
+               style="dashed", color="@EXT@", fillcolor="@BG@"];
+  frankfurter [label="Frankfurter 환율 API", style="rounded,dashed", color="@EXT@", fillcolor="@BG@"];
+  fallback    [label="날짜가 적힌 대체 환율", style="rounded,dashed", color="@ERR@", fillcolor="@BG@"];
+  openai      [label="OpenAI Responses API", style="rounded,dashed", color="@EXT@", fillcolor="@BG@"];
+
+  subgraph cluster_service {
+    label="research 서비스"; color="@SVC_LINE@"; style="rounded,dashed"; fontcolor="@FG@";
+
+    validate [label="1. 인증과 요청 검증\nBearer 토큰, JSON 본문 ≤ 1 MiB,\n계약 이름, request_id 일치"];
+    project  [label="2. 허용 필드만 남긴다\ncategory(필수), product_type,\ngender, season, material\n+ 필드마다 출처 하나"];
+    source   [label="RESEARCH_REVIEW_SOURCE\n= synthetic?", shape=diamond, style="filled", margin="0.04,0.04"];
+    synthetic [label="합성 모드: 패키지 합성 표\n외부 호출 없음, 결과에 synthetic 표시"];
+    mode     [label="H&M 연구 허용 +\n스냅샷 키 설정?", shape=diamond, style="filled", margin="0.04,0.04"];
+
+    subgraph cluster_sources {
+      label="3. 시장 자료원"; color="@SVC_LINE@"; style="rounded"; fontcolor="@FG@";
+      snapshot [label="예: 집계 스냅샷 한 개 읽기\nsha256·스키마·snapshot ID·\n매핑 지문 확인, 프로세스 캐시"];
+      fabric   [label="아니오: 원단 판매 목록 CSV\n크기 제한 GET, sha256 확인,\n소재어 일치"];
+      age      [label="아니오, H&M 허용 시: 연령대\nDuckDB httpfs 집계,\n10명 미만 칸 숨김"];
+      price    [label="아니오, H&M 허용 시: 가격 통계\nDuckDB httpfs 집계,\n×590 USD 연구 배율"];
+    }
+
+    bundle   [label="자료 묶음\n결과, 오류, 자료원 상태\n(하나가 실패해도 나머지 유지)"];
+    fx       [label="4. USD/KRW 기준 환율\n가격 집계가 있을 때만\n(합성 모드는 고정 합성 환율)"];
+    llm_gate [label="합성 모드이거나\nLLM 전송 허용?", shape=diamond, style="filled", margin="0.04,0.04"];
+    llm      [label="5. 타깃 고객 가설\n입력: 상품 필드, 연령 집계,\n원단 목록 집계\n(합성 모드는 고정 템플릿)"];
+    assemble [label="6. 리뷰 조립\n가격 참고값, 원단 참고값,\n업계 마진 시나리오,\n근거 연결, 의사결정 지원"];
+    respond  [label="7. 응답 투영과 검증\n원천 행 제거, 긴 문장 자르기,\n해석 한계 추가"];
+  }
+
+  caller   -> validate;
+  validate -> project;
+  validate -> reject [style=dashed, color="@ERR@", fontcolor="@ERR@", label="잘못된 요청"];
+  project  -> source;
+  source   -> synthetic [label="예"];
+  source   -> mode [label="아니오"];
+  synthetic -> bundle;
+  mode     -> snapshot;
+  mode     -> fabric;
+  mode     -> age;
+  mode     -> price;
+  snapshot -> bundle;
+  fabric   -> bundle;
+  age      -> bundle;
+  price    -> bundle;
+  price    -> r2 [ltail=cluster_sources, style=dashed, color="@EXT@", label="읽기 전용 GET,\nhttpfs 스캔"];
+  bundle   -> fx;
+  fx       -> frankfurter [style=dashed, color="@EXT@"];
+  fx       -> fallback [style=dashed, color="@ERR@", fontcolor="@ERR@", label="연결 불가"];
+  fx       -> llm_gate;
+  llm_gate -> llm [label="예"];
+  llm_gate -> assemble [label="아니오: not_authorized"];
+  llm      -> openai [style=dashed, color="@EXT@"];
+  llm      -> assemble [label="가설 또는\n치명적이지 않은 오류"];
+  assemble -> respond;
+  respond  -> response;
+
+  {rank=same; validate; reject}
+  {rank=same; snapshot; fabric; age; price; r2}
+  {rank=same; fx; frankfurter; fallback}
+  {rank=same; llm; openai}
+}

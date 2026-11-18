@@ -1,0 +1,54 @@
+// 리뷰 경로가 읽는 집계 스냅샷을 오프라인에서 만드는 흐름.
+// 모든 노드와 간선의 근거(file:line)는 docs/diagrams/CLAIMS.md에 있다.
+// 색은 토큰(@BG@, @FG@ ...)이고 scripts/render_diagrams.sh가 라이트·다크 값으로 바꾼다.
+digraph snapshot_build {
+  graph [rankdir=TB, bgcolor="@BG@", fontname="Pretendard", fontcolor="@FG@", fontsize=14,
+         nodesep=0.35, ranksep=0.4, pad=0.3, newrank=true,
+         label="research: 집계 스냅샷 만들기 (운영자, 오프라인)", labelloc=t, labeljust=l];
+  node  [fontname="Pretendard", fontsize=12, fontcolor="@FG@", color="@SVC_LINE@",
+         fillcolor="@SVC_FILL@", style="rounded,filled", shape=box, penwidth=1.2, margin="0.18,0.08"];
+  edge  [fontname="Pretendard", fontsize=10, fontcolor="@FG@", color="@FG@", arrowsize=0.7];
+
+  kaggle  [label="H&M Kaggle 데이터셋\n비상업 용도만,\n재배포 금지", style="rounded,dashed",
+           color="@EXT@", fillcolor="@BG@"];
+  owner   [label="원단 판매 목록 CSV\n운영자가 직접 준비", style="rounded,dashed",
+           color="@EXT@", fillcolor="@BG@"];
+  r2      [label="Cloudflare R2 버킷\ncustomers.csv, articles.parquet,\ntransactions_train.parquet, 원단 CSV",
+           shape=cylinder, style="dashed", color="@EXT@", fillcolor="@BG@"];
+
+  subgraph cluster_builder {
+    label="스냅샷 빌더 (python -m …hm_research_aggregate)"; color="@SVC_LINE@"; style="rounded,dashed"; fontcolor="@FG@";
+    gate    [label="1. H&M 비상업 연구\n설정이 켜져 있어야 함"];
+    keys    [label="2. R2 자료원 매니페스트에서\n객체 키 결정"];
+    heads   [label="3. 자료원마다 HEAD\n크기 한도와 버전 기록"];
+    fabric  [label="4. 원단 CSV 읽기(≤ 1 MB)\nsha256과 열 구성 확인"];
+    mapping [label="5. 카테고리 매핑 읽기\nmapping_sha256 = sha256(매핑)"];
+    query   [label="6. DuckDB httpfs 쿼리 두 번\n연령대 다음 가격 통계\n(연결 분리, 임시 디렉터리 지정)"];
+    recheck [label="7. 다시 HEAD: 버전 그대로인지"];
+    build   [label="8. 내용 만들기\n10명 미만 연령 칸 숨김,\n매핑·집계 SQL의 sha256 기록,\nsnapshot_id = sha256(내용)"];
+    out     [label="9. 직렬화(≤ 16 MB)\n키 = <prefix>/<snapshot_id>.json"];
+    upload  [label="10. 업로드(--upload와 업로드\n설정 필요): If-None-Match로 put"];
+  }
+
+  service [label="research 서비스\n설정된 스냅샷 키를 읽음"];
+  dryrun  [label="준비만 함,\n아무것도 쓰지 않음", style="rounded,dashed", color="@EXT@", fillcolor="@BG@"];
+  conflict [label="같은 키에 다른 객체:\n덮어쓰기 거부", style="rounded,dashed", color="@ERR@", fillcolor="@BG@"];
+  changed [label="자료원이 바뀜:\n중단", style="rounded,dashed", color="@ERR@", fillcolor="@BG@"];
+
+  kaggle  -> r2      [style=dashed, color="@EXT@", label="운영자가 올림"];
+  owner   -> r2      [style=dashed, color="@EXT@", label="운영자가 올림"];
+  gate    -> keys -> heads -> fabric -> mapping -> query -> recheck -> build -> out;
+  heads   -> r2      [style=dashed, color="@EXT@", constraint=false];
+  fabric  -> r2      [style=dashed, color="@EXT@", constraint=false];
+  query   -> r2      [style=dashed, color="@EXT@", constraint=false, label="필요한 열만 읽기"];
+  recheck -> changed [style=dashed, color="@ERR@", fontcolor="@ERR@", label="불일치"];
+  out     -> dryrun  [label="--upload 없음"];
+  out     -> upload  [label="--upload"];
+  upload  -> conflict [style=dashed, color="@ERR@", fontcolor="@ERR@"];
+  upload  -> r2      [style=dashed, color="@EXT@", constraint=false, label="새 불변 객체"];
+  r2      -> service [style=dashed, color="@EXT@", label="프로세스마다 GET 1회,\n매핑 지문 대조"];
+
+  {rank=same; kaggle; owner; gate}
+  {rank=same; r2; heads}
+  {rank=same; changed; recheck}
+}
