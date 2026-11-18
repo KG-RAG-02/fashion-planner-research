@@ -1,133 +1,183 @@
-# VOGUE Sales Market Review Agent (Project_07)
+# fashion-planner-research
 
-Project_07(P07)은 상품 기획 이후 시장 참고자료를 모아 검토 결과를 반환하는 HTTP 서비스입니다. P06는 Draft를 검증하고 반환하며, P08은 P06 bridge가 만든 허용 필드 projection을 검증한 뒤 P07 `/reviews`를 직접 호출합니다. P06와 P07 사이의 직접 호출은 없습니다. P08은 Draft 전체를 P07에 보내지 않으며, P07 응답은 Draft ID나 hash를 증명하지 않습니다. 선택 자료원에 문제가 생겨도 얻은 결과와 오류·한계를 함께 보존합니다.
+기획 중인 패션 상품을 판매·시장 자료로 검토하는 서비스입니다. 상품의 카테고리, 유형, 성별, 시즌, 소재를 받아 과거 판매가 통계, 고객 연령대, 원단 가격 참고값, 마진 시나리오, 그리고 선택적으로 타깃 고객 가설을 근거·한계와 함께 돌려줍니다.
 
-## 입력 → 분석 → 출력
+> 이 레포는 **fashion-planner** 5개 레포 중 하나입니다. 전체 구조와 실행 방법은 [fashion-planner-orchestrator](https://github.com/KG-RAG-02/fashion-planner-orchestrator)에서 시작하세요.
 
-### 1. 입력
+| 레포 | 역할 |
+|---|---|
+| [fashion-planner-orchestrator](https://github.com/KG-RAG-02/fashion-planner-orchestrator) | 기획 질의 구조화, 6단계 워크플로 실행, 웹 UI, 기획서 PNG, Docker 통합 배포 |
+| [fashion-planner-trend](https://github.com/KG-RAG-02/fashion-planner-trend) | Vogue Korea 기사에서 트렌드 추출, Neo4j 지식 그래프, 유사 상품 검색 |
+| [fashion-planner-inventory](https://github.com/KG-RAG-02/fashion-planner-inventory) | 트렌드에 맞는 과잉재고 상품 매칭(규칙 + CLIP) |
+| [fashion-planner-novelty](https://github.com/KG-RAG-02/fashion-planner-novelty) | 트렌드 기반 신상품(novelty) 기획안과 제품·착장 이미지 생성 |
+| **[fashion-planner-research](https://github.com/KG-RAG-02/fashion-planner-research)** | **기획안의 판매·시장 조사(가격, 원단 원가, 고객 연령, 타깃)** |
 
-- **요청 경로:** `POST /v1/agents/sales-market-agent/reviews`
-- **인증:** `Authorization: Bearer <token>`
-- **요청 계약:** `vogue-sales-market-review/0.3-proposal`
+이름의 "research"는 학술 연구가 아니라 이 판매·시장 검토를 뜻합니다.
 
-`input.product.category`는 필수입니다. `product_type`, `gender`, `season`, `material`은 선택 항목입니다. 바깥 요청과 `input`의 `request_id`는 같아야 합니다.
+## 개요
 
-현재 요청 형식과 필드별 `product_evidence` 예시는 [요청 예시](contracts/examples/sales-market-review-0.3-proposal.request.json)와 [요청 schema](contracts/schemas/proposals/sales-market-review-0.3-proposal.schema.json)를 참고하세요. 제공하는 각 상품 필드마다 `kind`, `source_ref`, `evidence_ids`를 보냅니다. 사용자 요청에서 온 값은 `user_requested`이며, P06의 실제 근거 ID가 없으면 `evidence_ids`는 빈 배열입니다. P07은 전체 기획 초안, 제안가, 원가표, 이미지 참조를 받지 않습니다.
+novelty가 상품 초안을 만들면, orchestrator가 그중 일부만 골라 research에 보냅니다. `category`(필수)와 `product_type`, `gender`, `season`, `material`(선택), 그리고 필드마다의 출처입니다. research는 다음을 수행합니다.
 
-### 2. 분석
+- 해당 카테고리·세그먼트의 H&M 과거 거래가 통계를 찾고, 평균을 원화 참고가로 바꿉니다.
+- 그 카테고리를 산 고객의 연령대를 집계로만 보여 줍니다. 작은 집단은 숨깁니다.
+- 소재와 맞는 공개 원단 판매 목록을 찾습니다.
+- 업계 매출총이익률 기준을 마진 시나리오로 적용합니다.
+- 허용된 경우에만 LLM에 타깃 고객 가설을 요청하고, 가설이라고 표시합니다.
+- 근거 링크, 빠진 자료마다의 이유, 해석 한계를 함께 돌려줍니다.
 
-1. **입력 검증 및 전달 필드 제한** — 알 수 없는 필드나 서로 다른 `request_id`를 거부하고 허용된 상품 정보만 자료원에 전달합니다.
-2. **시장 자료 조회** — 원단 listing의 category, composition, construction 항목에서 `material`과 일치하는 기록을 찾습니다. 요청 소재에서 섬유 혼용률이나 원가를 추정하지 않습니다. H&M 자료 사용 설정은 P07 코드 기본값에서 비상업 연구로 켜져 있습니다.
-   - `VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY`가 최신 통합 스냅샷을 가리키면, P07 프로세스가 처음 사용할 때 스냅샷 객체를 한 번 읽습니다. 스냅샷에는 H&M 연령·거래가격 집계와 크기가 제한된 원단 listing CSV가 있습니다. 스냅샷 생성은 연령과 가격 집계를 별도 DuckDB 쿼리 및 연결로 실행해 집계 메모리를 분리합니다. 가격의 p25·중앙값·p75는 T-Digest 근사 통계이며, 최소·최대·평균·행 수는 정확한 집계입니다. 실행 중에는 검증한 객체를 프로세스 메모리에서 재사용합니다.
-   - 스냅샷 생성기는 H&M 고객 CSV, 상품 Parquet, 거래 Parquet를 읽어 DuckDB 집계 쿼리 한 번을 실행하고, 원단 listing 객체도 검증한 뒤 변경 불가한 새 JSON 객체를 `derived/research-aggregate-snapshots/` 아래에 게시합니다. 고객 원본 행과 ID는 스냅샷에 저장하지 않습니다. 연령 구간 중 하나라도 10명 미만이면 해당 프로필의 연령별 수치·비율, 전체 분모, 타깃 연령대 수치를 모두 숨깁니다. 원단 listing은 한 번의 스냅샷 조회로 세 분석을 제공하기 위해 포함하며, 제공 데이터의 재사용 조건은 별도 제한사항입니다.
-   - 통합 스냅샷 키가 설정되면 성공·실패와 관계없이 요청은 그 객체만 읽습니다. 스냅샷을 읽지 못하면 포함된 세 자료원을 모두 `error`로 표시하며, 원단이나 H&M 원본 객체를 따로 조회하지 않습니다. 키가 없을 때만 독립 자료원 모드를 사용합니다.
-3. **가격 참고값 계산** — H&M 정규화 가격에 ×590 USD 해석을 적용하고, 값이 있으면 Frankfurter USD/KRW 기준환율로 원화 참고값을 계산합니다. 이는 제안가나 검증된 현재 시장 가격이 아닙니다. 업계 마진 기준은 시나리오 참고값이며 해당 상품의 실제 마진이 아닙니다.
-4. **선택적 타깃 가설 생성** — 코드 기본 설정은 LLM 전송을 허용합니다. 이 설정이 켜지면 허용된 상품 정보와 요약 근거로 LLM 호출을 시도합니다. `LLM_API_KEY`가 없거나 호출에 실패하면 `TARGET_AUDIENCE_LLM_FAILED`를 기록하고 가능한 다른 검토 결과는 보존합니다. 생성 결과는 고객 관측 사실이 아니라 가설입니다. 설정 위치는 [`runtime_settings.py`](src/market_research_agent/runtime_settings.py)입니다.
-5. **응답 조립** — 성공한 분석, 출처 근거, 누락 사유, 오류, 해석 한계와 사람의 검토 필요 여부를 함께 반환합니다. 없는 값을 0이나 임의의 가격으로 채우지 않습니다.
+숫자는 모두 코드로 계산하고, LLM은 가설 문장만 씁니다. research는 초안 전체나 제안가, 이미지를 받지 않고 결정도 하지 않습니다. 결정은 사람이 합니다.
 
-### 3. 출력
+## 아키텍처
 
-응답은 동기 방식입니다. 완료된 검토의 바깥 `status`와 `result.status`는 같은 값(`ok`, `partial`, `no_results`)을 가집니다. `request_id`도 바깥 응답과 결과에 보존됩니다. 요청 검증·서비스 실패는 `error` 객체를 포함한 HTTP 오류 응답입니다.
+<picture>
+  <source media="(prefers-color-scheme: dark)" srcset="docs/diagrams/review-pipeline-dark.svg">
+  <img alt="리뷰 흐름: 요청 검증, 허용 필드, 시장 자료원, 환율, 선택적 타깃 가설, 리뷰 조립, 응답 투영" src="docs/diagrams/review-pipeline.svg" width="900">
+</picture>
 
-P07은 P08 화면·기획·SWOT이 사용하는 집계 통계, 가격/소재/마진 요약, 타깃 가설, 근거 참조 ID, 누락·오류·제한만 `/reviews` 응답에 포함합니다. 거래·고객 원본 파일 목록과 원단 개별 listing 행은 전달하지 않습니다. 응답 버전과 필수 최상위 필드 이름은 유지하며, `target_audience`가 상세 가설의 소비 필드이고 `target_audience_analysis`는 상태·연령 요약 alias입니다. 근거 레코드는 출처·기간·권한·지원 필드와 해석만 전달하고, 집계값은 해당 분석 요약에 한 번만 둡니다.
+무거운 H&M 집계는 오프라인에서 한 번 실행해 내용 해시로 이름 붙인 스냅샷 하나로 올립니다. 요청은 프로세스마다 그 객체를 한 번만 읽습니다. 자세한 내용은 [docs/architecture.md](docs/architecture.md)에 있습니다.
 
-| 응답 경로 | 내용 |
-| --- | --- |
-| `result.category_price_comparison` | H&M 과거 거래가격 참고 통계 |
-| `result.material_cost_analysis` | 공개 원단 listing 참고값. 검증된 조달 원가가 아님 |
-| `result.customer_segment_analysis` | 개인정보 행이 아닌 과거 연령대 집계 |
-| `result.target_audience_analysis` | 연령 근거와 선택적 텍스트 가설 |
-| `result.evidence` | 분석에 사용한 자료의 출처 |
-| `result.missing_data` | 자료원 미설정, 일치 결과 없음, 자료 조회 불가 사유 |
-| `result.errors` | 치명적이지 않은 자료원 또는 선택 LLM 오류 |
-| `result.limitations` | 자료 범위와 해석상 제약 |
-| `result.margin_estimate`, `result.margin_price_range_analysis` | 업계 기준 시나리오. 상품의 실제 마진이 아님 |
-| `result.decision_support` | 근거 영역별 충족 여부와 담당자 검토 필요 표시 |
+## 기능
 
-- `ok`: 적용되는 자료원을 조회했고 결과를 반환한 상태입니다. 연구 자료의 해석상 한계는 `limitations`에 별도로 남습니다.
-- `partial`: 일부 검토 근거는 있지만 적용 자료원의 실패·미설정·일치 결과 없음이 남은 상태입니다. 해석상 한계는 `limitations`에 별도로 기록합니다. P08은 채워진 분석 필드를 표시하고 관련 오류도 함께 보존해야 합니다.
-- `no_results`: 상품별 검토 근거가 없습니다. 원천 오류는 `errors`, 조회 사유는 `missing_data`에 남길 수 있습니다. 일반 업계 기준만으로 시장 결과가 있다고 표시하지 않습니다.
+- 인증이 필요한 경로 하나(`POST /v1/agents/research/reviews`)와 상태 점검 경로(`GET /api/health`)
+- 허용 목록에 있는 입력만 받고, 필드마다 출처를 요구합니다. 모르는 필드는 거부합니다.
+- 가격·연령·원단·마진 수치를 결정적으로 계산하고, 근거(`evidence`)마다 어느 결과 필드를 뒷받침하는지 적습니다.
+- 부분 결과: 자료원 하나가 실패해도 나머지는 남고, 빠진 곳마다 `missing_data`에 이유를 적습니다.
+- 집계만 내보냅니다. 고객 행이나 ID는 쿼리 밖으로 나가지 않고, 10명 미만 연령대가 있으면 그 프로필을 통째로 숨깁니다.
+- H&M 자료 사용과 LLM 전송은 기본으로 꺼져 있고 env로만 켭니다.
+- 스냅샷 빌더는 기존 객체를 덮어쓰지 않고, 빌드 중 자료원이 바뀌면 멈춥니다.
+- 네트워크 없이 결정적인 결과를 내는 합성 리뷰 모드(`RESEARCH_REVIEW_SOURCE=synthetic`)
+- 표준 라이브러리 HTTP 서버와 LLM 클라이언트. 필수 런타임 의존성이 없습니다.
 
-원단 가격이 없는 경우 `result.missing_data[]`에서 `field=fabric_costs`인 항목을 확인하세요. `reason`은 `source_not_configured`, `no_match`, `source_error` 등을 구분합니다. 조회 오류는 `result.errors[]`에 `R2_FABRIC_PRICE_READ_FAILED`로도 나타납니다. 전체 형식은 [응답 schema](contracts/schemas/proposals/sales-market-review-0.3-proposal-response.schema.json)를, 예시는 [`no_results` 응답](contracts/examples/sales-market-review-0.3-proposal.response.json)을 참고하세요.
+## 빠른 시작(오프라인)
 
-## 로컬 실행
+Python 3.11 이상이 필요합니다. 데이터, 클라우드 저장소, API 키 없이 실행됩니다.
 
-Python 3.11 이상이 필요합니다. R2 자료 조회나 스냅샷 생성을 사용한다면 선택 의존성도 설치합니다.
-
-```bash
-python3 -m venv .venv
-source .venv/bin/activate
-pip install -e '.[r2]'
-export VOGUE_AGENT_SERVICE_BEARER_TOKEN='<token>'
-python -m market_research_agent.http_server
+```sh
+git clone https://github.com/KG-RAG-02/fashion-planner-research
+cd fashion-planner-research
+python -m venv .venv && . .venv/bin/activate
+pip install -e .
+export FASHION_PLANNER_SERVICE_TOKEN=change-me
+export RESEARCH_REVIEW_SOURCE=synthetic   # 합성 자료로 결과 모양을 확인합니다
+fashion-planner-research                  # 127.0.0.1:8766
 ```
 
-로컬 실행은 기본적으로 `127.0.0.1:8766`에만 bind합니다. `--host 127.0.0.1 --port 8766`으로 명시할 수도 있습니다. `/reviews` 요청에는 Bearer token이 필요합니다.
+다른 터미널에서:
 
-다른 터미널에서 요청 예시를 보냅니다.
-
-```bash
-curl http://127.0.0.1:8766/v1/agents/sales-market-agent/reviews \
-  -H 'Authorization: Bearer <token>' \
+```sh
+curl -s http://127.0.0.1:8766/v1/agents/research/reviews \
+  -H "Authorization: Bearer $FASHION_PLANNER_SERVICE_TOKEN" \
   -H 'Content-Type: application/json' \
-  --data-binary @contracts/examples/sales-market-review-0.3-proposal.request.json
+  --data-binary @contracts/examples/research-review.request.json
 ```
 
-`GET /api/health`는 서버 응답 여부만 확인하며 R2, DuckDB, 환율, LLM 연결은 확인하지 않습니다. 로컬 서버는 `.env`의 허용된 설정을 읽습니다. 로더를 끄려면 `VOGUE_PROJECT07_DISABLE_DOTENV=1`을 설정하세요.
+합성 모드에서는 `"status": "ok"`와 함께 가격·연령·원단·타깃 가설이 채워지고, `result.limitations`의 첫 항목이 합성 자료임을 알립니다. `RESEARCH_REVIEW_SOURCE`를 지우면 실제 자료원을 쓰며, 아무것도 설정하지 않았다면 `"status": "no_results"`와 자료원별 이유(`source_not_configured`, `source_not_configured_or_disabled`)가 옵니다. 실제 수치를 보려면 [docs/data.md](docs/data.md)의 자료를 준비하세요.
 
-### Docker 서비스 실행
+Docker:
 
-Docker 기본 명령은 HTTP 서버를 `0.0.0.0:8766`에 bind합니다. 비 loopback 서비스 모드는 `VOGUE_AGENT_SERVICE_BEARER_TOKEN`이 없으면 시작하지 않습니다. 저장소 루트의 `.env`에 해당 값을 설정한 뒤 실행하세요.
-
-```bash
-docker compose up --build -d sales-market-review-agent
+```sh
+cp .env.example .env            # FASHION_PLANNER_SERVICE_TOKEN을 채웁니다
+docker compose up --build -d research
 curl http://127.0.0.1:8766/api/health
 ```
 
-Compose는 호스트의 `8766` 포트를 컨테이너의 `8766`으로 전달하고 같은 health 경로를 주기적으로 확인합니다. 응답의 `mode`는 Docker에서 `container-service`, 로컬 실행에서 `local-development`입니다. health 응답은 liveness만 나타냅니다. P08이 별도 Compose 프로젝트라면 P07 서비스 URL과 공유 네트워크 연결은 P08 배포 설정에서 지정해야 합니다.
+## 설정
 
-P08 호출 흐름은 **P06 Draft → P08의 P06 bridge projection 검증 → P07 `POST /v1/agents/sales-market-agent/reviews`**입니다. 전송되는 상품 필드는 `category`(필수), `product_type`, `gender`, `season`, `material`(선택)와 현재 계약에서 요구하는 해당 필드의 provenance입니다. P07은 P06를 호출하지 않고 전체 Draft도 받지 않습니다.
+환경변수로 설정합니다. 레포 루트의 `.env`도 읽습니다(`RESEARCH_DISABLE_DOTENV=1`이면 읽지 않음).
 
-### 환경 설정 경계
+| 변수 | 기본값 | 용도 |
+|---|---|---|
+| `FASHION_PLANNER_SERVICE_TOKEN` | 없음 | 리뷰 경로의 Bearer 토큰. `--service-mode`로 시작할 때 필수 |
+| `RESEARCH_REVIEW_SOURCE` | 없음 | `synthetic`이면 네트워크 없이 합성 자료로 리뷰 |
+| `RESEARCH_HM_NONCOMMERCIAL_RESEARCH` | `false` | H&M 자료 읽기. 비상업 연구일 때만 `true` |
+| `RESEARCH_TARGET_LLM_TRANSFER_AUTHORIZED` | `false` | 가설 입력을 LLM 제공자에게 보내도록 허용 |
+| `LLM_API_KEY`, `LLM_MODEL` | 없음 | 타깃 가설용 OpenAI Responses API 키와 모델 |
+| `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY` | 없음 | 읽기 전용 객체 저장소(Cloudflare R2) |
+| `R2_ENDPOINT` | 계정 ID로 계산 | HTTPS 저장소 엔드포인트를 직접 지정 |
+| `RESEARCH_AGGREGATE_SNAPSHOT_KEY` | 없음 | H&M·원단 자료를 미리 만든 스냅샷 하나에서 읽기 |
+| `RESEARCH_AGGREGATE_SNAPSHOT_PREFIX` | `derived/research-aggregate-snapshots` | 스냅샷 빌더가 올리는 위치 |
+| `RESEARCH_R2_SOURCE_MANIFEST` | 패키지 매니페스트 | 자기 객체 키 매니페스트 파일 경로 |
+| `RESEARCH_USD_KRW_FALLBACK_RATE`, `RESEARCH_USD_KRW_FALLBACK_DATE` | `1334.71`, `2026-11-12` | 환율 API에 닿지 않을 때 쓰는 환율 |
+| `RESEARCH_CACHE_DIR` | `/tmp` | DuckDB 임시 파일의 기준 디렉터리 |
+| `RESEARCH_AGE_DUCKDB_THREADS`, `RESEARCH_AGE_DUCKDB_MEMORY_LIMIT`, `RESEARCH_AGE_DUCKDB_TEMP_DIRECTORY` | `1`, `3GB`, `<cache>/duckdb-age-tmp` | 집계용 DuckDB 한도 |
+| `RESEARCH_HTTPFS_TIMEOUT_SECONDS`, `RESEARCH_HTTPFS_RETRIES` | `20`, `1` | DuckDB `httpfs` 제한 시간(5–120)과 재시도(0–5) |
+| `RESEARCH_DUCKDB_EXTENSION_DIRECTORY` | DuckDB 기본값 | DuckDB가 `httpfs`를 찾는 위치 |
+| `RESEARCH_AGGREGATE_UPLOAD_ENABLED` | `false` | 스냅샷 빌더의 `--upload` 허용 |
 
-`.env`는 향후 P06과 통합하기 쉽도록 공용 provider 자격 증명과 프로젝트별 설정을 구분합니다. `LLM_API_KEY`, `LLM_MODEL`, `R2_ACCOUNT_ID`, `R2_BUCKET`, `R2_ACCESS_KEY_ID`, `R2_SECRET_ACCESS_KEY`는 공용 설정 후보입니다. P07 서비스 인증과 집계 스냅샷 키는 `.env`에 둡니다. H&M 비상업 연구 모드, 타깃 정보 LLM 전송 승인, 날짜가 있는 환율 fallback 기본값은 P07의 [`runtime_settings.py`](src/market_research_agent/runtime_settings.py)에 둡니다. H&M 연구와 타깃 정보 전송 승인은 코드 기본값이 켜져 있으며 프로세스 환경변수로 덮어쓸 수 있습니다. P06과 합칠 때 공용 값은 한 번만 정의하고 agent별 동작 설정은 프로젝트별로 유지하면 충돌을 줄일 수 있습니다.
+저장소 기능을 쓰려면 `pip install -e '.[r2]'`로 설치합니다.
 
-운영 요청 경로는 `VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY`가 가리키는 **단일 R2 객체**에서 H&M 연령·가격 집계와 원단 listing을 함께 읽습니다. cold process에서 객체 GET은 한 번이며, 검증한 snapshot을 프로세스 메모리에서 재사용합니다. 이 키가 설정됐지만 객체를 읽지 못하면 개별 원천 객체로 fallback하지 않고 포함 자료원 전체를 오류로 반환합니다. 원천 manifest는 스냅샷 작성·개발용 독립 자료원 모드에서만 사용합니다. 기본 Cloudflare R2 endpoint는 `R2_ACCOUNT_ID`로 유도되므로 `R2_ENDPOINT`는 생략할 수 있습니다. 필요한 변수 목록과 P06 공용 설정 경계는 [`.env.example`](.env.example)에 정리했습니다.
+## 데이터
 
-`VOGUE_DUCKDB_EXTENSION_DIRECTORY`는 R2 접속 설정이 아니라 로컬 DuckDB 확장 파일 위치입니다. 통합 스냅샷을 읽는 서버 요청에는 필요하지 않고, Docker 이미지가 호환되는 확장 경로를 자체 설정합니다. 로컬에서 스냅샷을 직접 생성할 때만 환경에 따라 일회성 지정이 필요할 수 있습니다.
+이 레포에는 데이터가 없고, MIT 라이선스는 코드에만 적용됩니다. H&M 데이터셋은 비상업 용도로만 쓸 수 있고 재배포할 수 없습니다. 원단 판매 목록 CSV는 직접 준비해야 합니다. 출처, 이용 조건, 스키마, 스냅샷 빌더는 [docs/data.md](docs/data.md)에 있습니다.
 
-## R2 통합 스냅샷
+## API와 계약
 
-스냅샷 생성에는 H&M 원본 객체와 원단 listing 객체의 읽기 권한, 파생 경로에 새 변경 불가 객체를 추가할 권한이 필요합니다. 원본 객체는 덮어쓰지 않습니다.
+| 경로 | 용도 |
+|---|---|
+| `POST /v1/agents/research/reviews` | 동기식 리뷰 한 건. Bearer 토큰 필요 |
+| `GET /api/health` | 살아 있는지와 실행 모드(`local-development` 또는 `container-service`)만 알려 줌 |
 
-스냅샷 작성기는 저장소의 `configs/r2-source-manifest.v1.json`에서 원천 객체 키를 읽습니다. 원천 객체가 다른 prefix에 있으면 manifest를 수정한 뒤 이미지를 다시 빌드하거나, 로컬 작성 명령에 `PROJECT07_R2_SOURCE_MANIFEST`를 직접 설정하세요. Compose의 리뷰 서비스는 manifest를 mount하지 않으며, 구성된 통합 스냅샷 객체만 읽습니다.
+- 요청·응답·오류 스키마: [`contracts/schemas/`](contracts/schemas/)
+- 예시: [`contracts/examples/`](contracts/examples/)
+- 필드와 status 설명: [`contracts/README.md`](contracts/README.md)
 
-```bash
-VOGUE_HM_AGGREGATE_UPLOAD_ENABLED=true \
-python -m market_research_agent.sources.sales.hm_kaggle.hm_research_aggregate --upload
+서비스 간 계약의 기준 사본은 orchestrator 레포에 있습니다.
+
+## 프로젝트 구조
+
+```
+src/fashion_planner_research/
+  http_server.py          경로, 요청 검증, 리뷰 한 건 처리
+  runtime_settings.py     정책 스위치, 대체 환율
+  domain/                 리뷰 조립, 마진 시나리오, 환율 환산
+  llm/                    Responses API 클라이언트, 타깃 고객 가설
+  sources/                객체 저장소, 원단 목록, H&M 집계·스냅샷, 합성 리뷰 소스
+  resources/              카테고리 매핑, 자료원 매니페스트, 프롬프트, 합성 표
+contracts/                JSON Schema와 예시
+docs/                     아키텍처, 데이터, 설계 결정, 문제 해결, 다이어그램
+tests/                    합성 데이터를 쓰는 오프라인 단위 테스트
+scripts/                  테스트 실행, 다이어그램 생성·검사
 ```
 
-출력된 경로를 `VOGUE_HM_RESEARCH_AGGREGATE_R2_KEY`에 설정하고 P07을 재시작하세요. 원본 버전이나 category mapping이 바뀌면 다른 객체 경로가 만들어집니다. `--upload`를 생략하면 로컬 집계까지만 수행하고 R2에는 쓰지 않습니다. API 요청 경로는 읽기 전용입니다.
+## 테스트
 
-## 저장소 구조
+```sh
+pip install -e '.[r2,test]'
+python scripts/run_tests.py
+```
 
-- `src/market_research_agent/http_server.py`: 요청 검증, 자료원 조정, 응답 반환
-- `src/market_research_agent/domain/`: 검토 결과, 근거·상태 규칙, 원가 시나리오, 환산
-- `src/market_research_agent/sources/`: R2, 원단 listing, H&M 연구 자료원
-- `src/market_research_agent/llm/`: 선택적 타깃 가설 호출과 결과 검증
-- `prompts/target_audience_hypothesis/`: 버전 관리되는 타깃 가설 prompt
-- `configs/`: 자료원 객체 manifest와 카테고리 mapping
-- `contracts/`: 현재 요청·응답 schema 및 예시
-- `tests/`: API, 자료원, 계약 및 합성 fixture 검증 코드
+모든 테스트는 합성 데이터와 가짜 저장소 클라이언트로 오프라인에서 돌아갑니다. `r2` extra 없이 설치하면 DuckDB로 실제 집계 쿼리를 돌리는 테스트 1개만 건너뜁니다. CI도 같은 명령을 씁니다. Docker로는 `docker compose --profile test run --rm research-tests`를 씁니다.
 
-요청·응답 구현의 소유자는 P07입니다. 소비 프로젝트와 공유하는 계약 변경은 합의가 필요합니다. [저장소 경계](docs/repository-boundaries.md)와 [P08 → P07 현재 검토 흐름](docs/design/post-planning-sales-market-review.md)을 참고하세요.
+다이어그램은 `scripts/render_diagrams.sh`로 `docs/diagrams/src/`에서 다시 만들고, `python scripts/check_diagram_claims.py`로 모든 요소를 코드와 대조합니다.
 
-## P08 연동 계약 및 제공 경로
+## 문제 해결과 교훈
 
-확인된 `KG-RAG-02/fashion-planner-orchestrator` main (`2d818e0`, 2026-11-17 기준)은 P07에 `POST /v1/agents/sales-market-agent/reviews`와 `vogue-sales-market-review/0.3-proposal`만 호출합니다. P08은 P06 Draft에서 허용된 상품 필드와 필드별 출처를 구성해 전달합니다. 이 저장소의 HTTP 서버도 해당 0.3 리뷰 경로만 제공합니다. P07은 구형 `/runs`, `/structured-runs`, Full-Draft artifact replay 계약을 패키징하거나 제공하지 않습니다. 이 저장소의 예시·테스트도 현재 0.3 요청 및 `sales-market-review/0.1-internal` 응답 계약을 기준으로 합니다.
+DuckDB 메모리 한도부터 한국어 카테고리 이름까지 겪은 문제와 배운 점은 [docs/troubleshooting.md](docs/troubleshooting.md)에, 설계 결정은 [docs/decisions/](docs/decisions/)에 있습니다.
 
-요청·응답 계약, 예시, 상태 해석은 [`contracts/README.md`](contracts/README.md)와 [현재 P08 → P07 흐름](docs/design/post-planning-sales-market-review.md)을 기준으로 확인하세요. P06/P08 공유 계약을 변경하지 않습니다.
+## 한계
 
-로컬 실행은 `python -m market_research_agent.http_server` 또는 `vogue-sales-market-review-http` 명령을 사용합니다. Docker/Compose 배포는 위 기본 실행 절차를 따릅니다. API는 상태 저장 replay artifact를 만들지 않으므로 리뷰 artifact 디렉터리나 upstream artifact mount가 필요하지 않습니다.
+- H&M 자료는 한 소매업체의 과거(2018–2020) 자료입니다. 여러분의 고객이나 지금의 수요가 아닙니다.
+- 가격의 ×590 USD 배율은 가정이며 데이터셋의 통화 정보가 아닙니다.
+- 성별 필터는 고객 성별이 아니라 상품 세그먼트 기준입니다. 시즌 정보는 없습니다.
+- 원단 가격은 공개 판매가 참고값이며 조달 원가가 아닙니다.
+- 마진은 업계 기준 시나리오이며 이 상품의 실제 마진이 아닙니다.
+- 타깃 고객 문장은 제한된 입력으로 만든 가설입니다.
+- 캐시는 프로세스마다 따로 있습니다. 복제본 사이에 공유하지 않습니다.
 
-`python scripts/run_tests.py`는 저장소의 전체 단위 검증을 실행합니다. Dockerfile의 test profile도 이 명령을 사용합니다.
+## 감사의 말
+
+- Kaggle의 [H&M Personalized Fashion Recommendations](https://www.kaggle.com/competitions/h-and-m-personalized-fashion-recommendations): 대회 규칙에 따라 비상업 연구에 사용했습니다.
+- NYU Stern Aswath Damodaran의 *Margins by Sector (US)*: 의류 매출총이익률 기준
+- [Frankfurter](https://frankfurter.dev): USD/KRW 기준 환율
+- [DuckDB](https://duckdb.org), [boto3](https://github.com/boto/boto3)
+- 다이어그램은 Graphviz와 [Pretendard](https://github.com/orioncactus/pretendard)(SIL Open Font License 1.1)로 그렸습니다. 글꼴 파일은 레포에 넣지 않았습니다.
+- 코드와 문서 일부는 AI(Claude)의 도움을 받아 작성했고, 해당 커밋에 그 사실을 적었습니다.
+
+## 고지
+
+- 이 프로젝트는 학습·교육 목적의 비상업 프로젝트입니다. Condé Nast, Vogue Korea(두산매거진), 무신사, H&M과 관련이 없으며 이들의 승인이나 후원을 받지 않았습니다. 'Vogue'는 해당 권리자의 상표입니다.
+- 이 레포에는 제3자 데이터(기사 원문, 이미지, 상품·거래 데이터)가 들어 있지 않습니다. 데이터를 직접 받아 쓰는 경우 각 출처의 이용약관을 따라야 합니다. 자세한 내용은 `docs/data.md`를 보세요.
+
+## 라이선스
+
+코드는 [MIT 라이선스](LICENSE)로 배포합니다. MIT 라이선스는 이 레포의 코드에만 적용되며, 외부 데이터셋과 그 파생물에는 적용되지 않습니다.
