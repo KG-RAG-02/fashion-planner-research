@@ -16,7 +16,7 @@
 
 ## 개요
 
-novelty가 상품 초안을 만들면, orchestrator가 그중 일부만 골라 research에 보냅니다. `category`(필수)와 `product_type`, `gender`, `season`, `material`(선택), 그리고 필드마다의 출처입니다. fashion-planner 흐름에서는 orchestrator가 다섯 필드를 모두 보내며, 초안에 값이 없으면 대체값을 넣어 `kind: proposal`로 표시합니다. `proposal`인 값은 확인되지 않은 제안입니다. research는 다음을 수행합니다.
+novelty가 상품 초안을 만들면, orchestrator가 그중 일부만 골라 research에 보냅니다. `category`(필수)와 `product_type`, `gender`, `season`, `material`(선택), 그리고 필드마다의 출처입니다. fashion-planner 흐름에서는 orchestrator가 다섯 필드를 모두 보내며, 초안에 값이 없으면 대체값을 넣어 `kind: proposal`로 표시합니다. `proposal`인 값은 확인되지 않은 제안이지만, research는 이 값도 그대로 자료 선택에 씁니다. research는 다음을 수행합니다.
 
 - 해당 카테고리·세그먼트의 H&M 과거 거래가 통계를 찾고, 평균을 원화 참고가로 바꿉니다.
 - 그 카테고리를 산 고객의 연령대를 집계로만 보여 줍니다. 작은 집단은 숨깁니다.
@@ -121,7 +121,7 @@ curl http://127.0.0.1:8766/api/health
 - 예시: [`contracts/examples/`](contracts/examples/)
 - 필드와 status 설명: [`contracts/README.md`](contracts/README.md)
 
-서비스 간 계약의 기준 사본은 orchestrator 레포에 있습니다.
+orchestrator 레포에는 호출하는 쪽의 스키마와 이 계약의 사본이 있습니다. 응답·오류 스키마는 바이트가 같고, 요청은 보내는 쪽 규칙이 더 엄격합니다([contracts/README.md](contracts/README.md)).
 
 ## 프로젝트 구조
 
