@@ -186,5 +186,15 @@ class TargetAudienceCacheTests(unittest.TestCase):
                 )
 
 
+
+class PromptIdentityTests(unittest.TestCase):
+    def test_prompt_sha256_matches_the_packaged_system_prompt(self):
+        import hashlib
+        from fashion_planner_research.resource_paths import PROMPTS_DIR
+
+        content = (PROMPTS_DIR / "target_audience_hypothesis" / "system.md").read_bytes()
+        self.assertEqual(target_audience.SYSTEM_PROMPT_SHA256, hashlib.sha256(content).hexdigest())
+
+
 if __name__ == "__main__":
     unittest.main()

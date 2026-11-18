@@ -48,6 +48,8 @@ class CurrentReviewRouteTests(unittest.TestCase):
         self.assertEqual(handler.status, 200)
         self.assertEqual(response["contract_version"], "research-handoff")
         self.assertEqual(response["request_id"], request["request_id"])
+        self.assertEqual(response["result"]["target_audience"]["llm_call_status"], "not_authorized")
+        self.assertIsNone(response["result"]["target_audience"]["prompt_sha256"])
         Draft202012Validator(response_schema).validate(response)
         source.assert_called_once_with(request["input"]["product"])
 

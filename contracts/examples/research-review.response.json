@@ -144,7 +144,8 @@
       ],
       "evidence_ids": [],
       "transfer_authorized": false,
-      "llm_call_status": "not_authorized"
+      "llm_call_status": "not_authorized",
+      "prompt_sha256": null
     }
   }
 }

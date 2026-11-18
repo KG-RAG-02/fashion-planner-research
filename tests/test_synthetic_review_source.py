@@ -85,6 +85,7 @@ class SyntheticReviewSourceTests(unittest.TestCase):
         self.assertIsInstance(result["price_analysis"]["proposed_price"], int)
         self.assertEqual(result["target_audience"]["llm_call_status"], synthetic.LLM_CALL_STATUS)
         self.assertFalse(result["target_audience"]["transfer_authorized"])
+        self.assertIsNone(result["target_audience"]["prompt_sha256"])
         self.assertTrue(result["target_audience"]["proposal"]["proposal"].startswith("[합성]"))
         data_evidence = [item for item in result["evidence"]
                          if item["source_type"] not in {"usd_krw_reference_rate", "industry_gross_margin_benchmark"}]

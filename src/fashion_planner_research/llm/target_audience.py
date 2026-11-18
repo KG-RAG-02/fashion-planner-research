@@ -17,6 +17,8 @@ from .responses_api import LlmCallError, OpenAIResponsesClient
 
 
 _SYSTEM = (PROMPTS_DIR / "target_audience_hypothesis" / "system.md").read_text(encoding="utf-8")
+# 가설을 만들 때 쓴 시스템 프롬프트의 SHA-256. 프롬프트 디렉터리에 버전을 두지 않고 이 값으로 식별한다.
+SYSTEM_PROMPT_SHA256 = hashlib.sha256(_SYSTEM.encode("utf-8")).hexdigest()
 _OUTPUT_FIELDS = {
     "proposal", "primary_segment", "secondary_segments", "age_evidence", "product_fit",
     "merchandising_actions", "channel_content_hypotheses",

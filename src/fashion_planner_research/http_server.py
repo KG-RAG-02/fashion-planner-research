@@ -14,7 +14,7 @@ from urllib.parse import unquote, urlsplit
 
 from .domain.currency_conversion import CurrencyConversionError, convert_usd_to_krw, fetch_usd_krw_reference_rate
 from .domain.sales_market_review import REVIEW_SCHEMA_VERSION, build_sales_market_review
-from .llm.target_audience import propose_target_audience
+from .llm.target_audience import SYSTEM_PROMPT_SHA256, propose_target_audience
 from .llm.responses_api import LlmCallError, OpenAIResponsesClient
 from .runtime_settings import hm_research_noncommercial_enabled, target_llm_transfer_authorized
 from .sources.sales.hm_kaggle.hm_combined_research_source import HmCombinedResearchSource
@@ -212,7 +212,7 @@ def _orchestrator_review_projection(review: dict[str, Any]) -> dict[str, Any]:
     # small status/age summary so response schema keys remain stable.
     target = pick(review.get("target_audience"), (
         "status", "proposal", "age_cohort", "limitations", "evidence_ids",
-        "transfer_authorized", "llm_call_status",
+        "transfer_authorized", "llm_call_status", "prompt_sha256",
     ))
     proposal = target.get("proposal")
     if isinstance(proposal, dict):
@@ -494,6 +494,10 @@ def make_handler(*, service_mode: bool = False):
                     synthetic.LLM_CALL_STATUS if use_synthetic else
                     "completed" if target_audience_proposal is not None else
                     "failed" if target_audience_error else "not_authorized"
+                )
+                # 실제 LLM 호출을 시도했을 때만 어떤 프롬프트를 썼는지 남긴다.
+                review["target_audience"]["prompt_sha256"] = (
+                    SYSTEM_PROMPT_SHA256 if target_audience_authorized and not use_synthetic else None
                 )
                 if target_audience_error:
                     review["errors"].append({"code": "TARGET_AUDIENCE_LLM_FAILED", "message": target_audience_error})

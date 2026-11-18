@@ -10,6 +10,7 @@ from email.message import Message
 from unittest.mock import patch
 
 from fashion_planner_research.http_server import REVIEW_CONTRACT_VERSION, REVIEW_PATH, _validate_review_result, make_handler, serve
+from fashion_planner_research.llm.target_audience import SYSTEM_PROMPT_SHA256
 
 
 class ReviewHttpTests(unittest.TestCase):
@@ -416,6 +417,7 @@ class ReviewHttpTests(unittest.TestCase):
         self.assertEqual(response["status"], "partial")
         self.assertEqual(response["status"], response["result"]["status"])
         self.assertEqual(response["result"]["target_audience"]["llm_call_status"], "failed")
+        self.assertEqual(response["result"]["target_audience"]["prompt_sha256"], SYSTEM_PROMPT_SHA256)
         self.assertIn("TARGET_AUDIENCE_LLM_FAILED", {item["code"] for item in response["result"]["errors"]})
 
     def test_fabric_failure_does_not_drop_price_or_customer_analysis(self):
