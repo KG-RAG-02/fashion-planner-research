@@ -1,0 +1,53 @@
+{
+  "notice": "합성(synthetic) 테스트 데이터입니다. 실제 시장·고객 자료가 아닙니다.",
+  "period": {"start": "2025-01-01", "end": "2025-12-31"},
+  "usd_krw": {"rate": 1350.0, "rate_date": "2025-12-31"},
+  "segment_shares": {"Ladieswear": 0.6, "Menswear": 0.4},
+  "channel_codes": ["1", "2"],
+  "categories": {
+    "default": {
+      "age_bands": {"under_20": 60, "20_29": 420, "30_39": 380, "40_49": 210, "50_plus": 150, "unknown_age": 40},
+      "price": {"minimum": 0.0051, "p25": 0.0169, "median": 0.0254, "p75": 0.0339, "maximum": 0.1017, "mean": 0.0271,
+                "transaction_rows": 2400, "article_count": 180}
+    },
+    "Tops": {
+      "age_bands": {"under_20": 120, "20_29": 860, "30_39": 640, "40_49": 310, "50_plus": 180, "unknown_age": 50},
+      "price": {"minimum": 0.0034, "p25": 0.0135, "median": 0.0203, "p75": 0.0305, "maximum": 0.0847, "mean": 0.0237,
+                "transaction_rows": 5200, "article_count": 410}
+    },
+    "Bottoms": {
+      "age_bands": {"under_20": 90, "20_29": 640, "30_39": 590, "40_49": 330, "50_plus": 210, "unknown_age": 40},
+      "price": {"minimum": 0.0068, "p25": 0.0203, "median": 0.0305, "p75": 0.0423, "maximum": 0.1186, "mean": 0.0322,
+                "transaction_rows": 3900, "article_count": 290}
+    },
+    "Outerwear": {
+      "age_bands": {"under_20": 40, "20_29": 380, "30_39": 450, "40_49": 300, "50_plus": 260, "unknown_age": 30},
+      "price": {"minimum": 0.0169, "p25": 0.0423, "median": 0.0593, "p75": 0.0847, "maximum": 0.2542, "mean": 0.0678,
+                "transaction_rows": 1700, "article_count": 150}
+    },
+    "Knitwear": {
+      "age_bands": {"under_20": 50, "20_29": 410, "30_39": 470, "40_49": 280, "50_plus": 200, "unknown_age": 30},
+      "price": {"minimum": 0.0102, "p25": 0.0254, "median": 0.0373, "p75": 0.0508, "maximum": 0.1356, "mean": 0.0398,
+                "transaction_rows": 2100, "article_count": 170}
+    },
+    "Dresses": {
+      "age_bands": {"under_20": 70, "20_29": 690, "30_39": 520, "40_49": 260, "50_plus": 140, "unknown_age": 30},
+      "price": {"minimum": 0.0085, "p25": 0.0254, "median": 0.0339, "p75": 0.0474, "maximum": 0.1525, "mean": 0.0366,
+                "transaction_rows": 2600, "article_count": 230}
+    },
+    "One-piece": {
+      "age_bands": {"under_20": 60, "20_29": 520, "30_39": 410, "40_49": 200, "50_plus": 110, "unknown_age": 30},
+      "price": {"minimum": 0.0085, "p25": 0.0237, "median": 0.0322, "p75": 0.0457, "maximum": 0.1356, "mean": 0.0349,
+                "transaction_rows": 1500, "article_count": 120}
+    }
+  },
+  "fabric_listings": [
+    {"label": "기본", "price_amount": 9000, "original_unit": "1 yd", "width_cm": "150", "weight_g_per_cut": "320"},
+    {"label": "고밀도", "price_amount": 14000, "original_unit": "1 yd", "width_cm": "150", "weight_g_per_cut": "410"},
+    {"label": "경량", "price_amount": 6500, "original_unit": "90 cm", "width_cm": "140", "weight_g_per_cut": "210"}
+  ],
+  "target_audience": {
+    "cohort_labels": {"under_20": "10대 후반", "20_39": "20–30대", "40_plus": "40대 이상"},
+    "gender_labels": {"women": "여성", "men": "남성", "unisex": "남녀 공용", "unknown": ""}
+  }
+}

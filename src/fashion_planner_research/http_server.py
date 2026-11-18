@@ -18,6 +18,7 @@ from .llm.target_audience import propose_target_audience
 from .llm.responses_api import LlmCallError, OpenAIResponsesClient
 from .runtime_settings import hm_research_noncommercial_enabled, target_llm_transfer_authorized
 from .sources.sales.hm_kaggle.hm_combined_research_source import HmCombinedResearchSource
+from .sources import synthetic_review_source as synthetic
 
 REVIEW_CONTRACT_VERSION = "vogue-sales-market-review/0.3-proposal"
 REVIEW_PATH = "/v1/agents/sales-market-agent/reviews"
@@ -348,6 +349,7 @@ def _load_project_r2_env() -> None:
                                  or key == "VOGUE_AGENT_SERVICE_BEARER_TOKEN"
                                  or key == "LLM_API_KEY"
                                  or key == "LLM_MODEL"
+                                 or key == synthetic.REVIEW_SOURCE_ENV
                                  ):
             continue
         value = value.strip()
@@ -420,7 +422,14 @@ def make_handler(*, service_mode: bool = False):
                 # Read .env for each request so a locally restarted or long-lived
                 # development server always observes the persisted research gates.
                 _load_project_r2_env()
-                research_bundle = HmCombinedResearchSource().analyze(product)
+                try:
+                    review_source = synthetic.configured_review_source()
+                except synthetic.UnsupportedReviewSource as exc:
+                    send(503, _review_error_payload("REVIEW_SOURCE_UNSUPPORTED", str(exc), request_id))
+                    return
+                use_synthetic = review_source == synthetic.SYNTHETIC
+                research_bundle = (synthetic.synthetic_research_bundle(product) if use_synthetic
+                                   else HmCombinedResearchSource().analyze(product))
                 fabric_prices = research_bundle["fabric_prices"]
                 fabric_price_error = research_bundle["fabric_price_error"]
                 customer_profile = research_bundle["customer_age_profile"]
@@ -429,11 +438,11 @@ def make_handler(*, service_mode: bool = False):
                 target_audience_error = None
                 historical_price = research_bundle["historical_price"]
                 historical_price_error = research_bundle["historical_price_error"]
-                if hm_research_noncommercial_enabled():
+                if use_synthetic or hm_research_noncommercial_enabled():
                     if historical_price is not None:
                         fx_started = time.perf_counter()
                         try:
-                            fx = fetch_usd_krw_reference_rate()
+                            fx = synthetic.synthetic_fx_reference() if use_synthetic else fetch_usd_krw_reference_rate()
                             scaled_mean = historical_price.get("scaled_price_statistics", {}).get("mean")
                             conversion = convert_usd_to_krw(scaled_mean, fx["rate"])
                             historical_price["usd_krw_conversion"] = {**fx, **conversion}
@@ -444,8 +453,14 @@ def make_handler(*, service_mode: bool = False):
                         finally:
                             _LOGGER.info("FX reference lookup and conversion completed in %.3fs",
                                          time.perf_counter() - fx_started)
-                target_audience_authorized = target_llm_transfer_authorized()
-                if target_audience_authorized:
+                # 합성 모드는 외부로 아무것도 보내지 않으므로 전송 허용과 무관하다.
+                target_audience_authorized = False if use_synthetic else target_llm_transfer_authorized()
+                if use_synthetic:
+                    target_audience_proposal = synthetic.synthetic_target_audience(
+                        product_context=product, customer_profile=customer_profile,
+                        fabric_listing_reference=list(fabric_prices),
+                    )
+                elif target_audience_authorized:
                     llm_started = time.perf_counter()
                     try:
                         target_audience_proposal = propose_target_audience(
@@ -473,6 +488,7 @@ def make_handler(*, service_mode: bool = False):
                 ).to_dict()
                 review["target_audience"]["transfer_authorized"] = target_audience_authorized
                 review["target_audience"]["llm_call_status"] = (
+                    synthetic.LLM_CALL_STATUS if use_synthetic else
                     "completed" if target_audience_proposal is not None else
                     "failed" if target_audience_error else "not_authorized"
                 )
@@ -481,6 +497,8 @@ def make_handler(*, service_mode: bool = False):
                     if review["status"] == "ok":
                         review["status"] = "partial"
                 review = _orchestrator_review_projection(review)
+                if use_synthetic:
+                    synthetic.apply_synthetic_limitations(review)
                 _validate_review_result(review, request_id)
                 _LOGGER.info("Review assembly and contract validation completed in %.3fs",
                              time.perf_counter() - review_started)
@@ -543,6 +561,7 @@ def make_handler(*, service_mode: bool = False):
 
 def serve(host: str = "127.0.0.1", port: int = 8766, *, service_mode: bool = False) -> None:
     _load_project_r2_env()
+    synthetic.configured_review_source()  # 지원하지 않는 값이면 시작하지 않는다.
     if service_mode:
         if host != "0.0.0.0":
             raise ValueError("Container service mode must bind to 0.0.0.0.")

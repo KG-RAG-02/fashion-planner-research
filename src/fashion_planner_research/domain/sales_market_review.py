@@ -141,6 +141,9 @@ def _review_evidence(
             evidence_supports = supports + ["result.margin_estimate", "result.margin_analysis"]
             if analysis.get("usd_krw_conversion"):
                 evidence_supports.extend(["result.margin_price_range_analysis"])
+        # 합성 자료원처럼 자료가 자기 이름과 해석을 가지고 오면 그것을 쓴다.
+        label = str(analysis.get("source_name") or label)
+        interpretation = str(analysis.get("evidence_interpretation") or interpretation)
         for ref in refs:
             if isinstance(ref, dict) and isinstance(ref.get("object_key"), str):
                 add({
@@ -162,7 +165,7 @@ def _review_evidence(
             source_rows = group.get("sources", [])
             add({
                 "source_id": source_type, "source_type": source_type,
-                "source_name": "Owner-provided public fabric listing snapshot",
+                "source_name": str(group.get("source_name") or "Owner-provided public fabric listing snapshot"),
                 "locator": ref["object_key"],
                 "version": str(ref.get("version") or ref.get("sha256") or ""),
                 "as_of": observed_at, "observed_at": observed_at,
@@ -176,7 +179,7 @@ def _review_evidence(
                     "matched_record_ids": [item.get("record_id") for item in source_rows
                                             if isinstance(item, dict) and item.get("record_id")],
                 },
-                "interpretation": "Public listing reference only; it is not a verified purchase or production cost, and material composition is not inferred.",
+                "interpretation": str(group.get("evidence_interpretation") or "Public listing reference only; it is not a verified purchase or production cost, and material composition is not inferred."),
             }, supports=["result.material_cost_analysis", "result.fabric_cost_analysis",
                          "result.margin_estimate", "result.margin_analysis",
                          "result.margin_price_range_analysis"])
@@ -188,7 +191,7 @@ def _review_evidence(
                 "source_id": str(conversion.get("provider") or "frankfurter"),
                 "source_type": "usd_krw_reference_rate",
                 "source_name": str(conversion.get("provider") or "Frankfurter USD/KRW reference rate"),
-                "locator": "https://api.frankfurter.dev/v2/rate/usd/krw",
+                "locator": str(conversion.get("source_url") or "https://api.frankfurter.dev/v2/rate/usd/krw"),
                 "version": str(conversion.get("rate_date") or ""),
                 "as_of": conversion.get("rate_date"),
                 "permission_status": "public_reference_data",
