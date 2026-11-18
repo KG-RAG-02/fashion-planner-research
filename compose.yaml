@@ -1,8 +1,9 @@
 services:
-  sales-market-review-agent:
+  research:
     build:
       context: .
-    image: vogue-sales-market-review-agent:local
+      target: runtime
+    image: fashion-planner-research:local
     user: "10001:10001"
     read_only: true
     tmpfs:
@@ -24,11 +25,11 @@ services:
     volumes:
       - hm-cache:/data/hm-cache
 
-  sales-market-review-agent-tests:
+  research-tests:
     build:
       context: .
-    image: vogue-sales-market-review-agent:local
-    command: ["python", "scripts/run_tests.py"]
+      target: test
+    image: fashion-planner-research:test
     network_mode: none
     profiles: ["test"]
     restart: "no"
