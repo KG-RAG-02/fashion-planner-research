@@ -9,7 +9,7 @@ import unittest
 from email.message import Message
 from unittest.mock import patch
 
-from fashion_planner_research.http_server import REVIEW_CONTRACT_VERSION, _validate_review_result, make_handler, serve
+from fashion_planner_research.http_server import REVIEW_CONTRACT_VERSION, REVIEW_PATH, _validate_review_result, make_handler, serve
 
 
 class ReviewHttpTests(unittest.TestCase):
@@ -73,6 +73,29 @@ class ReviewHttpTests(unittest.TestCase):
 
         handler.wfile = DisconnectedWriter()
         handler._send_json(200, {"status": "ok"})
+
+    def test_other_methods_on_the_review_route_return_405_before_authentication(self):
+        for method in ("GET", "HEAD", "PUT", "DELETE", "PATCH", "OPTIONS", "TRACE", "CONNECT"):
+            with self.subTest(method=method):
+                handler_type = make_handler()
+                handler = object.__new__(handler_type)
+                handler.path = REVIEW_PATH
+                handler.command = method
+                handler.headers = Message()
+                handler.wfile = io.BytesIO()
+                sent: dict[str, object] = {}
+                headers: dict[str, str] = {}
+                handler.send_response = lambda status, *args, sent=sent: sent.__setitem__("status", status)
+                handler.send_header = lambda name, value, headers=headers: headers.__setitem__(name, value)
+                handler.end_headers = lambda: None
+                getattr(handler_type, f"do_{method}")(handler)
+                self.assertEqual(sent["status"], 405)
+                self.assertEqual(headers.get("Allow"), "POST")
+                body = handler.wfile.getvalue()
+                if method == "HEAD":
+                    self.assertEqual(body, b"")
+                else:
+                    self.assertEqual(json.loads(body)["error"]["code"], "METHOD_NOT_ALLOWED")
 
     def test_health_reports_local_and_container_service_modes(self):
         local_status, local_body = self.request("GET", "/api/health")
