@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:vogue:sales-market-review:0.3:error",
-  "title": "Project_07 review request/service error envelope",
+  "$id": "https://contracts.fashion-planner.invalid/research/research-review-error.schema.json",
+  "title": "research review request/service error envelope",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,7 +11,7 @@
   ],
   "properties": {
     "contract_version": {
-      "const": "vogue-sales-market-review/0.3-proposal"
+      "const": "research-handoff"
     },
     "request_id": {
       "type": [

@@ -18,9 +18,9 @@ from fashion_planner_research.sources import synthetic_review_source as syntheti
 from fashion_planner_research.sources.market.fabric_price_r2_source import _REQUIRED_COLUMNS
 
 ROOT = Path(__file__).resolve().parents[1]
-REQUEST = json.loads((ROOT / "contracts/examples/sales-market-review-0.3-proposal.request.json").read_text())
+REQUEST = json.loads((ROOT / "contracts/examples/research-review.request.json").read_text())
 RESPONSE_SCHEMA = json.loads(
-    (ROOT / "contracts/schemas/proposals/sales-market-review-0.3-proposal-response.schema.json").read_text()
+    (ROOT / "contracts/schemas/research-review-response.schema.json").read_text()
 )
 ENV = {
     "VOGUE_AGENT_SERVICE_BEARER_TOKEN": "test-token",

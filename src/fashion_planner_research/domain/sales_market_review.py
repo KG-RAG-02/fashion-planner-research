@@ -13,7 +13,7 @@ from .apparel_costing import (
     calculate_benchmark_margin_estimate,
     calculate_price_range_margin_analysis,
 )
-REVIEW_SCHEMA_VERSION = "sales-market-review/0.1-internal"
+REVIEW_SCHEMA_VERSION = "1.0.0"
 
 
 def _fabric_reference(fabric_rows: tuple[dict[str, Any], ...]) -> tuple[float | None, str | None, list[str]]:
@@ -463,7 +463,7 @@ def build_sales_market_review(
     request_id: str,
     *,
     product_context: dict[str, Any],
-    producer_id: str = "sales-market-agent",
+    producer_id: str = "research",
     fabric_price_analysis: tuple[dict[str, Any], ...] = (),
     fabric_price_error: str | None = None,
     fabric_price_source_status: str | None = None,

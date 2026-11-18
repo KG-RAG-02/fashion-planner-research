@@ -20,9 +20,9 @@ from .runtime_settings import hm_research_noncommercial_enabled, target_llm_tran
 from .sources.sales.hm_kaggle.hm_combined_research_source import HmCombinedResearchSource
 from .sources import synthetic_review_source as synthetic
 
-REVIEW_CONTRACT_VERSION = "vogue-sales-market-review/0.3-proposal"
-REVIEW_PATH = "/v1/agents/sales-market-agent/reviews"
-AGENT_ID = "sales-market-agent"
+REVIEW_CONTRACT_VERSION = "research-handoff"
+REVIEW_PATH = "/v1/agents/research/reviews"
+AGENT_ID = "research"
 MAX_BODY_BYTES = 1_048_576
 _LOGGER = logging.getLogger(__name__)
 _REVIEW_REQUIRED_FIELDS = frozenset({
@@ -552,7 +552,7 @@ def make_handler(*, service_mode: bool = False):
             if isinstance(body, dict):
                 request_id = _safe_error_request_id(body.get("request_id"))
             if not isinstance(body, dict) or body.get("contract_version") != REVIEW_CONTRACT_VERSION:
-                self._send_json(422, _review_error_payload("UNSUPPORTED_CONTRACT_VERSION", "This route accepts vogue-sales-market-review/0.3-proposal.", request_id))
+                self._send_json(422, _review_error_payload("UNSUPPORTED_CONTRACT_VERSION", "This route accepts research-handoff.", request_id))
                 return
             self._handle_product_review(body)
 

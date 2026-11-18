@@ -1,16 +1,16 @@
 {
-  "contract_version": "vogue-sales-market-review/0.3-proposal",
-  "request_id": "review-http-001",
+  "contract_version": "research-handoff",
+  "request_id": "review-001",
   "producer": {
-    "agent_id": "sales-market-agent",
-    "schema_version": "sales-market-review/0.1-internal"
+    "agent_id": "research",
+    "schema_version": "1.0.0"
   },
   "status": "no_results",
   "result": {
-    "schema_version": "sales-market-review/0.1-internal",
-    "request_id": "review-http-001",
+    "schema_version": "1.0.0",
+    "request_id": "review-001",
     "draft_id": null,
-    "producer_id": "sales-market-agent",
+    "producer_id": "research",
     "status": "no_results",
     "draft_context": {
       "category": "Outerwear",
@@ -24,39 +24,25 @@
     "customer_segment_analysis": [],
     "target_audience_analysis": {
       "status": "no_results",
-      "proposal": null,
       "age_cohort": null,
       "limitations": [
         "Age profile is unavailable or disabled.",
         "LLM target hypothesis is unavailable or not authorized."
       ],
-      "evidence_ids": [],
-      "transfer_authorized": false,
-      "llm_call_status": "not_authorized"
+      "evidence_ids": []
     },
     "margin_estimate": {
       "status": "benchmark_only",
       "estimate_type": "industry_average_gross_margin_benchmark",
       "basis": "nyu_stern_us_apparel_gross_margin_january_2026",
       "benchmark_gross_margin_rate": 0.5688,
-      "estimated_gross_margin_rate": 0.5688,
       "benchmark_source": "NYU Stern Damodaran Margins by Sector (US), January 2026",
       "benchmark_sample_size": 35,
       "benchmark_region": "US",
-      "formula": {
-        "benchmark_implied_cost_allowance": "selling_price * (1 - apparel_industry_gross_margin_rate)",
-        "fabric_cost_per_garment": "fabric_unit_cost * fabric_consumption",
-        "remaining_cost_allowance": "benchmark_implied_cost_allowance - fabric_cost_per_garment"
-      },
       "selling_price": null,
       "currency": null,
       "evidence_ids": [
         "source:0734512f658ef4699fbaf75d"
-      ],
-      "limitations": [
-        "The 56.88% rate is an average for 35 US public apparel companies; it is not a Korea-specific or product-specific forecast.",
-        "A public fabric listing reference is not a verified purchasing cost.",
-        "This benchmark estimate represents US apparel sector economics; it is not a product-specific margin observation."
       ]
     },
     "evidence": [
@@ -74,13 +60,6 @@
           "result.margin_analysis"
         ],
         "analysis": {
-          "observed": {
-            "industry": "Apparel",
-            "gross_margin_rate": 0.5688,
-            "firm_count": 35,
-            "region": "US",
-            "period": "January 2026"
-          },
           "interpretation": "Sector-level benchmark scenario, not this product's observed margin or a Korea-specific forecast."
         }
       }
@@ -89,7 +68,7 @@
       {
         "field": "historical_hm_transaction_prices",
         "reason": "source_not_configured_or_disabled",
-        "message": "Enable non-commercial H&M research mode and configure its R2 source."
+        "message": "H&M non-commercial research is disabled."
       },
       {
         "field": "fabric_costs",
@@ -99,12 +78,12 @@
       {
         "field": "customer_segments",
         "reason": "source_not_configured_or_disabled",
-        "message": "Enable non-commercial H&M research mode and configure its R2 source."
+        "message": "H&M non-commercial research is disabled."
       }
     ],
     "errors": [],
     "limitations": [
-      "Margin analysis uses the US apparel industry gross-margin benchmark; it is not this product's actual gross margin."
+      "[마진 참고] 미국 의류 업계 평균 매출총이익률 벤치마크이며 이 상품의 실제 마진이 아닙니다."
     ],
     "decision_support": {
       "recommendation": "review_required",
@@ -130,9 +109,7 @@
       "sample_size": null,
       "period": null,
       "proposed_price": null,
-      "method": "normalized source mean × 590 as USD; convert using dated USD/KRW reference rate; round suggested KRW price to nearest 1,000",
       "proposal_reason": "No matching H&M price observations are available.",
-      "limitations": [],
       "evidence_ids": []
     },
     "fabric_cost_analysis": {
@@ -140,8 +117,6 @@
       "unit": null,
       "currency": null,
       "matched_material": "wool blend",
-      "source_record_ids": [],
-      "price_references": [],
       "limitations": [
         "Fabric listing references are not verified purchase costs; no verified per-meter cost is asserted."
       ],
@@ -150,7 +125,6 @@
     "margin_analysis": {
       "status": "benchmark_only",
       "basis": "nyu_stern_us_apparel_gross_margin_january_2026",
-      "formula": "estimated_gross_margin_rate = NYU Stern US apparel gross margin benchmark",
       "selling_price": null,
       "currency": null,
       "margin_rate_percent": 56.88,

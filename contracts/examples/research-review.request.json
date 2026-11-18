@@ -1,5 +1,5 @@
 {
-  "contract_version": "vogue-sales-market-review/0.3-proposal",
+  "contract_version": "research-handoff",
   "request_id": "review-001",
   "input": {
     "request_id": "review-001",
@@ -13,27 +13,27 @@
     "product_evidence": {
       "category": {
         "kind": "user_requested",
-        "source_ref": "p06.draft.product_profile.category",
+        "source_ref": "novelty.draft.product_profile.category",
         "evidence_ids": []
       },
       "product_type": {
         "kind": "user_requested",
-        "source_ref": "p06.draft.product_profile.product_type",
+        "source_ref": "novelty.draft.product_profile.product_type",
         "evidence_ids": []
       },
       "gender": {
         "kind": "user_requested",
-        "source_ref": "p06.draft.product_profile.gender",
+        "source_ref": "novelty.draft.product_profile.gender",
         "evidence_ids": []
       },
       "season": {
         "kind": "user_requested",
-        "source_ref": "p06.draft.product_profile.season",
+        "source_ref": "novelty.draft.product_profile.season",
         "evidence_ids": []
       },
       "material": {
         "kind": "evidence_observation",
-        "source_ref": "p06.draft.product_profile.material",
+        "source_ref": "novelty.draft.product_profile.material",
         "evidence_ids": [
           "trend:evidence-example"
         ]

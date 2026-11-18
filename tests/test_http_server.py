@@ -150,12 +150,12 @@ class ReviewHttpTests(unittest.TestCase):
 
     def test_review_route_returns_review_and_human_decision_support(self):
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            "POST", "/v1/agents/research/reviews", self.valid_review(),
         )
         self.assertEqual(status, 200)
         self.assertEqual(response["contract_version"], REVIEW_CONTRACT_VERSION)
-        self.assertEqual(response["producer"]["agent_id"], "sales-market-agent")
-        self.assertEqual(response["producer"]["schema_version"], "sales-market-review/0.1-internal")
+        self.assertEqual(response["producer"]["agent_id"], "research")
+        self.assertEqual(response["producer"]["schema_version"], "1.0.0")
         self.assertEqual(response["request_id"], "review-http-001")
         self.assertEqual(response["status"], response["result"]["status"])
         self.assertEqual(response["result"]["request_id"], response["request_id"])
@@ -170,7 +170,7 @@ class ReviewHttpTests(unittest.TestCase):
 
     def test_no_sources_returns_no_results_not_empty_partial(self):
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            "POST", "/v1/agents/research/reviews", self.valid_review(),
         )
         self.assertEqual(status, 200)
         self.assertEqual(response["status"], "no_results")
@@ -198,7 +198,7 @@ class ReviewHttpTests(unittest.TestCase):
             "permission_status": "owner_provided_snapshot",
         },)
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            "POST", "/v1/agents/research/reviews", self.valid_review(),
             research_bundle={
                 "fabric_prices": fabric, "fabric_price_error": None,
                 "fabric_price_source_status": "available",
@@ -296,7 +296,7 @@ class ReviewHttpTests(unittest.TestCase):
                 request["request_id"] = request_id
                 request["input"]["request_id"] = request_id
                 status, response = self.request(
-                    "POST", "/v1/agents/sales-market-agent/reviews", request,
+                    "POST", "/v1/agents/research/reviews", request,
                     research_bundle=bundle,
                     env_overrides={
                         "VOGUE_HM_RESEARCH_NONCOMMERCIAL": "true",
@@ -390,7 +390,7 @@ class ReviewHttpTests(unittest.TestCase):
             "sources": [{"object_key": "synthetic/transactions.parquet", "version": "fixture-v1"}],
         }
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            "POST", "/v1/agents/research/reviews", self.valid_review(),
             research_bundle={
                 "fabric_prices": (), "fabric_price_error": None,
                 "fabric_price_source_status": "not_configured",
@@ -433,7 +433,7 @@ class ReviewHttpTests(unittest.TestCase):
             "sources": [{"object_key": "transactions.parquet", "version": "synthetic-v1"}],
         }
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            "POST", "/v1/agents/research/reviews", self.valid_review(),
             research_bundle={
                 "fabric_prices": (), "fabric_price_error": "synthetic access denied",
                 "fabric_price_source_status": "error",
@@ -452,7 +452,7 @@ class ReviewHttpTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "missing contract fields"):
             _validate_review_result({}, "review-http-001")
         _status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            "POST", "/v1/agents/research/reviews", self.valid_review(),
         )
         invalid = dict(response["result"], status="partial")
         with self.assertRaisesRegex(ValueError, "status claims results"):
@@ -464,7 +464,7 @@ class ReviewHttpTests(unittest.TestCase):
 
     def test_r2_fabric_read_failure_is_nonfatal_and_preserves_request_id(self):
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            "POST", "/v1/agents/research/reviews", self.valid_review(),
             research_bundle={
                 "fabric_prices": (), "fabric_price_error": "synthetic snapshot unavailable",
                 "fabric_price_source_status": "error",
@@ -487,7 +487,7 @@ class ReviewHttpTests(unittest.TestCase):
 
     def test_customer_age_failure_is_partial_and_keeps_review_linkage(self):
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            "POST", "/v1/agents/research/reviews", self.valid_review(),
             research_bundle={
                 "fabric_prices": (), "fabric_price_error": None,
                 "fabric_price_source_status": "not_configured",
@@ -521,7 +521,7 @@ class ReviewHttpTests(unittest.TestCase):
             "sources": [{"object_key": "synthetic/transactions.parquet", "version": "fixture-v1"}],
         }
         response_status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            "POST", "/v1/agents/research/reviews", self.valid_review(),
             research_bundle={
                 "fabric_prices": (), "fabric_price_error": None,
                 "fabric_price_source_status": "no_match",
@@ -564,7 +564,7 @@ class ReviewHttpTests(unittest.TestCase):
 
     def test_unconfigured_fabric_source_returns_missing_data_without_invented_cost(self):
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            "POST", "/v1/agents/research/reviews", self.valid_review(),
         )
 
         self.assertEqual(status, 200)
@@ -588,7 +588,7 @@ class ReviewHttpTests(unittest.TestCase):
         payload = self.valid_review()
         payload["input"]["product"].pop("material")
         payload["input"]["product_evidence"].pop("material")
-        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+        status, response = self.request("POST", "/v1/agents/research/reviews", payload)
         self.assertEqual(status, 200)
         fabric_missing = next(item for item in response["result"]["missing_data"]
                               if item["field"] == "fabric_costs")
@@ -602,7 +602,7 @@ class ReviewHttpTests(unittest.TestCase):
             "season": "2027SS", "material": "cotton",
         })
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", payload,
+            "POST", "/v1/agents/research/reviews", payload,
             research_bundle={
                 "fabric_prices": (), "fabric_price_error": None,
                 "fabric_price_source_status": "no_match",
@@ -624,7 +624,7 @@ class ReviewHttpTests(unittest.TestCase):
 
     def test_configured_fabric_source_without_material_match_is_not_a_read_error(self):
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(),
+            "POST", "/v1/agents/research/reviews", self.valid_review(),
             research_bundle={
                 "fabric_prices": (), "fabric_price_error": None,
                 "fabric_price_source_status": "no_match",
@@ -652,7 +652,7 @@ class ReviewHttpTests(unittest.TestCase):
                 "evidence_ids": [],
             },
         }
-        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+        status, response = self.request("POST", "/v1/agents/research/reviews", payload)
         self.assertEqual(status, 200)
         self.assertEqual(response["result"]["draft_context"], {"category": "Outerwear"})
 
@@ -662,14 +662,14 @@ class ReviewHttpTests(unittest.TestCase):
             "category": "Outerwear", "product_type": None, "gender": None,
             "season": None, "material": None,
         }
-        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+        status, response = self.request("POST", "/v1/agents/research/reviews", payload)
         self.assertEqual(status, 200)
         self.assertEqual(response["result"]["draft_context"], {"category": "Outerwear"})
 
     def test_category_is_required(self):
         payload = self.valid_review()
         payload["input"]["product"] = {"product_type": "Jacket"}
-        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+        status, response = self.request("POST", "/v1/agents/research/reviews", payload)
         self.assertEqual(status, 422)
         self.assertEqual(response["error"]["code"], "INVALID_PRODUCT")
         self.assertEqual(response["contract_version"], REVIEW_CONTRACT_VERSION)
@@ -677,7 +677,7 @@ class ReviewHttpTests(unittest.TestCase):
     def test_gender_must_use_supported_enum(self):
         payload = self.valid_review()
         payload["input"]["product"]["gender"] = "WOMEN"
-        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+        status, response = self.request("POST", "/v1/agents/research/reviews", payload)
         self.assertEqual(status, 422)
         self.assertEqual(response["error"]["code"], "INVALID_GENDER")
 
@@ -689,7 +689,7 @@ class ReviewHttpTests(unittest.TestCase):
             with self.subTest(field=field):
                 payload = self.valid_review()
                 payload["input"]["product"][field] = value
-                status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+                status, response = self.request("POST", "/v1/agents/research/reviews", payload)
                 self.assertEqual(status, 422)
                 self.assertEqual(response["error"]["code"], "INVALID_PRODUCT")
 
@@ -701,13 +701,13 @@ class ReviewHttpTests(unittest.TestCase):
             with self.subTest(field=field):
                 payload = self.valid_review()
                 payload["input"][field] = value
-                status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+                status, response = self.request("POST", "/v1/agents/research/reviews", payload)
                 self.assertEqual(status, 422)
                 self.assertEqual(response["error"]["code"], "INVALID_INPUT")
 
     def test_review_requires_bearer_authentication(self):
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", self.valid_review(), token=None,
+            "POST", "/v1/agents/research/reviews", self.valid_review(), token=None,
         )
         self.assertEqual(status, 401)
         # Authentication runs before body/version dispatch on the shared route.
@@ -716,10 +716,10 @@ class ReviewHttpTests(unittest.TestCase):
         self.assertEqual(response["error"]["code"], "UNAUTHORIZED")
         self.assertTrue(response["error"]["message"])
 
-    def test_retired_02_contract_is_rejected_explicitly(self):
+    def test_other_contract_names_are_rejected_explicitly(self):
         payload = self.valid_review()
-        payload["contract_version"] = "vogue-sales-market-review/0.2-proposal"
-        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+        payload["contract_version"] = "novelty-handoff"
+        status, response = self.request("POST", "/v1/agents/research/reviews", payload)
         self.assertEqual(status, 422)
         self.assertEqual(response["contract_version"], REVIEW_CONTRACT_VERSION)
         self.assertEqual(response["error"]["code"], "UNSUPPORTED_CONTRACT_VERSION")
@@ -727,14 +727,14 @@ class ReviewHttpTests(unittest.TestCase):
     def test_current_contract_requires_provenance_for_each_product_field(self):
         payload = self.valid_review()
         del payload["input"]["product_evidence"]["material"]
-        status, response = self.request("POST", "/v1/agents/sales-market-agent/reviews", payload)
+        status, response = self.request("POST", "/v1/agents/research/reviews", payload)
         self.assertEqual(status, 422)
         self.assertEqual(response["error"]["code"], "INVALID_PRODUCT_EVIDENCE")
 
     def test_retired_research_endpoints_are_not_exposed(self):
         for route in (
-            "/v1/agents/sales-market-agent/runs",
-            "/v1/agents/sales-market-agent/structured-runs",
+            "/v1/agents/research/runs",
+            "/v1/agents/research/structured-runs",
             "/v1/agents/market-research-agent/runs",
         ):
             with self.subTest(route=route):
@@ -744,7 +744,7 @@ class ReviewHttpTests(unittest.TestCase):
 
     def test_simulation_stays_disabled_by_default(self):
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/simulation-runs", self.valid_review(),
+            "POST", "/v1/agents/research/simulation-runs", self.valid_review(),
         )
         self.assertEqual(status, 404)
         self.assertEqual(response["error"]["code"], "NOT_FOUND")
@@ -753,7 +753,7 @@ class ReviewHttpTests(unittest.TestCase):
         payload = self.valid_review()
         payload["input"]["request_id"] = "different-id"
         status, response = self.request(
-            "POST", "/v1/agents/sales-market-agent/reviews", payload,
+            "POST", "/v1/agents/research/reviews", payload,
         )
         self.assertEqual(status, 422)
         self.assertEqual(response["error"]["code"], "REQUEST_ID_MISMATCH")

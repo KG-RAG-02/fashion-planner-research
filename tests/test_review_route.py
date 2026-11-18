@@ -17,9 +17,9 @@ TOKEN = "test-only-token"
 
 class CurrentReviewRouteTests(unittest.TestCase):
     def test_orchestrator_product_request_uses_review_api_without_artifact_store(self):
-        request = json.loads((ROOT / "contracts/examples/sales-market-review-0.3-proposal.request.json").read_text())
-        request_schema = json.loads((ROOT / "contracts/schemas/proposals/sales-market-review-0.3-proposal.schema.json").read_text())
-        response_schema = json.loads((ROOT / "contracts/schemas/proposals/sales-market-review-0.3-proposal-response.schema.json").read_text())
+        request = json.loads((ROOT / "contracts/examples/research-review.request.json").read_text())
+        request_schema = json.loads((ROOT / "contracts/schemas/research-review-request.schema.json").read_text())
+        response_schema = json.loads((ROOT / "contracts/schemas/research-review-response.schema.json").read_text())
         Draft202012Validator(request_schema).validate(request)
         research = {
             "fabric_prices": (), "fabric_price_error": None,
@@ -46,18 +46,18 @@ class CurrentReviewRouteTests(unittest.TestCase):
             handler_type.do_POST(handler)
         response = json.loads(handler.wfile.getvalue())
         self.assertEqual(handler.status, 200)
-        self.assertEqual(response["contract_version"], "vogue-sales-market-review/0.3-proposal")
+        self.assertEqual(response["contract_version"], "research-handoff")
         self.assertEqual(response["request_id"], request["request_id"])
         Draft202012Validator(response_schema).validate(response)
         source.assert_called_once_with(request["input"]["product"])
 
     def test_published_response_and_error_payloads_match_their_schemas(self):
-        response_example = json.loads((ROOT / "contracts/examples/sales-market-review-0.3-proposal.response.json").read_text())
-        response_schema = json.loads((ROOT / "contracts/schemas/proposals/sales-market-review-0.3-proposal-response.schema.json").read_text())
-        error_schema = json.loads((ROOT / "contracts/schemas/proposals/sales-market-review-0.3-error.schema.json").read_text())
+        response_example = json.loads((ROOT / "contracts/examples/research-review.response.json").read_text())
+        response_schema = json.loads((ROOT / "contracts/schemas/research-review-response.schema.json").read_text())
+        error_schema = json.loads((ROOT / "contracts/schemas/research-review-error.schema.json").read_text())
         Draft202012Validator(response_schema).validate(response_example)
         Draft202012Validator(error_schema).validate({
-            "contract_version": "vogue-sales-market-review/0.3-proposal",
+            "contract_version": "research-handoff",
             "request_id": "review-contract-check",
             "error": {"code": "UPSTREAM_UNAVAILABLE", "message": "Source unavailable."},
         })

@@ -1,7 +1,7 @@
 {
   "$schema": "https://json-schema.org/draft/2020-12/schema",
-  "$id": "urn:vogue:sales-market-review:0.3:proposal",
-  "title": "Project_07 product review request with per-field provenance",
+  "$id": "https://contracts.fashion-planner.invalid/research/research-review-request.schema.json",
+  "title": "research product review request with per-field provenance",
   "type": "object",
   "additionalProperties": false,
   "required": [
@@ -11,7 +11,7 @@
   ],
   "properties": {
     "contract_version": {
-      "const": "vogue-sales-market-review/0.3-proposal"
+      "const": "research-handoff"
     },
     "request_id": {
       "type": "string",
