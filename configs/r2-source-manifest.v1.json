@@ -4,6 +4,6 @@
     "hm_articles": "articles.parquet",
     "hm_transactions": "transactions_train.parquet",
     "hm_customers": "customers.csv",
-    "fabric_prices": "example/fabric-prices/fabric_price_list.csv"
+    "fabric_prices": "fabric-prices/fabric_price_list.csv"
   }
 }

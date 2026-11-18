@@ -22,7 +22,7 @@ from ..shared.r2_object_store import (
 from ..shared.r2_source_manifest import r2_source_key
 
 
-DEFAULT_FABRIC_PRICE_KEY = "example/fabric-prices/fabric_price_list.csv"
+DEFAULT_FABRIC_PRICE_KEY = "fabric-prices/fabric_price_list.csv"
 _MAX_BYTES = 1_000_000
 _REQUIRED_COLUMNS = {
     "record_id", "product_name", "category", "composition", "construction_or_finish",
