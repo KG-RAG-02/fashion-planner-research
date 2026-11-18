@@ -24,8 +24,8 @@ research는 orchestrator가 보낸 상품 필드 몇 개를 받아, 설정된 �
 ## 요청
 
 - 바깥 봉투의 `request_id`와 `input.request_id`는 같아야 합니다.
-- `input.product`: `category`(필수), `product_type`, `gender`(`women`, `men`, `unisex`, `unknown`), `season`, `material`(선택). 문자열은 120자 이하입니다.
-- `input.product_evidence`: 보낸 상품 필드마다 출처 하나. `kind`(`user_requested`, `evidence_observation`, `proposal`, `hypothesis`, `to_validate`, `unknown`), `source_ref`(예: `novelty.draft.product_profile.category`), `evidence_ids`(목록, 실제 근거 ID가 없으면 빈 목록)를 담습니다.
+- `input.product`: `category`(필수), `product_type`, `gender`(`women`, `men`, `unisex`, `unknown`), `season`, `material`(선택). 문자열은 120자 이하입니다. fashion-planner 흐름에서는 orchestrator가 다섯 필드를 모두 보내고, novelty 초안에 값이 없으면 대체값(`product_type`=카테고리, `gender`=`unknown`, `season`=초안 시즌 또는 `미정`, `material`=`혼방 소재`)을 `kind: proposal`로 넣습니다. `proposal`인 값은 확인되지 않은 제안입니다.
+- `input.product_evidence`: 보낸 상품 필드마다 출처 하나. `kind`(`user_requested`, `evidence_observation`, `proposal`, `hypothesis`, `to_validate`, `unknown`), `source_ref`(예: `novelty.draft.product_profile.category`), `evidence_ids`(목록, 실제 근거 ID가 없으면 빈 목록)를 담습니다. 스키마는 `kind` 6가지를 허용하지만, fashion-planner 흐름에서 orchestrator가 넘기는 것은 `user_requested`, `evidence_observation`, `proposal` 세 가지입니다.
 - 모르는 필드, 다른 계약 이름, 1 MiB를 넘는 본문은 거부합니다.
 
 research는 기획 초안 전체, 제안가, 원가표, 이미지를 받지 않습니다. 그래서 응답은 초안 ID나 해시를 증명하지 않습니다.

@@ -21,7 +21,7 @@ orchestrator가 novelty 초안으로 요청을 만듭니다. research는 아래 
 </picture>
 
 1. **인증과 요청 검증**(`http_server.py`). Bearer 토큰을 상수 시간으로 비교하고, `Content-Type: application/json`, 최대 1 MiB 본문, 지원하는 계약 이름(`research-handoff`), 바깥과 `input`의 같은 `request_id`를 확인합니다.
-2. **허용 필드만 남깁니다.** `category`(필수), `product_type`, `gender`(`women`, `men`, `unisex`, `unknown`), `season`, `material`, 그리고 보낸 필드마다 출처(`kind`, `source_ref`, `evidence_ids`) 하나. 모르는 필드는 거부합니다.
+2. **허용 필드만 남깁니다.** `category`(필수), `product_type`, `gender`(`women`, `men`, `unisex`, `unknown`), `season`, `material`, 그리고 보낸 필드마다 출처(`kind`, `source_ref`, `evidence_ids`) 하나. 모르는 필드는 거부합니다. orchestrator는 다섯 필드를 모두 보내고, novelty 초안에 값이 없거나 넘길 수 없는 `kind`이면 대체값(`product_type`=카테고리, `gender`=`unknown`, `season`=초안 시즌 또는 `미정`, `material`=`혼방 소재`)을 `kind: proposal`로 넣습니다. 리뷰는 `proposal`인 값을 확인된 사실로 다루지 않습니다.
 3. **시장 자료원을 읽습니다**(`sources/`). [자료원 모드](#자료원-모드)를 보세요.
 4. **환율을 적용합니다**(`domain/currency_conversion.py`). 과거 가격 집계가 있을 때만 Frankfurter에서 USD/KRW 기준 환율을 가져오고, API에 닿지 않으면 날짜가 적힌 대체 환율을 씁니다.
 5. **타깃 고객 가설**(`llm/target_audience.py`). LLM 전송이 허용됐을 때만 만듭니다. [ADR 0001](decisions/0001-deterministic-figures-llm-for-hypotheses-only.md)을 보세요.

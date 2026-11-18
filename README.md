@@ -16,7 +16,7 @@
 
 ## 개요
 
-novelty가 상품 초안을 만들면, orchestrator가 그중 일부만 골라 research에 보냅니다. `category`(필수)와 `product_type`, `gender`, `season`, `material`(선택), 그리고 필드마다의 출처입니다. research는 다음을 수행합니다.
+novelty가 상품 초안을 만들면, orchestrator가 그중 일부만 골라 research에 보냅니다. `category`(필수)와 `product_type`, `gender`, `season`, `material`(선택), 그리고 필드마다의 출처입니다. fashion-planner 흐름에서는 orchestrator가 다섯 필드를 모두 보내며, 초안에 값이 없으면 대체값을 넣어 `kind: proposal`로 표시합니다. `proposal`인 값은 확인되지 않은 제안입니다. research는 다음을 수행합니다.
 
 - 해당 카테고리·세그먼트의 H&M 과거 거래가 통계를 찾고, 평균을 원화 참고가로 바꿉니다.
 - 그 카테고리를 산 고객의 연령대를 집계로만 보여 줍니다. 작은 집단은 숨깁니다.
