@@ -6,7 +6,6 @@ import hashlib
 import json
 import logging
 import os
-from pathlib import Path
 import re
 import threading
 import time
@@ -17,6 +16,7 @@ from urllib.parse import urlsplit
 
 from ....sources.shared.r2_object_store import R2ObjectStore, R2Settings
 from ....sources.shared.r2_source_manifest import r2_source_key
+from ....resource_paths import CONFIGS_DIR
 from ....runtime_settings import hm_research_noncommercial_enabled
 from .duckdb_http import configure_httpfs
 from .hm_customer_age_source import _map_gender, _map_product_type, _map_requested_category, _safe_failure_category
@@ -26,9 +26,7 @@ class HmPriceSourceError(RuntimeError):
     """Safe error raised when the historical Kaggle price source is unavailable."""
 
 
-_ROOT = Path(__file__).resolve().parents[5]
-_CONFIGS_DIR = Path(os.getenv("PROJECT07_CONFIGS_DIR", _ROOT / "configs"))
-_MAPPING_PATH = _CONFIGS_DIR / "hm-category-map.v1.json"
+_MAPPING_PATH = CONFIGS_DIR / "hm-category-map.json"
 _MAX_ARTICLES_BYTES = 50_000_000
 _MAX_TRANSACTIONS_BYTES = 1_000_000_000
 _CACHE: OrderedDict[tuple[str, ...], dict[str, Any] | None] = OrderedDict()

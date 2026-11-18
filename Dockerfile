@@ -9,8 +9,6 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
     VOGUE_PROJECT07_DISABLE_DOTENV=1 \
     VOGUE_R2_HM_DB_CACHE_DIR=/data/hm-cache \
     VOGUE_HM_AGE_DUCKDB_TEMP_DIRECTORY=/data/hm-cache/duckdb-age-tmp \
-    PROJECT07_PROMPTS_DIR=/app/prompts \
-    PROJECT07_CONFIGS_DIR=/app/configs \
     VOGUE_DUCKDB_EXTENSION_DIRECTORY=/opt/duckdb/extensions
 
 WORKDIR /app
@@ -24,8 +22,6 @@ RUN groupadd --gid 10001 agent \
 COPY --chown=10001:10001 pyproject.toml README.md ./
 COPY --chown=10001:10001 src/ ./src/
 COPY --chown=10001:10001 contracts/ ./contracts/
-COPY --chown=10001:10001 prompts/ ./prompts/
-COPY --chown=10001:10001 configs/ ./configs/
 COPY --chown=10001:10001 scripts/ ./scripts/
 COPY --chown=10001:10001 tests/ ./tests/
 

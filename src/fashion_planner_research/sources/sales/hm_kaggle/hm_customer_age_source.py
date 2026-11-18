@@ -23,6 +23,7 @@ from urllib.parse import urlsplit
 
 from ....sources.shared.r2_object_store import R2ObjectStore, R2Settings
 from ....sources.shared.r2_source_manifest import r2_source_key
+from ....resource_paths import CONFIGS_DIR
 from ....runtime_settings import hm_research_noncommercial_enabled
 from .duckdb_http import configure_httpfs
 
@@ -31,9 +32,7 @@ class CustomerAgeSourceError(RuntimeError):
     """Safe, non-sensitive age-profile source error."""
 
 
-_ROOT = Path(__file__).resolve().parents[5]
-_CONFIGS_DIR = Path(os.getenv("PROJECT07_CONFIGS_DIR", _ROOT / "configs"))
-_MAPPING_PATH = _CONFIGS_DIR / "hm-category-map.v1.json"
+_MAPPING_PATH = CONFIGS_DIR / "hm-category-map.json"
 _CACHE: OrderedDict[tuple[str, ...], dict[tuple[str, str], dict[str, Any]]] = OrderedDict()
 _CACHE_LOCK = threading.Lock()
 _CACHE_INFLIGHT: dict[tuple[str, ...], Future[dict[tuple[str, str], dict[str, Any]]]] = {}

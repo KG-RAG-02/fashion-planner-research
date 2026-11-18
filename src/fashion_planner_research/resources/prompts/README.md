@@ -1,22 +1,9 @@
-# P07 target-audience prompt
+# 타깃 고객 가설 프롬프트
 
-`target_audience_hypothesis/v1/` supports one optional part of the active
-`POST /v1/agents/sales-market-agent/reviews` flow: generating a target-audience
-hypothesis. It is not the market-data analysis itself. P07 builds the prompt
-input from the allowlisted product fields and summarized customer-age,
-historical-price, and fabric-listing evidence. It does not include the full P06
-Draft or customer-level source rows.
+`target_audience_hypothesis/`는 리뷰의 선택 기능인 타깃 고객 가설에만 쓰입니다. 시장 수치 계산에는 쓰지 않습니다.
 
-The code default allows this transfer. Set
-`VOGUE_TARGET_LLM_TRANSFER_AUTHORIZED=false` in the process environment to turn
-it off. An enabled call needs `LLM_API_KEY`; missing credentials or a failed
-call is reported as a nonfatal target-audience error, while other review
-results are preserved. The generated output is a hypothesis, not an observed
-customer fact.
+- `system.md`: `llm/target_audience.py`가 읽는 시스템 프롬프트
+- `user_template.md`: 사람이 읽기 위한 입력 모양. 실제 입력 JSON은 코드가 허용된 상품 필드, 연령 집계, 원단 목록 집계만으로 만듭니다.
+- `examples.json`: 동작을 설명하는 합성 예시. 모델 호출에는 넣지 않습니다.
 
-- `system_template.md`: editable source prompt
-- `rendered_system.md`: runtime system prompt loaded by `llm/target_audience.py`
-- `user_template.md`: human-readable input shape; runtime builds a reduced JSON payload directly
-- `examples.json`: synthetic behavior examples; not injected into model calls
-
-The prompt output is validated in `src/fashion_planner_research/llm/target_audience.py`. Keep its required fields synchronized with `_OUTPUT_FIELDS` and the prompt's JSON instructions.
+LLM 전송이 허용되고 API 키가 있을 때만 호출합니다. 출력은 `llm/target_audience.py`의 `_OUTPUT_FIELDS`와 필드별 검사로 확인하므로, 프롬프트의 JSON 지시를 바꿀 때는 그쪽도 함께 맞춥니다. 결과는 관측 사실이 아니라 가설입니다.

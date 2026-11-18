@@ -21,6 +21,7 @@ from fashion_planner_research.sources.sales.hm_kaggle.hm_customer_age_source imp
     CustomerAgeSourceError,
     HmCustomerAgeResearchSource,
 )
+from fashion_planner_research.resource_paths import CONFIGS_DIR
 from fashion_planner_research.sources.market.fabric_price_r2_source import _REQUIRED_COLUMNS
 from fashion_planner_research.sources.shared.r2_object_store import R2ObjectStore, R2Settings
 
@@ -387,7 +388,7 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
         store = R2ObjectStore(
             R2Settings("account", "bucket", "key-id", "secret"), client=client,
         )
-        manifest = json.loads((Path(__file__).resolve().parents[2] / "configs" / "r2-source-manifest.v1.json").read_text())
+        manifest = json.loads((CONFIGS_DIR / "r2-source-manifest.json").read_text())
         return HmCustomerAgeResearchSource(
             store=store,
             customers_key=manifest["objects"]["hm_customers"],
@@ -570,7 +571,7 @@ class HmCustomerAgeR2PipelineTests(unittest.TestCase):
             import duckdb
         except ImportError:
             self.skipTest("optional DuckDB dependency is not installed")
-        mapping = json.loads((Path(__file__).resolve().parents[2] / "configs" / "hm-category-map.v1.json").read_text())
+        mapping = json.loads((CONFIGS_DIR / "hm-category-map.json").read_text())
         with tempfile.TemporaryDirectory(prefix="p07-hm-fixture-") as temp_dir:
             root = Path(temp_dir)
             articles = root / "articles.parquet"

@@ -7,20 +7,20 @@ import os
 from pathlib import Path
 from typing import Any
 
+from ...resource_paths import CONFIGS_DIR
 
-_ROOT = Path(__file__).resolve().parents[4]
-_CONFIGS_DIR = Path(os.getenv("PROJECT07_CONFIGS_DIR", _ROOT / "configs"))
-_DEFAULT_MANIFEST = _CONFIGS_DIR / "r2-source-manifest.v1.json"
+
+_DEFAULT_MANIFEST = CONFIGS_DIR / "r2-source-manifest.json"
 
 
 def r2_source_key(name: str, *, default: str) -> str:
-    """Resolve an R2 object key from the shared manifest or its default."""
+    """Resolve an R2 object key from the shared manifest or its default.
+
+    A manifest path set in the environment may be absolute or relative to the
+    current working directory.
+    """
     manifest_value = os.getenv("PROJECT07_R2_SOURCE_MANIFEST", "").strip()
-    manifest_path = Path(manifest_value) if manifest_value else _DEFAULT_MANIFEST
-    if not manifest_path.is_absolute():
-        manifest_path = (_ROOT / manifest_path).resolve()
-        if _ROOT not in manifest_path.parents and manifest_path != _ROOT:
-            raise ValueError("PROJECT07_R2_SOURCE_MANIFEST must point inside the project workspace.")
+    manifest_path = Path(manifest_value).resolve() if manifest_value else _DEFAULT_MANIFEST
     try:
         payload: Any = json.loads(manifest_path.read_text(encoding="utf-8"))
     except FileNotFoundError:

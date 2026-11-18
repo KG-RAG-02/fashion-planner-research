@@ -5,21 +5,18 @@ from __future__ import annotations
 import json
 import hashlib
 import logging
-import os
 import threading
 import time
 from collections import OrderedDict
 from concurrent.futures import Future
 from copy import deepcopy
-from pathlib import Path
 from typing import Any, Callable
 
+from ..resource_paths import PROMPTS_DIR
 from .responses_api import LlmCallError, OpenAIResponsesClient
 
 
-_ROOT = Path(__file__).resolve().parents[3]
-_PROMPTS_DIR = Path(os.getenv("PROJECT07_PROMPTS_DIR", _ROOT / "prompts"))
-_SYSTEM = (_PROMPTS_DIR / "target_audience_hypothesis" / "v1" / "rendered_system.md").read_text(encoding="utf-8")
+_SYSTEM = (PROMPTS_DIR / "target_audience_hypothesis" / "system.md").read_text(encoding="utf-8")
 _OUTPUT_FIELDS = {
     "proposal", "primary_segment", "secondary_segments", "age_evidence", "product_fit",
     "merchandising_actions", "channel_content_hypotheses",
